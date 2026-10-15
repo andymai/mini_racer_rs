@@ -30,6 +30,8 @@ step scripts/check-prose.sh
 step scripts/check-action-pins.sh
 step scripts/check-versions.sh
 step scripts/check-platforms.sh
+step scripts/check-doc-paths.sh
+step scripts/test-claude-hooks.sh
 step cargo clippy --workspace --all-targets --locked -- -D warnings
 [ "$mode" = --quick ] && exit 0
 

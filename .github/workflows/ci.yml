@@ -175,6 +175,8 @@ jobs:
       - run: scripts/check-action-pins.sh
       - run: scripts/check-platforms.sh
       - run: scripts/check-prose.sh
+      - run: scripts/check-doc-paths.sh
+      - run: scripts/test-claude-hooks.sh
 
   msrv:
     name: MSRV
