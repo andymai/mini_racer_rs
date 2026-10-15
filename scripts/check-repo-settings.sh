@@ -46,10 +46,7 @@ expect "required approvals" "$(jq -r .required_approving_review_count <<<"$pr")"
 expect "thread resolution" "$(jq -r .required_review_thread_resolution <<<"$pr")" true
 expect "merge methods" "$(jq -r '.allowed_merge_methods | join(",")' <<<"$pr")" squash
 checks=$(jq -r '.rules[] | select(.type == "required_status_checks") | .parameters.required_status_checks | map("\(.context)@\(.integration_id)") | sort | join(",")' <<<"$ruleset")
-case "$checks" in
-  "CI Pass@15368" | "CI Pass@15368,Greptile"*) ;;
-  *) echo "VIOLATION [settings]: required checks are $checks"; fail=1 ;;
-esac
+expect "required checks" "$checks" "CI Pass@15368,Greptile Review@867647"
 
 if [ "$fail" -ne 0 ]; then
   exit 1
