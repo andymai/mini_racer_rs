@@ -6,7 +6,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# Build outputs the docs describe on purpose.
+# Build outputs the docs describe on purpose; an entry ending in / covers
+# everything under it.
 allowed=(
   "lib/mini_racer_rs/mini_racer_rs.so"
   "target/"
@@ -25,7 +26,10 @@ for doc in CLAUDE.md .claude/skills/*/*.md; do
   while IFS= read -r path; do
     [ -n "$path" ] || continue
     for skip in "${allowed[@]}"; do
-      [ "$path" = "$skip" ] && continue 2
+      case "$skip" in
+        */) [[ "$path" == "$skip"* ]] && continue 2 ;;
+        *) [ "$path" = "$skip" ] && continue 2 ;;
+      esac
     done
     if [ ! -e "$path" ] && [ ! -e "vendor/mini_racer/$path" ]; then
       echo "VIOLATION [doc-path]: $doc names $path, which does not exist"

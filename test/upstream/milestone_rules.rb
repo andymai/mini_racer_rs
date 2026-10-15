@@ -71,6 +71,8 @@ end
 # tests and legs absent from the results keep their entries, and per-leg
 # fields such as timeout_s survive.
 module LedgerMerge
+  REGRESSION_KINDS = %w[xfail crash flaky].freeze
+
   module_function
 
   def merge(existing, rows, prune: false, allow_regressions: false)
@@ -98,7 +100,10 @@ module LedgerMerge
 
       previous = UpstreamLedger.effective(entry, leg)
       status = MilestoneRules.status_for(id, reference, candidates, previous)
-      if previous&.fetch("status", nil) == "pass" && status["status"] != "pass" && !allow_regressions
+      # A regression is this gem failing where upstream still passes; a skip or
+      # failure in the reference run is the platform, not a regression.
+      regressed = REGRESSION_KINDS.include?(status["status"].split(":").first)
+      if previous&.fetch("status", nil) == "pass" && regressed && !allow_regressions
         warnings << "#{id}: passed on #{leg}, now #{status["status"]}; kept pass (ALLOW_REGRESSIONS=1 records it)"
         status = { "status" => "pass" }
       end

@@ -32,6 +32,14 @@ class LedgerMergeTest < Minitest::Test
     assert_match "kept pass", warnings.first
   end
 
+  def test_an_upstream_skip_on_a_new_leg_is_not_a_regression
+    rows = [row("reference", "skip", leg: MAC), row("candidate", "skip", leg: MAC)]
+    ledger, warnings = merge({ ID => { "status" => "pass" } }, rows)
+
+    assert_empty warnings
+    assert_equal "upstream-skip", ledger[ID]["overrides"][MAC]["status"]
+  end
+
   def test_allowing_regressions_records_them
     ledger, = merge({ ID => { "status" => "pass" } }, [row("reference", "pass"), row("candidate", "fail")],
                     allow_regressions: true,)
