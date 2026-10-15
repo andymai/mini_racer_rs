@@ -35,6 +35,9 @@ run 2 'git config core.hookspath /dev/null'
 run 2 "GIT_CONFIG_PARAMETERS=\"'core.hookspath'='/dev/null'\" git commit -m x"
 run 2 $'git status\ngit commit -n -m x'
 run 2 'git commit -m ";" -n'
+run 2 'git -C "$PWD"/.worktrees/feat commit -n -m x'
+run 2 $'git commit -m "fix: x" \\\n  -n'
+run 2 'echo "$(git commit -n -m x)"'
 
 run 0 'git commit -m "fix: x"'
 run 0 'git commit --amend --no-edit'

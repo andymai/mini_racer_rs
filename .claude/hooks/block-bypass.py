@@ -6,7 +6,6 @@
 # The command is tokenized like a shell would (quotes, &&, |, ;) so flags are
 # judged where git would see them, not wherever they appear in the text.
 import json
-import shlex
 import sys
 
 OPERATOR_CHARS = set(";&|()\n")
@@ -20,35 +19,89 @@ COMMIT_LONG_WITH_VALUE = {
 SHELLS = {"bash", "sh", "zsh", "dash", "ksh"}
 
 
-# Non-POSIX mode keeps quotes on each word, so a quoted ";" stays an argument
-# while a bare one separates commands; newlines separate commands too. Words
-# are unquoted only after the split.
-def tokens(command):
-    lexer = shlex.shlex(command, posix=False, punctuation_chars="();<>|&\n")
-    lexer.whitespace = " \t\r"
-    lexer.whitespace_split = True
-    try:
-        return list(lexer)
-    except ValueError:
-        return command.split()
+# A minimal shell lexer: adjacent quoted and unquoted text form one word, quoted
+# punctuation stays text, and unquoted ; & | ( ) and newlines separate commands.
+# Redirections (> < >& and friends) are skipped rather than treated as separators.
+def words_and_separators(command):
+    out, word, started, i = [], [], False, 0
+    n = len(command)
+
+    def flush():
+        nonlocal word, started
+        if started:
+            out.append(("word", "".join(word)))
+        word, started = [], False
+
+    while i < n:
+        c = command[i]
+        if c == "\\" and i + 1 < n:
+            if command[i + 1] != "\n":
+                word.append(command[i + 1])
+                started = True
+            i += 2
+        elif c == "'":
+            end = command.find("'", i + 1)
+            end = n if end < 0 else end
+            word.append(command[i + 1:end])
+            started, i = True, end + 1
+        elif c == '"':
+            i += 1
+            while i < n and command[i] != '"':
+                if command[i] == "\\" and i + 1 < n and command[i + 1] in '"\\$`':
+                    i += 1
+                word.append(command[i])
+                i += 1
+            started, i = True, i + 1
+        elif c in " \t\r":
+            flush()
+            i += 1
+        elif c in OPERATOR_CHARS or c in "<>":
+            flush()
+            j = i
+            while j < n and (command[j] in OPERATOR_CHARS or command[j] in "<>"):
+                j += 1
+            run = command[i:j]
+            out.append(("redirect" if any(ch in run for ch in "<>") else "separator", run))
+            i = j
+        else:
+            word.append(c)
+            started = True
+            i += 1
+    flush()
+    return out
 
 
-def unquote(word):
-    try:
-        return " ".join(shlex.split(word))
-    except ValueError:
-        return word.replace('"', "").replace("'", "").replace("\\", "")
+# The shell runs $(...) and `...` even inside double quotes, so their contents
+# are checked as commands of their own.
+def substitutions(command):
+    found, i, n = [], 0, len(command)
+    while i < n:
+        if command.startswith("$(", i):
+            depth, j = 1, i + 2
+            while j < n and depth:
+                depth += {"(": 1, ")": -1}.get(command[j], 0)
+                j += 1
+            found.append(command[i + 2:j - 1])
+            i = j
+        elif command[i] == "`":
+            end = command.find("`", i + 1)
+            end = n if end < 0 else end
+            found.append(command[i + 1:end])
+            i = end + 1
+        else:
+            i += 1
+    return found
 
 
-def simple_commands(words):
+def simple_commands(command):
     current = []
-    for word in words:
-        if word and set(word) <= OPERATOR_CHARS:
+    for kind, text in words_and_separators(command):
+        if kind == "separator":
             if current:
                 yield current
             current = []
-        else:
-            current.append(unquote(word))
+        elif kind == "word":
+            current.append(text)
     if current:
         yield current
 
@@ -127,7 +180,11 @@ def check_git(words):
 def check(command, depth=0):
     if depth > 3:
         return None
-    for words in simple_commands(tokens(command)):
+    for inner in substitutions(command):
+        reason = check(inner, depth + 1)
+        if reason:
+            return reason
+    for words in simple_commands(command):
         env = {}
         while words and assignment(words[0]):
             name, value = assignment(words[0])
