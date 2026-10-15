@@ -288,7 +288,7 @@ jobs:
       - name: Unpacked source gem resolves with its own lockfile
         run: |
           gem unpack tmp/mini_racer_rs.gem --target tmp/unpacked
-          cd tmp/unpacked/mini_racer_rs-*
+          cd tmp/unpacked/mini_racer_rs
           cargo metadata --locked --format-version 1 >/dev/null
 
   ruby:
