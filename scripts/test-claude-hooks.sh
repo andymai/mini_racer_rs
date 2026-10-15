@@ -38,6 +38,7 @@ run 2 'git commit -m ";" -n'
 run 2 'git -C "$PWD"/.worktrees/feat commit -n -m x'
 run 2 $'git commit -m "fix: x" \\\n  -n'
 run 2 'echo "$(git commit -n -m x)"'
+run 2 "echo \"it's ok \$(git commit -n -m x)\""
 run 2 'git commit -n -m "fix: x" # a comment'
 
 run 0 'git commit -m "fix: x"'

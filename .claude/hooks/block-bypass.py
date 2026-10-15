@@ -77,11 +77,14 @@ def words_and_separators(command):
 # The shell runs $(...) and `...` even inside double quotes, so their contents
 # are checked as commands of their own; single quotes and escapes keep them literal.
 def substitutions(command):
-    found, i, n = [], 0, len(command)
+    found, i, n, double = [], 0, len(command), False
     while i < n:
         if command[i] == "\\":
             i += 2
-        elif command[i] == "'":
+        elif command[i] == '"':
+            double = not double
+            i += 1
+        elif command[i] == "'" and not double:
             end = command.find("'", i + 1)
             i = n if end < 0 else end + 1
         elif command.startswith("$(", i):
