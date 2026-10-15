@@ -14,6 +14,7 @@ AllCops:
     - "target/**/*"
     - "tmp/**/*"
     - "vendor/**/*"
+    - "**/vendor/**/*"
 
 Style/Documentation:
   Enabled: false
@@ -27,6 +28,23 @@ Metrics/MethodLength:
 
 Metrics/AbcSize:
   Exclude:
+    - "rakelib/**/*"
+    - "test/**/*"
+
+Metrics/BlockLength:
+  Exclude:
+    - "*.gemspec"
+    - "rakelib/**/*"
+    - "test/**/*"
+
+Metrics/CyclomaticComplexity:
+  Exclude:
+    - "rakelib/**/*"
+    - "test/**/*"
+
+Metrics/PerceivedComplexity:
+  Exclude:
+    - "rakelib/**/*"
     - "test/**/*"
 
 Minitest/MultipleAssertions:

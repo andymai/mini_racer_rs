@@ -1,0 +1,23 @@
+# Upstream's standalone scripts. Before its milestone is done a script runs and
+# its outcome is recorded; afterwards a wrong exit fails the run.
+
+[scripts."test/test_crash.rb"]
+expected_exit = 0
+milestone = "M9"
+timeout_s = 14400
+weekly = true
+
+[scripts."test/test_forking.rb"]
+expected_exit = 0
+milestone = "S6"
+timeout_s = 60
+
+[scripts."test/test_leak.rb"]
+expected_exit = 0
+milestone = "M3"
+timeout_s = 300
+
+[scripts."test/test_multithread.rb"]
+expected_exit = 0
+milestone = "M3"
+timeout_s = 120

@@ -1,0 +1,11 @@
+# frozen_string_literal: true
+
+# The real mini_racer 0.22.1, for reference runs of upstream's suite and for
+# differential tests. Install with BUNDLE_PATH=tools/reference/vendor/bundle.
+
+source "https://rubygems.org"
+
+gem "activesupport", "~> 8.0"
+gem "mini_racer", "0.22.1"
+gem "minitest", "~> 5.25"
+gem "tzinfo-data"

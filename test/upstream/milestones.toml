@@ -1,0 +1,55 @@
+# Spike steps and milestones that ledger statuses (xfail:<id>, crash:<id>) may
+# name. `done` milestones make their script tests strict.
+
+[milestones.S0]
+done = true
+title = "Layering rules"
+
+[milestones.S1]
+done = true
+title = "Link and load"
+
+[milestones.S2]
+title = "Core dispatch"
+
+[milestones.S3]
+title = "Conversion both directions"
+
+[milestones.S3b]
+title = "attach, callbacks, Snapshot.new"
+
+[milestones.S4]
+title = "Numbers"
+
+[milestones.S5]
+title = "Fiber scheduler"
+
+[milestones.S6]
+title = "Fork protocol"
+
+[milestones.M1]
+title = "eval and JS to Ruby types"
+
+[milestones.M2]
+title = "call, attach, callbacks, Ruby to JS"
+
+[milestones.M3]
+title = "Lifecycle, limits, interrupts, heap"
+
+[milestones.M4]
+title = "async, platform tasks, wasm, microtasks"
+
+[milestones.M5]
+title = "Snapshots and flags"
+
+[milestones.M6]
+title = "Single-threaded mode, fork, exit"
+
+[milestones.M7]
+title = "Fiber scheduler hardening"
+
+[milestones.M8]
+title = "TruffleRuby, packaging, ExecJS, shim"
+
+[milestones.M9]
+title = "Hardening"

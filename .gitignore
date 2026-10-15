@@ -3,7 +3,7 @@
 /pkg/
 *.gem
 .bundle/
-vendor/bundle/
+**/vendor/bundle/
 node_modules/
 .worktrees/
 .claude/settings.local.json
