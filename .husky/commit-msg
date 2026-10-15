@@ -1,0 +1,3 @@
+# Conventional commits and no en or em dashes; both tools are required.
+npx --no -- commitlint --edit "$1"
+scripts/check-prose.sh --commit-msg "$1"

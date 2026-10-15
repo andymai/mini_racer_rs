@@ -1,0 +1,19 @@
+# Fast static checks in parallel; tests run in CI. A missing tool fails the hook.
+for tool in cargo taplo cargo-machete bundle; do
+  command -v "$tool" >/dev/null 2>&1 || { echo "pre-commit: $tool is not installed (run bin/setup)"; exit 1; }
+done
+. scripts/fetch-v8-archive.sh
+
+cargo fmt --all -- --check & fmt=$!
+cargo clippy --workspace --all-targets --locked -- -D warnings & clippy=$!
+taplo fmt --check & taplo=$!
+cargo machete & machete=$!
+bundle exec rubocop & rubocop=$!
+
+status=0
+wait "$fmt" || { echo "cargo fmt failed; run cargo fmt --all"; status=1; }
+wait "$clippy" || { echo "clippy failed"; status=1; }
+wait "$taplo" || { echo "taplo failed; run taplo fmt"; status=1; }
+wait "$machete" || { echo "cargo machete found unused dependencies"; status=1; }
+wait "$rubocop" || { echo "rubocop failed; run bundle exec rubocop -a"; status=1; }
+exit "$status"

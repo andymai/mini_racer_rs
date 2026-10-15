@@ -1,0 +1,37 @@
+# Single source of the crate layering. scripts/check-boundaries.sh enforces it.
+# `normal` lists every allowed normal dependency by package name; anything else fails.
+
+[crates.mini_racer_wire]
+layer = 0
+normal = ["thiserror"]
+path = "crates/mini_racer_wire"
+unsafe = "forbid"
+
+[crates.mini_racer_sync]
+layer = 0
+normal = ["thiserror"]
+path = "crates/mini_racer_sync"
+unsafe = "forbid"
+
+[crates.mini_racer_engine]
+layer = 1
+normal = ["deno_core_icudata", "libc", "mini_racer_sync", "mini_racer_wire", "thiserror", "v8"]
+path = "crates/mini_racer_engine"
+unsafe = "fenced"
+unsafe_modules = ["sys"]
+
+[crates.mini_racer_rs]
+cdylib = true
+layer = 2
+normal = ["magnus", "mini_racer_engine", "mini_racer_wire", "rb-sys", "thiserror"]
+path = "ext/mini_racer_rs"
+unsafe = "fenced"
+unsafe_modules = ["gc_root", "guard", "rb_raw"]
+
+[rules]
+# Crates that only the Ruby-aware layer may depend on, directly or transitively.
+ruby_only = ["magnus", "rb-sys"]
+# Crates that only the engine may name directly.
+engine_only = ["v8"]
+# v8 crate features that must stay off.
+v8_forbidden_features = ["v8_enable_pointer_compression", "v8_enable_sandbox"]

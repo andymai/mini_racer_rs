@@ -1,0 +1,26 @@
+[package]
+build = "build.rs"
+description = "V8 runtime for mini_racer_rs: process state, platform, runners and dispatch"
+edition.workspace = true
+license.workspace = true
+links = "mini_racer_madvise"
+name = "mini_racer_engine"
+publish.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[features]
+no-madvise-wrap = []
+
+[dependencies]
+deno_core_icudata.workspace = true
+libc.workspace = true
+thiserror.workspace = true
+v8.workspace = true
+
+[dev-dependencies]
+mini_racer_wire.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,14 @@
+{
+  "files": [
+    {
+      "path": "layers.toml",
+      "description": "Crate layering, allowed dependencies and unsafe fences; enforced by scripts/check-boundaries.sh",
+      "scope": ["**/Cargo.toml", "**/*.rs"]
+    },
+    {
+      "path": "Cargo.toml",
+      "description": "Workspace members, pinned dependencies and shared lints",
+      "scope": ["**/Cargo.toml"]
+    }
+  ]
+}

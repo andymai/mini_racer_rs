@@ -1,0 +1,3 @@
+# Copy to .envrc for direnv. Exports the pinned V8 archive so cargo never downloads it.
+source_env_if_exists .envrc.local
+source scripts/fetch-v8-archive.sh
