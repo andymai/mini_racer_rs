@@ -9,7 +9,7 @@ import json
 import shlex
 import sys
 
-SEPARATORS = {"&&", "||", ";", "|", "|&", "&", "(", ")", ";;"}
+OPERATOR_CHARS = set(";&|()\n")
 GIT_GLOBAL_WITH_VALUE = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env", "--exec-path"}
 COMMIT_SHORT_WITH_VALUE = set("mFCct")
 COMMIT_SHORT_OPTIONAL_ATTACHED = set("Su")
@@ -20,8 +20,12 @@ COMMIT_LONG_WITH_VALUE = {
 SHELLS = {"bash", "sh", "zsh", "dash", "ksh"}
 
 
+# Non-POSIX mode keeps quotes on each word, so a quoted ";" stays an argument
+# while a bare one separates commands; newlines separate commands too. Words
+# are unquoted only after the split.
 def tokens(command):
-    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer = shlex.shlex(command, posix=False, punctuation_chars="();<>|&\n")
+    lexer.whitespace = " \t\r"
     lexer.whitespace_split = True
     try:
         return list(lexer)
@@ -29,15 +33,22 @@ def tokens(command):
         return command.split()
 
 
+def unquote(word):
+    try:
+        return " ".join(shlex.split(word))
+    except ValueError:
+        return word.replace('"', "").replace("'", "").replace("\\", "")
+
+
 def simple_commands(words):
     current = []
     for word in words:
-        if word in SEPARATORS:
+        if word and set(word) <= OPERATOR_CHARS:
             if current:
                 yield current
             current = []
         else:
-            current.append(word)
+            current.append(unquote(word))
     if current:
         yield current
 

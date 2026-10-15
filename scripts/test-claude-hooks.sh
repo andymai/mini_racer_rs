@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Feeds sample tool calls to the Claude Code hooks: every hook-skipping form must
-# be blocked, and ordinary commands that merely look similar must not be.
+# A blocked ordinary command teaches an agent to route around the hook, so the
+# look-alike cases matter as much as the bypasses.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -33,6 +33,8 @@ run 2 'git -c core.hooksPath=/dev/null commit -m "fix: x"'
 run 2 'git -c core.hookspath=/dev/null commit -m "fix: x"'
 run 2 'git config core.hookspath /dev/null'
 run 2 "GIT_CONFIG_PARAMETERS=\"'core.hookspath'='/dev/null'\" git commit -m x"
+run 2 $'git status\ngit commit -n -m x'
+run 2 'git commit -m ";" -n'
 
 run 0 'git commit -m "fix: x"'
 run 0 'git commit --amend --no-edit'
@@ -47,6 +49,8 @@ run 0 'git config --get core.hooksPath'
 run 0 'rg -n core.hooksPath .'
 run 0 'git status'
 run 0 'cargo nextest run --workspace'
+run 0 $'git commit -F - <<\'MSG\'\nfix: x\n\nbody -n --no-verify\nMSG'
+run 0 $'git commit -m "fix: x\n\nsecond line"'
 
 manifest() {
   local expected="$1" project="$2" file="$3" status=0
