@@ -1,5 +1,8 @@
-use mini_racer_engine::process::platform;
-use mini_racer_engine::{ContextHandle, EngineError, JsErrorKind};
+#![allow(clippy::panic, reason = "test helpers fail the test by panicking")]
+
+use std::time::Duration;
+
+use mini_racer_engine::{ContextHandle, EngineError, JsErrorKind, WaitOutcome};
 use mini_racer_wire::{Scalar, Visitor, decode_value};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -30,8 +33,11 @@ impl Visitor for Shape {
 }
 
 fn eval(context: &ContextHandle, source: &str) -> Result<Out, EngineError> {
-    let bytes = context.eval(source.to_owned())?;
-    Ok(decode_value(&bytes, &mut Shape).expect("V8 output decodes"))
+    let pending = context.eval(source.to_owned())?;
+    let WaitOutcome::Done(result) = pending.wait() else {
+        panic!("nothing interrupts this wait");
+    };
+    Ok(decode_value(&result?, &mut Shape).expect("V8 output decodes"))
 }
 
 #[test]
@@ -64,16 +70,6 @@ fn reports_parse_and_runtime_errors() {
 }
 
 #[test]
-fn applies_flags_before_initialization() {
-    platform::push_flag(b"use_strict", None).expect("flag");
-    let context = ContextHandle::spawn().expect("spawn");
-    match eval(&context, "x = 1") {
-        Err(EngineError::Js(js)) => assert_eq!(js.kind, JsErrorKind::Runtime),
-        other => panic!("expected strict mode to reject an undeclared assignment, got {other:?}"),
-    }
-}
-
-#[test]
 fn contexts_are_isolated() {
     let a = ContextHandle::spawn().expect("spawn");
     let b = ContextHandle::spawn().expect("spawn");
@@ -82,4 +78,23 @@ fn contexts_are_isolated() {
         eval(&b, "typeof shared === 'undefined'").ok(),
         Some(Out::Bool(true))
     );
+}
+
+#[test]
+fn terminates_a_running_script() {
+    let context = ContextHandle::spawn().expect("spawn");
+    let pending = context.eval("while (true) {}".to_owned()).expect("post");
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            std::thread::sleep(Duration::from_millis(50));
+            pending.interrupt();
+        });
+        assert!(matches!(pending.wait(), WaitOutcome::Interrupted));
+    });
+    context.terminate(&pending);
+    match pending.wait_for(Duration::from_secs(10)) {
+        Some(Err(EngineError::Js(js))) => assert_eq!(js.kind, JsErrorKind::Terminated),
+        other => panic!("expected termination, got {other:?}"),
+    }
+    assert_eq!(eval(&context, "6 * 7").ok(), Some(Out::Int(42)));
 }

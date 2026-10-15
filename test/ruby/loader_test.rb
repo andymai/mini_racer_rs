@@ -21,7 +21,23 @@ class LoaderTest < Minitest::Test
     end
   end
 
-  def test_context_cannot_be_allocated_directly
-    assert_raises(TypeError) { MiniRacer::Context.allocate }
+  def test_an_allocated_context_needs_initialize
+    assert_raises(MiniRacerRs::InternalError) { MiniRacer::Context.allocate.eval("1") }
+  end
+
+  def test_context_can_be_subclassed
+    subclass = Class.new(MiniRacer::Context) do
+      attr_reader :label
+
+      def initialize(label)
+        super()
+        @label = label
+      end
+    end
+    context = subclass.new("mine")
+
+    assert_instance_of subclass, context
+    assert_equal "mine", context.label
+    assert_equal 2, context.eval("1 + 1")
   end
 end

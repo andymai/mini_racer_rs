@@ -1,11 +1,25 @@
+use magnus::value::ReprValue;
 use magnus::{Error, ExceptionClass, Module, RModule, Ruby};
 use mini_racer_engine::{EngineError, FlagError, JsErrorKind};
 
 use crate::gc_root::StaticRoot;
 
+// const_get on a module falls back to Object, so a missing MiniRacer::RuntimeError
+// would silently resolve to ::RuntimeError; the inspect check rejects that.
 fn class(ruby: &Ruby, module: &str, name: &str) -> Result<ExceptionClass, Error> {
-    let module: RModule = ruby.class_object().const_get(module)?;
-    module.const_get(name)
+    let found: ExceptionClass = ruby
+        .class_object()
+        .const_get::<_, RModule>(module)?
+        .const_get(name)?;
+    let expected = format!("{module}::{name}");
+    if found.inspect() == expected {
+        Ok(found)
+    } else {
+        Err(Error::new(
+            ruby.exception_load_error(),
+            format!("{expected} is not defined"),
+        ))
+    }
 }
 
 macro_rules! roots {
@@ -26,6 +40,7 @@ macro_rules! roots {
 roots! {
     PARSE = "MiniRacer"::"ParseError";
     RUNTIME = "MiniRacer"::"RuntimeError";
+    TERMINATED = "MiniRacer"::"ScriptTerminatedError";
     DISPOSED = "MiniRacer"::"ContextDisposedError";
     PLATFORM_INITIALIZED = "MiniRacer"::"PlatformAlreadyInitialized";
     INTERNAL = "MiniRacerRs"::"InternalError";
@@ -37,10 +52,12 @@ pub fn engine(ruby: &Ruby, error: EngineError) -> Error {
             let root = match js.kind {
                 JsErrorKind::Parse => &PARSE,
                 JsErrorKind::Runtime => &RUNTIME,
+                JsErrorKind::Terminated => &TERMINATED,
             };
             Error::new(root.get(ruby), js.message)
         }
         EngineError::Disposed => Error::new(DISPOSED.get(ruby), "disposed context"),
+        EngineError::Orphaned => Error::new(RUNTIME.get(ruby), EngineError::Orphaned.to_string()),
         EngineError::Internal(message) => Error::new(INTERNAL.get(ruby), message),
     }
 }

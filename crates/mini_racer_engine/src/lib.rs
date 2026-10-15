@@ -8,5 +8,5 @@ mod runner;
 )]
 mod sys;
 
-pub use context::ContextHandle;
+pub use context::{ContextHandle, Pending, WaitOutcome};
 pub use error::{EngineError, FlagError, JsError, JsErrorKind};

@@ -67,6 +67,10 @@ impl<'a> Reader<'a> {
         let mut result = 0u64;
         for shift in (0..64).step_by(7) {
             let byte = self.byte()?;
+            // The tenth byte carries only bit 63; anything more overflows a u64.
+            if shift == 63 && byte > 1 {
+                return Err(DecodeError::Varint);
+            }
             result |= u64::from(byte & 0x7f) << shift;
             if byte & 0x80 == 0 {
                 return Ok(result);
@@ -237,6 +241,18 @@ mod tests {
         assert_eq!(texts, vec!["東京".to_owned()]);
         let (_, texts) = decode(&[0xFF, 0x0F, b'S', 0x02, 0xC3, 0xA9]);
         assert_eq!(texts, vec!["é".to_owned()]);
+    }
+
+    #[test]
+    fn rejects_overflowing_varints() {
+        let mut ten_bytes = vec![0xFF, 0x0F, b'S'];
+        ten_bytes.extend_from_slice(&[0x80; 9]);
+        ten_bytes.push(0x7E);
+        assert!(matches!(decode(&ten_bytes).0, Err(DecodeError::Varint)));
+        let mut max = vec![0xFF, 0x0F, b'S'];
+        max.extend_from_slice(&[0xFF; 9]);
+        max.push(0x01);
+        assert!(matches!(decode(&max).0, Err(DecodeError::Truncated)));
     }
 
     #[test]

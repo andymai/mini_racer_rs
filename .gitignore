@@ -8,7 +8,7 @@ node_modules/
 .worktrees/
 .claude/settings.local.json
 .envrc
-lib/mini_racer_rs/*/
+lib/mini_racer_rs/[0-9]*/
 lib/mini_racer_rs/*.so
 lib/mini_racer_rs/*.bundle
 .DS_Store

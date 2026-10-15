@@ -1,3 +1,4 @@
+use std::sync::OnceLock;
 use std::sync::mpsc::Receiver;
 
 use v8::ValueSerializerHelper;
@@ -18,21 +19,33 @@ impl v8::ValueSerializerImpl for Serializer {
     }
 }
 
+fn terminated() -> EngineError {
+    EngineError::from(JsError {
+        kind: JsErrorKind::Terminated,
+        message: "terminated".to_owned(),
+    })
+}
+
 macro_rules! js_error {
     ($tc:expr, $kind:expr) => {{
-        let message = $tc.exception().map_or_else(
-            || "unknown JavaScript error".to_owned(),
-            |exception| exception.to_rust_string_lossy($tc),
-        );
-        EngineError::from(JsError {
-            kind: $kind,
-            message,
-        })
+        if $tc.has_terminated() {
+            terminated()
+        } else {
+            let message = $tc.exception().map_or_else(
+                || "unknown JavaScript error".to_owned(),
+                |exception| exception.to_rust_string_lossy($tc),
+            );
+            EngineError::from(JsError {
+                kind: $kind,
+                message,
+            })
+        }
     }};
 }
 
-pub fn run(inbox: &Receiver<Request>) {
+pub fn run(inbox: &Receiver<Request>, handle: &OnceLock<v8::IsolateHandle>) {
     let mut isolate = v8::Isolate::new(v8::CreateParams::default());
+    let _ = handle.set(isolate.thread_safe_handle());
     let context = {
         v8::scope!(let scope, &mut isolate);
         let context = v8::Context::new(scope, v8::ContextOptions::default());
@@ -40,12 +53,17 @@ pub fn run(inbox: &Receiver<Request>) {
     };
     while let Ok(request) = inbox.recv() {
         match request {
-            Request::Eval { source, reply } => {
-                let result = {
+            Request::Eval { source, slot } => {
+                // A termination aimed at an earlier request may still be pending;
+                // clear it before reading this request's cancel flag.
+                isolate.cancel_terminate_execution();
+                let result = if slot.is_cancelled() {
+                    Err(terminated())
+                } else {
                     v8::scope_with_context!(let scope, &mut isolate, &context);
                     eval(scope, &source)
                 };
-                let _ = reply.send(result);
+                slot.complete(result);
             }
         }
     }

@@ -86,6 +86,17 @@ pub fn is_initialized() -> bool {
     flags().frozen
 }
 
+// The last --stack_size (or --stack-size) value, in KiB, as V8 parses it.
+#[must_use]
+pub fn stack_size_kb() -> Option<usize> {
+    flags().list.iter().rev().find_map(|flag| {
+        let value = flag
+            .strip_prefix("--stack_size=")
+            .or_else(|| flag.strip_prefix("--stack-size="))?;
+        value.parse().ok()
+    })
+}
+
 pub(crate) fn freeze() -> Vec<String> {
     let mut flags = flags();
     flags.frozen = true;

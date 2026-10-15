@@ -323,9 +323,11 @@ jobs:
             exit 1
           fi
       - run: bundle exec rake test
-      # S1: the source gem installs into an empty GEM_HOME and loads.
+      # S1: the source gem installs into an empty GEM_HOME and loads. The setup
+      # action's pre-fetched V8 variables are dropped so extconf's pin is what runs.
       - name: Install the source gem from scratch
         run: |
+          unset RUSTY_V8_ARCHIVE RUSTY_V8_SRC_BINDING_PATH RUSTY_V8_ARCHIVE_SHA256
           mkdir -p tmp
           gem build mini_racer_rs.gemspec --output tmp/mini_racer_rs.gem
           export GEM_HOME="$RUNNER_TEMP/gem-home" GEM_PATH="$RUNNER_TEMP/gem-home"

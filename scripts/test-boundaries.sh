@@ -40,6 +40,10 @@ def write(path, text):
     return ("write", path, text)
 
 
+def cc(path, source):
+    return ("cc", path, source)
+
+
 CRATE = '[package]\nedition = "2024"\nname = "mini_racer_extra"\npublish = false\nversion = "0.0.0"\n\n[lints]\nworkspace = true\n'
 
 CASES = [
@@ -80,6 +84,15 @@ CASES = [
     ("unsafe_code allowed on an unfenced module", "check-unsafe-fences.sh", "fence", [
         replace("ext/mini_racer_rs/src/lib.rs", "mod context;\n", '#[allow(unsafe_code, reason = "planted")]\nmod context;\n'),
     ]),
+    ("rustfmt-wrapped allow on an unfenced module", "check-unsafe-fences.sh", "fence", [
+        replace("ext/mini_racer_rs/src/lib.rs", "mod context;\n", '#[allow(\n    unsafe_code,\n    reason = "planted"\n)]\nmod context;\n'),
+    ]),
+    ("unsafe_code inside a combined lint list", "check-unsafe-fences.sh", "fence", [
+        replace("ext/mini_racer_rs/src/lib.rs", "mod context;\n", '#[allow(dead_code, unsafe_code, reason = "planted")]\nmod context;\n'),
+    ]),
+    ("inner allow inside a module file", "check-unsafe-fences.sh", "fence", [
+        replace("ext/mini_racer_rs/src/context.rs", "use std::sync::OnceLock;\n", '#![allow(unsafe_code, reason = "planted")]\n\nuse std::sync::OnceLock;\n'),
+    ]),
     ("crate opts out of workspace lints", "check-unsafe-fences.sh", "lints", [
         replace("crates/mini_racer_sync/Cargo.toml", "[lints]\nworkspace = true\n", ""),
     ]),
@@ -94,6 +107,12 @@ CASES = [
     ]),
     ("engine static outside process", "check-statics.sh", "static", [
         append("crates/mini_racer_engine/src/context.rs", "\nstatic PLANTED: u8 = 0;\n"),
+    ]),
+    ("extension still imports madvise", "check-exports.sh fake.so", "madvise", [
+        cc("fake.so", "int madvise(void *, unsigned long, int);\nint Init_mini_racer_rs(void) { return madvise(0, 0, 0); }\n"),
+    ]),
+    ("mangled symbol exported", "check-exports.sh fake.so", "mangled", [
+        cc("fake.so", "void Init_mini_racer_rs(void) {}\nvoid planted(void) __asm__(\"_ZN7planted4testEv\");\nvoid planted(void) {}\n"),
     ]),
     ("em dash in prose", "check-prose.sh", "dash", [
         append("README.md", "\nplanted \u2014 dash\n"),
@@ -126,11 +145,14 @@ for name, script, tag, ops in CASES:
         elif op[0] == "append":
             with path.open("a") as f:
                 f.write(op[2])
+        elif op[0] == "cc":
+            subprocess.run(["cc", "-shared", "-fPIC", "-x", "c", "-", "-o", str(path)], input=op[2], text=True, check=True)
         else:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(op[2])
     else:
-        result = subprocess.run([str(case / "scripts" / script)], cwd=case, env=env, capture_output=True, text=True)
+        command, *args = script.split()
+        result = subprocess.run([str(case / "scripts" / command), *args], cwd=case, env=env, capture_output=True, text=True)
         output = result.stdout + result.stderr
         if result.returncode != 0 and f"[{tag}]" in output:
             print(f"ok   {name} ({script} [{tag}])")

@@ -12,6 +12,7 @@ pub enum FlagError {
 pub enum JsErrorKind {
     Parse,
     Runtime,
+    Terminated,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -27,6 +28,16 @@ pub enum EngineError {
     Js(#[from] JsError),
     #[error("context disposed")]
     Disposed,
+    #[error("single-threaded runner: {}", ebusy())]
+    Orphaned,
     #[error("internal error: {0}")]
     Internal(String),
+}
+
+fn ebusy() -> String {
+    let message = std::io::Error::from_raw_os_error(libc::EBUSY).to_string();
+    match message.rsplit_once(" (os error ") {
+        Some((text, _)) => text.to_owned(),
+        None => message,
+    }
 }

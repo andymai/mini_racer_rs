@@ -43,11 +43,14 @@ if [ -n "$mangled" ]; then
 fi
 if ! diff <(printf '%s\n' "$exports") "$allow" >/dev/null; then
   echo "VIOLATION [allowlist]: exports differ from $allow (< built, > allowed):"
-  diff <(printf '%s\n' "$exports") "$allow" | grep -E '^[<>]' | head -40
+  diff <(printf '%s\n' "$exports") "$allow" | grep -E '^[<>]' | head -40 || true
   fail=1
 fi
 if [ "$os" = linux ]; then
-  if nm -D --undefined-only "$lib" | awk '{ print $NF }' | grep -qx madvise; then
+  # nm prints versioned imports as madvise@GLIBC_2.2.5. The list is captured
+  # first: grep -q closing the pipe early would fail the pipeline under pipefail.
+  imports=$(nm -D --undefined-only "$lib" | awk '{ print $NF }' | sed 's/@.*//')
+  if grep -qx madvise <<<"$imports"; then
     echo "VIOLATION [madvise]: $lib still references madvise; V8's calls must bind to __wrap_madvise"
     fail=1
   fi
