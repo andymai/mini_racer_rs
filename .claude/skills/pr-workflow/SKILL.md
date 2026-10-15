@@ -5,7 +5,7 @@ description: Use when committing, pushing, opening, reviewing, or merging a pull
 
 # PR Workflow
 
-Every change reaches `main` as a squash-merged PR with `CI Pass` green and every review thread resolved. There is no human approval gate; CI and the review loop are the gate.
+Every change reaches `main` as a squash-merged PR with both required checks green, `CI Pass` (GitHub Actions) and `Greptile Review` (the Greptile app, id 867647), and every review thread resolved. There is no human approval gate; CI and the review loop are the gate.
 
 ## Quick reference
 
@@ -20,7 +20,7 @@ Every change reaches `main` as a squash-merged PR with `CI Pass` green and every
 | Open the PR | `gh pr create --head <branch> --base main --title <title> --body-file <body-file>` (the token push sets no upstream, so pass `--head`) |
 | Confirm the remote head | `gh pr view <N> --json headRefOid` |
 | Watch CI | `gh pr checks <N> --watch` |
-| Review threads | the `check-pr-comments` skill |
+| Review threads | Greptile posts its review a few minutes after a push; handle its threads with the `check-pr-comments` skill |
 | Merge | `gh pr merge <N> --auto --squash` once threads are resolved |
 | After merge | when `gh pr view <N> --json state` reports `MERGED`: `git checkout main && git pull`, then remove the worktree |
 
