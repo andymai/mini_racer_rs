@@ -112,6 +112,7 @@ def run_suite(options, ledger)
   files = options[:files] || (Dir.chdir(UPSTREAM) { Dir["test/*_test.rb"] } + ["test/test_object_identity_fix.rb"]).sort
   results = {}
   attempt = 0
+  log = nil
   loop do
     attempt += 1
     before = results.size
@@ -158,7 +159,10 @@ def run_suite(options, ledger)
       abort "upstream harness: the suite process died outside any test (#{status.inspect}); see #{log}"
     end
   end
-  abort "upstream harness: the filter #{options[:filter].inspect} selected no tests" if results.empty?
+  if results.empty?
+    warn File.read(log).lines.last(40).join if log && File.exist?(log)
+    abort "upstream harness: no test reported a result (filter #{options[:filter].inspect})"
+  end
   results
 end
 

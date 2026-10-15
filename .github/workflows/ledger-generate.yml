@@ -21,7 +21,7 @@ permissions: {}
 
 jobs:
   cruby:
-    name: Ruby ${{ matrix.ruby }} (${{ matrix.os }})
+    name: Ledger, Ruby ${{ matrix.ruby }} (${{ matrix.os }})
     if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'ledger-generate')
     strategy:
       fail-fast: false
@@ -44,7 +44,8 @@ jobs:
         with:
           ruby: ${{ matrix.ruby }}
       - name: Install the real mini_racer 0.22.1
-        run: BUNDLE_GEMFILE=tools/reference/Gemfile BUNDLE_PATH=tools/reference/vendor/bundle bundle install
+        working-directory: tools/reference
+        run: BUNDLE_PATH=vendor/bundle bundle install
       - run: bundle exec rake compile
       - name: Reference and candidate runs
         run: |
@@ -60,7 +61,7 @@ jobs:
           retention-days: 14
 
   truffleruby:
-    name: TruffleRuby
+    name: Ledger, TruffleRuby
     if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'ledger-generate')
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -79,7 +80,8 @@ jobs:
           bundler-cache: true
       - run: truffleruby-polyglot-get js
       - name: Install the real mini_racer 0.22.1
-        run: BUNDLE_GEMFILE=tools/reference/Gemfile BUNDLE_PATH=tools/reference/vendor/bundle bundle install
+        working-directory: tools/reference
+        run: BUNDLE_PATH=vendor/bundle bundle install
       - name: Reference and candidate runs
         run: |
           mkdir -p results

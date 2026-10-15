@@ -10,3 +10,12 @@ taplo-cli = "0.9.3"
 
 [toolchains]
 msrv = "1.91.0"
+
+# Submodule pins: the tag each tracks and the commit that tag names.
+[upstream.execjs]
+commit = "b8a5855917b0cf368b1e6bf34958f92e5148dd88"
+tag = "v2.10.2"
+
+[upstream.mini_racer]
+commit = "413b11963457f176a62c6ea240d7edaf01214e76"
+tag = "v0.22.1"

@@ -14,7 +14,7 @@ Parity means mini_racer 0.22.1's own tests pass unmodified. `vendor/mini_racer` 
 | Run the suite, strict | `bundle exec ruby test/upstream/run.rb --strict` |
 | One test | `bundle exec ruby test/upstream/run.rb -n test_it_can_stop` |
 | One file | `bundle exec ruby test/upstream/run.rb --files test/function_test.rb` |
-| Real mini_racer (reference) | `BUNDLE_GEMFILE=tools/reference/Gemfile BUNDLE_PATH=tools/reference/vendor/bundle bundle install`, then add `--reference` |
+| Real mini_racer (reference) | `cd tools/reference && BUNDLE_PATH=vendor/bundle bundle install` (a relative `BUNDLE_PATH` resolves against the Gemfile's directory), then add `--reference` |
 | Standalone scripts | `bundle exec ruby test/upstream/run.rb --scripts` |
 | Results and logs | `tmp/upstream/` (one JSON line per test, plus the suite log) |
 | Regenerate the ledger on a PR | add the `ledger-generate` label, then see "Regenerating" |

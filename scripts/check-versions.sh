@@ -23,10 +23,14 @@ explicit=$(grep -lE '^version = ' crates/*/Cargo.toml ext/*/Cargo.toml || true)
 parity=$(sed -nE 's/^ *VERSION = "([^"]+)"$/\1/p' lib/mini_racer/version.rb)
 shim=$(sed -nE 's/^ *spec\.version = "([^"]+)"$/\1/p' shim/mini_racer.gemspec)
 [ "$parity" = "$shim" ] || mismatch "MiniRacer::VERSION $parity != shim version $shim"
-if [ -d vendor/mini_racer/.git ] || [ -f vendor/mini_racer/.git ]; then
-  tag=$(git -C vendor/mini_racer describe --tags --exact-match 2>/dev/null || echo none)
-  [ "$tag" = "v$parity" ] || mismatch "vendor/mini_racer is at $tag, expected v$parity"
-fi
+# The tree records each submodule's commit, so this needs neither tags nor a checkout.
+for module in mini_racer execjs; do
+  pinned=$(taplo get -f tools/versions.toml "upstream.$module.commit")
+  recorded=$(git ls-tree HEAD "vendor/$module" | awk '{ print $3 }')
+  [ "$recorded" = "$pinned" ] || mismatch "vendor/$module is at ${recorded:-nothing}, tools/versions.toml pins $pinned"
+done
+upstream_tag=$(taplo get -f tools/versions.toml upstream.mini_racer.tag)
+[ "$upstream_tag" = "v$parity" ] || mismatch "tools/versions.toml pins mini_racer $upstream_tag, MiniRacer::VERSION is $parity"
 
 msrv=$(taplo get -f Cargo.toml workspace.package.rust-version)
 tool_msrv=$(taplo get -f tools/versions.toml toolchains.msrv)
