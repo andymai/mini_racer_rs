@@ -1,0 +1,60 @@
+plugins:
+  - rubocop-minitest
+  - rubocop-performance
+  - rubocop-rake
+
+AllCops:
+  NewCops: enable
+  SuggestExtensions: false
+  TargetRubyVersion: 3.3
+  Exclude:
+    - "lib/mini_racer/shared.rb"
+    - "lib/mini_racer/truffleruby.rb"
+    - "node_modules/**/*"
+    - "target/**/*"
+    - "tmp/**/*"
+    - "vendor/**/*"
+
+Style/Documentation:
+  Enabled: false
+
+# vocabulary.rb reproduces mini_racer's Ruby code as written, and Context#load
+# calls the JavaScript eval method, not Kernel#eval.
+Metrics/MethodLength:
+  Exclude:
+    - "lib/mini_racer_rs/vocabulary.rb"
+    - "test/**/*"
+
+Metrics/AbcSize:
+  Exclude:
+    - "test/**/*"
+
+Minitest/MultipleAssertions:
+  Max: 10
+
+Security/Eval:
+  Exclude:
+    - "lib/mini_racer_rs/vocabulary.rb"
+
+Style/FileOpen:
+  Exclude:
+    - "lib/mini_racer_rs/vocabulary.rb"
+
+Style/SuperArguments:
+  Exclude:
+    - "lib/mini_racer_rs/vocabulary.rb"
+
+Style/StringLiterals:
+  EnforcedStyle: double_quotes
+
+Style/StringLiteralsInInterpolation:
+  EnforcedStyle: double_quotes
+
+Style/TrailingCommaInArguments:
+  EnforcedStyleForMultiline: consistent_comma
+
+Style/TrailingCommaInArrayLiteral:
+  EnforcedStyleForMultiline: consistent_comma
+
+Style/TrailingCommaInHashLiteral:
+  EnforcedStyleForMultiline: consistent_comma

@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Installs the pinned toolchain and tools, the Ruby and Node dev dependencies,
+# fetches the pinned V8 archive, and builds the extension.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+rustup show active-toolchain >/dev/null
+rustup toolchain install "$(taplo get -f tools/versions.toml toolchains.msrv 2>/dev/null || echo 1.91.0)" --profile minimal
+while IFS='=' read -r tool version; do
+  tool=$(xargs <<<"$tool")
+  version=$(tr -d ' "' <<<"$version")
+  installed=$("$tool" --version 2>/dev/null | head -1 || true)
+  [ "$tool" = taplo-cli ] && installed=$(taplo --version 2>/dev/null || true)
+  case "$installed" in *"$version"*) continue ;; esac
+  cargo install --locked "$tool@$version"
+done < <(sed -n '/^\[cargo\]$/,/^\[/p' tools/versions.toml | grep '=')
+
+bundle install
+npm ci
+# shellcheck source=scripts/fetch-v8-archive.sh
+. scripts/fetch-v8-archive.sh
+bundle exec rake compile
+echo "Ready. Run scripts/gate.sh before opening a PR."

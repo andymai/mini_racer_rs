@@ -1,0 +1,8 @@
+# frozen_string_literal: true
+
+require "rubocop/rake_task"
+
+RuboCop::RakeTask.new(:rubocop)
+
+desc "Run RuboCop"
+task lint: :rubocop

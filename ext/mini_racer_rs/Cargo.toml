@@ -1,0 +1,25 @@
+[package]
+build = "build.rs"
+description = "Ruby extension for mini_racer_rs"
+edition.workspace = true
+license.workspace = true
+name = "mini_racer_rs"
+publish.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[features]
+no-madvise-wrap = ["mini_racer_engine/no-madvise-wrap"]
+
+[dependencies]
+magnus.workspace = true
+mini_racer_engine.workspace = true
+mini_racer_wire.workspace = true
+rb-sys.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,353 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Supersede in-flight runs on a PR; let every push to main finish.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -Dwarnings
+
+permissions: {}
+
+jobs:
+  changes:
+    name: Changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      # Docs-only PRs skip the build jobs; CI Pass counts skipped jobs as passing.
+      - id: diff
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ -z "$BASE" ]; then
+            echo "code=true" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          code=$(git diff --name-only "$BASE"...HEAD | grep -vE '\.md$|^LICENSE$|^\.github/(ISSUE_TEMPLATE|FUNDING\.yml)' || true)
+          echo "code=$([ -n "$code" ] && echo true || echo false)" >>"$GITHUB_OUTPUT"
+
+  fmt:
+    name: Format
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install && cargo fmt --all -- --check
+
+  taplo:
+    name: TOML Format
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          v8: "false"
+          tools: taplo-cli
+      - run: taplo fmt --check
+
+  rubocop:
+    name: RuboCop
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ruby/setup-ruby@651ff0d62c5c79bed6d53ec518387aae20e72c1a # v1.329.0
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+      - run: bundle exec rubocop
+
+  machete:
+    name: Unused Dependencies
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          v8: "false"
+          tools: cargo-machete
+      - run: cargo machete
+
+  deny:
+    name: Cargo Deny
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          v8: "false"
+          tools: cargo-deny
+      - run: cargo deny check
+
+  # A prebuilt cargo-audit: building it from source pulls the newest releases of
+  # its dependencies, and one bad upstream publish then fails every run.
+  audit:
+    name: Security Audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          v8: "false"
+          tools: cargo-audit
+      - run: cargo audit
+
+  boundaries:
+    name: Boundaries
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          v8: "false"
+          tools: taplo-cli
+      - run: scripts/check-boundaries.sh
+      - run: scripts/test-boundaries.sh
+      - run: scripts/check-unsafe-fences.sh
+      - run: scripts/check-ffi-guards.sh
+      - run: scripts/check-gc-roots.sh
+      - run: scripts/check-statics.sh
+
+  repo-checks:
+    name: Repo Checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          v8: "false"
+          tools: taplo-cli
+      - run: scripts/check-versions.sh
+      - run: scripts/check-action-pins.sh
+      - run: scripts/check-platforms.sh
+      - run: scripts/check-prose.sh
+
+  msrv:
+    name: MSRV
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          ruby: "3.4"
+      - name: Check on the minimum supported Rust
+        run: |
+          msrv=$(sed -nE 's/^msrv = "([^"]+)"$/\1/p' tools/versions.toml)
+          rustup toolchain install "$msrv" --profile minimal
+          cargo "+$msrv" check --workspace --all-targets --locked
+
+  rustdoc:
+    name: Rustdoc
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          ruby: "3.4"
+      - run: cargo doc --workspace --no-deps --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  clippy:
+    name: Clippy
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          ruby: "3.4"
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  # The extension crate is excluded: its test binary would need libruby linked.
+  # Ruby-level behaviour is covered by the ruby job.
+  rust-test:
+    name: Rust Tests
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          tools: cargo-nextest
+      - run: cargo nextest run --workspace --exclude mini_racer_rs --locked
+      # nextest does not run doctests, so they get their own step.
+      - run: cargo test --doc --workspace --exclude mini_racer_rs --locked
+
+  gem-verify:
+    name: Gem Contents
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          ruby: "3.4"
+          v8: "false"
+      - name: Build both gemspecs
+        run: |
+          mkdir -p tmp
+          gem build mini_racer_rs.gemspec --output tmp/mini_racer_rs.gem
+          gem build shim/mini_racer.gemspec --output tmp/mini_racer-shim.gem
+      - name: Check the source gem file list
+        run: |
+          files=$(tar -xOf tmp/mini_racer_rs.gem data.tar.gz | tar -tz)
+          for required in Cargo.toml Cargo.lock ext/mini_racer_rs/extconf.rb ext/mini_racer_rs/v8-archives.sha256 \
+            lib/mini_racer.rb lib/mini_racer_rs.rb crates/mini_racer_engine/src/lib.rs LICENSE; do
+            grep -qx "$required" <<<"$files" || { echo "missing $required"; exit 1; }
+          done
+          forbidden=$(grep -E '^(\.cargo|\.github|target|test|scripts|tools|vendor|bin|node_modules)/|rust-toolchain\.toml|\.(so|bundle)$' <<<"$files" || true)
+          [ -z "$forbidden" ] || { echo "unexpected files:"; echo "$forbidden"; exit 1; }
+          [ -z "$(tar -xOf tmp/mini_racer-shim.gem data.tar.gz | tar -tz)" ] || { echo "shim gem has files"; exit 1; }
+      - name: Unpacked source gem resolves with its own lockfile
+        run: |
+          gem unpack tmp/mini_racer_rs.gem --target tmp/unpacked
+          cd tmp/unpacked/mini_racer_rs
+          cargo metadata --locked --format-version 1 >/dev/null
+
+  ruby:
+    name: Ruby ${{ matrix.ruby }} (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+        ruby: ["3.4"]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      CI: "true"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          ruby: ${{ matrix.ruby }}
+      - run: bundle exec rake compile
+      - name: Check exports
+        run: |
+          if ! scripts/check-exports.sh; then
+            echo "::group::Built exports"
+            scripts/check-exports.sh --print
+            echo "::endgroup::"
+            exit 1
+          fi
+      - run: bundle exec rake test
+      # S1: the source gem installs into an empty GEM_HOME and loads. The setup
+      # action's pre-fetched V8 variables are dropped so extconf's pin is what runs.
+      - name: Install the source gem from scratch
+        run: |
+          unset RUSTY_V8_ARCHIVE RUSTY_V8_SRC_BINDING_PATH RUSTY_V8_ARCHIVE_SHA256
+          mkdir -p tmp
+          gem build mini_racer_rs.gemspec --output tmp/mini_racer_rs.gem
+          export GEM_HOME="$RUNNER_TEMP/gem-home" GEM_PATH="$RUNNER_TEMP/gem-home"
+          rb_sys=$(sed -nE 's/^ *spec\.add_dependency "rb_sys", "= ([^"]+)"$/\1/p' mini_racer_rs.gemspec)
+          gem install rb_sys -v "$rb_sys" --no-document
+          gem install --local tmp/mini_racer_rs.gem --no-document
+          cd "$RUNNER_TEMP"
+          ruby -e 'require "mini_racer"; p MiniRacer::Context.new.eval("1+1")' | grep -qx 2
+
+  # !cancelled() rather than always(): a run superseded by a newer push must
+  # not report a failing gate for its commit.
+  ci-pass:
+    name: CI Pass
+    if: ${{ !cancelled() }}
+    needs: [changes, fmt, taplo, rubocop, machete, deny, audit, boundaries, repo-checks, msrv, rustdoc, clippy, rust-test, gem-verify, ruby]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check all jobs
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -e 'to_entries | all(.value.result == "success" or .value.result == "skipped")' >/dev/null

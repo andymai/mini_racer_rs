@@ -1,0 +1,34 @@
+{
+  "strictness": 1,
+  "commentTypes": ["syntax", "logic", "style", "info"],
+  "rules": [
+    {
+      "id": "rust-owns-behavior",
+      "severity": "high",
+      "scope": ["lib/**"],
+      "rule": "Behavior belongs in Rust. Ruby files under lib/ hold only vocabulary: constants, the error hierarchy, MiniRacer::Binary, the loader, and the pure compositions Context#load and #write_heap_snapshot. Flag new Ruby logic that converts values, validates options, or talks to V8."
+    },
+    {
+      "id": "upstream-unmodified",
+      "severity": "high",
+      "scope": ["vendor/**", "lib/mini_racer/truffleruby.rb", "lib/mini_racer/shared.rb"],
+      "rule": "Upstream sources are byte-identical copies. Flag any edit to vendor/ submodules or to the vendored TruffleRuby backend files."
+    },
+    {
+      "id": "require-relative",
+      "severity": "medium",
+      "scope": ["lib/**"],
+      "rule": "Files inside the gem load each other with require_relative, never require, so a co-installed mini_racer gem cannot shadow them."
+    },
+    {
+      "id": "compat-ledger",
+      "severity": "high",
+      "rule": "A behavior change that differs from mini_racer 0.22.1 needs a compat.toml entry (deviation with a reason) and a failing-first fixture. Flag observable behavior changes without one."
+    },
+    {
+      "id": "comments-why",
+      "severity": "medium",
+      "rule": "Comments explain a non-obvious why (hidden constraint, invariant, workaround). Flag comments that restate code, narrate changes, reference tickets or PRs, or are tombstones."
+    }
+  ]
+}

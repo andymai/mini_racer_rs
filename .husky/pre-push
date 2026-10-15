@@ -1,0 +1,3 @@
+# Validation is delegated to CI (.github/workflows/ci.yml) behind the CI Pass gate;
+# scripts/gate.sh runs the same checks locally.
+echo "pre-push: validation runs in CI."

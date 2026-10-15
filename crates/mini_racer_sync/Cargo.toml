@@ -1,0 +1,12 @@
+[package]
+description = "Concurrency protocol types for mini_racer_rs"
+edition.workspace = true
+license.workspace = true
+name = "mini_racer_sync"
+publish.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lints]
+workspace = true

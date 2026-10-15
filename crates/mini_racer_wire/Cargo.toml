@@ -1,0 +1,15 @@
+[package]
+description = "V8 ValueSerializer wire format codec for mini_racer_rs"
+edition.workspace = true
+license.workspace = true
+name = "mini_racer_wire"
+publish.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[lints]
+workspace = true

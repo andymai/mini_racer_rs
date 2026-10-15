@@ -1,0 +1,21 @@
+// The prebuilt V8 archive marks every heap mapping MADV_DONTFORK, so a forked
+// child would lose the isolate's memory. `-Wl,--wrap=madvise` (build.rs) routes
+// V8's calls here; this drops that one advice and forwards the rest unchanged.
+#[cfg(all(target_os = "linux", not(feature = "no-madvise-wrap")))]
+#[unsafe(no_mangle)]
+pub extern "C" fn __wrap_madvise(
+    addr: *mut libc::c_void,
+    len: libc::size_t,
+    advice: libc::c_int,
+) -> libc::c_int {
+    let forwarded = std::panic::catch_unwind(|| {
+        if advice == libc::MADV_DONTFORK {
+            return 0;
+        }
+        // SAFETY: the arguments are the caller's own madvise arguments, passed
+        // through unchanged to the kernel, which validates them.
+        let result = unsafe { libc::syscall(libc::SYS_madvise, addr, len, advice) };
+        libc::c_int::try_from(result).unwrap_or(-1)
+    });
+    forwarded.unwrap_or_else(|_| std::process::abort())
+}

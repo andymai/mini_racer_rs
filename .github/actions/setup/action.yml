@@ -1,0 +1,66 @@
+name: Setup
+description: Pinned Rust toolchain, verified V8 archive, cargo cache, and optionally Ruby and cargo tools
+
+inputs:
+  ruby:
+    description: Ruby version to install with bundler cache; empty skips Ruby
+    default: ""
+  tools:
+    description: Space-separated tool names from tools/versions.toml to install
+    default: ""
+  v8:
+    description: Fetch the pinned V8 archive and export RUSTY_V8_* for cargo
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    # rust-toolchain.toml pins the version; this installs it before cargo runs.
+    - name: Install Rust toolchain
+      shell: bash
+      run: rustup toolchain install && rustc --version
+    - name: Restore V8 archive
+      if: inputs.v8 == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/mini_racer_rs/v8
+        key: v8-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ext/mini_racer_rs/v8-archives.sha256') }}
+    # The sourced script verifies the pinned digests; GITHUB_ENV carries its
+    # exports into later steps.
+    - name: Fetch and verify V8 archive
+      if: inputs.v8 == 'true'
+      shell: bash
+      run: |
+        . scripts/fetch-v8-archive.sh
+        {
+          echo "RUSTY_V8_ARCHIVE=$RUSTY_V8_ARCHIVE"
+          echo "RUSTY_V8_SRC_BINDING_PATH=$RUSTY_V8_SRC_BINDING_PATH"
+          echo "RUSTY_V8_ARCHIVE_SHA256=$RUSTY_V8_ARCHIVE_SHA256"
+        } >>"$GITHUB_ENV"
+    - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      with:
+        save-if: ${{ github.ref == 'refs/heads/main' }}
+    - if: inputs.ruby != ''
+      uses: ruby/setup-ruby@651ff0d62c5c79bed6d53ec518387aae20e72c1a # v1.329.0
+      with:
+        ruby-version: ${{ inputs.ruby }}
+        bundler-cache: true
+    - name: Resolve tool versions
+      id: tools
+      if: inputs.tools != ''
+      shell: bash
+      env:
+        TOOLS: ${{ inputs.tools }}
+      run: |
+        specs=()
+        for tool in $TOOLS; do
+          version=$(sed -nE "s/^$tool = \"([^\"]+)\"$/\\1/p" tools/versions.toml)
+          [ -n "$version" ] || { echo "$tool is not pinned in tools/versions.toml" >&2; exit 1; }
+          case "$tool" in taplo-cli) tool=taplo ;; esac
+          specs+=("$tool@$version")
+        done
+        echo "specs=$(IFS=,; echo "${specs[*]}")" >>"$GITHUB_OUTPUT"
+    - if: inputs.tools != ''
+      uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+      with:
+        tool: ${{ steps.tools.outputs.specs }}
