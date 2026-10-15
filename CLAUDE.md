@@ -4,7 +4,7 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 
 ## Hard rules
 
-- Rust owns behavior. Ruby under `lib/` is vocabulary only: constants, the error hierarchy, `MiniRacer::Binary`, the loader, and the pure compositions `Context#load` and `#write_heap_snapshot`.
+- Rust owns behavior. Ruby under `lib/` is vocabulary only: constants, the error hierarchy, `MiniRacer::Binary`, the loader, and the pure compositions `Context#load` and `#write_heap_snapshot`. The one exception is upstream's TruffleRuby backend, `lib/mini_racer/truffleruby.rb` and `lib/mini_racer/shared.rb`, vendored byte for byte and never edited.
 - Intra-gem loads use `require_relative`.
 - `unsafe` lives only in the modules `layers.toml` fences (`engine::sys`, `ext::rb_raw`, `ext::guard`, `ext::gc_root`), one operation per block, each with a `// SAFETY:` comment.
 - rb-sys is called only from `ext/mini_racer_rs/src/rb_raw.rs`. Release the GVL only through `rb_raw::nogvl` and run interrupts only through `rb_raw::check_ints`, so no Ruby exception unwinds through a Rust frame.

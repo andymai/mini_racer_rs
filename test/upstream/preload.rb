@@ -16,13 +16,17 @@ module UpstreamGuard
     path.is_a?(String) && (path.start_with?("#{UPSTREAM}/") || UPSTREAM_EXTENSION.match?(path))
   end
 
+  # A trip in a subprocess may only fail one test, so it also leaves a marker the
+  # runner checks after every attempt.
   def trip(path)
+    report = ENV.fetch("MINI_RACER_RS_UPSTREAM_REPORT", nil)
+    File.write("#{report}.guard", "#{path}\n", mode: "a") if report
     warn "upstream harness: #{path} was loaded; the suite must exercise mini_racer_rs"
     exit!(97)
   end
 
-  def audit
-    leaked = $LOADED_FEATURES.find { upstream?(_1) }
+  def audit(from = 0)
+    leaked = $LOADED_FEATURES.drop(from).find { upstream?(_1) }
     trip(leaked) if leaked
   end
 
@@ -31,9 +35,10 @@ module UpstreamGuard
     # break it; the TracePoint and the exit audit cover relative loads.
     %i[require load].each do |name|
       define_method(name) do |*args, **kwargs|
+        known = $LOADED_FEATURES.size
         result = super(*args, **kwargs)
         UpstreamGuard.trip(args.first) if name == :load && UpstreamGuard.upstream?(File.expand_path(args.first.to_s))
-        UpstreamGuard.audit
+        UpstreamGuard.audit(known)
         result
       end
     end

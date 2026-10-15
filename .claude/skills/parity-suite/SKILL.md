@@ -39,10 +39,10 @@ An `xfail` or `crash` test that starts passing fails strict mode on purpose: upd
 
 1. Add the `ledger-generate` label to the PR; `.github/workflows/ledger-generate.yml` runs the reference once and three candidate seeds on every leg.
 2. `gh run watch <run-id>`, then `gh run download <run-id> -D tmp/ledger-<sha>`.
-3. `bundle exec rake ledger:merge DIR=tmp/ledger-<sha>`. Existing milestones, causes, deviations and `timeout_s` survive.
+3. `bundle exec rake ledger:merge DIR=tmp/ledger-<sha>`. Tests and legs without results keep their entries; milestones, causes, deviations and `timeout_s` survive. A test that passed and now fails is kept as `pass` with a warning unless `ALLOW_REGRESSIONS=1`; `PRUNE=1` removes tests with no result.
 4. Review the diff, commit it, and remove the label.
 
-Locally, `rake ledger:merge DIR=tmp/upstream` merges whatever reference and candidate runs are there.
+Locally, write runs into a fresh directory with `--out <dir>/<name>.jsonl` (one reference, several candidate seeds) and merge that directory; old runs in it would count as extra seeds.
 
 ## When something goes wrong
 
@@ -50,7 +50,8 @@ Locally, `rake ledger:merge DIR=tmp/upstream` merges whatever reference and cand
 |---|---|---|
 | exit 97, "the suite must exercise mini_racer_rs" | A file from upstream's `lib/` loaded | Find what required it; never weaken `test/upstream/preload.rb` |
 | `timeout` result | The watchdog killed a test that overran | Read `tmp/upstream/<test>.timeout.txt` (Ruby threads, then native stacks) |
-| `crash` result | The suite process died inside that test | The suite log in `tmp/upstream/` has the last output |
+| `crash` result | The suite process died, or called exit, inside that test | The suite log in `tmp/upstream/` has the last output |
+| `suite failure` | The process crashed or hung outside any test (loading, between tests, at exit) | Strict mode always fails on it; read the log and `tmp/upstream/suite-attempt-*.timeout.txt` |
 | "not in the ledger" | A new upstream test or a renamed one | Regenerate |
 | "in the ledger but did not run" | A ledger entry for a test that no longer exists | Regenerate |
 

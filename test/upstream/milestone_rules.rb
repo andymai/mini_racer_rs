@@ -4,7 +4,7 @@ require_relative "ledger"
 
 # Turns raw results into ledger statuses. A failing test is assigned to the
 # first milestone whose rule matches, in plan order; a status already in the
-# ledger keeps its milestone and cause.
+# ledger keeps its milestone, cause and target.
 module MilestoneRules
   SPIKE_TESTS = {
     "S2" => %w[MiniRacerTest#test_it_can_stop MiniRacerTest#test_ruby_timeout_does_not_leave_stale_termination
@@ -25,6 +25,9 @@ module MilestoneRules
     ["M3", ->(_file, name) { name.match?(/memory|heap|dispose|stop|timeout|terminat|gc|idle/) }],
   ].freeze
 
+  PREFERRED_LEG = "ruby-3.4-linux-x86_64"
+  STATUS_KEYS = %w[status cause].freeze
+
   module_function
 
   def milestone_for(id)
@@ -35,40 +38,94 @@ module MilestoneRules
     RULES.find { |_, rule| rule.call(file, name) }&.first || "M1"
   end
 
-  def status_for(id, reference, candidates, existing)
-    ref = reference["status"]
-    return { "status" => "upstream-skip" } if ref == "skip"
+  # The candidate's own results decide first: a test this gem passes is `pass`
+  # even where upstream fails, so a passing candidate never meets a status that
+  # strict mode would reject.
+  def status_for(id, reference, candidates, previous)
+    outcomes = candidates.map { |row| row["status"] }.uniq
+    previous_kind, previous_target = previous&.fetch("status", nil).to_s.split(":", 2)
+    return { "status" => "pass" } if outcomes.all? { |o| UpstreamLedger::PASSING.include?(o) }
 
-    unless UpstreamLedger::PASSING.include?(ref)
-      cause = existing && existing["status"] == "upstream-fail" ? existing["cause"] : nil
+    if outcomes.any? { |o| UpstreamLedger::PASSING.include?(o) }
+      anchor = previous_kind == "flaky" ? previous_target : "flaky-#{id.split("#").last}"
+      return { "status" => "flaky:#{anchor}" }
+    end
+
+    ref = reference["status"]
+    return { "status" => "upstream-skip" } if ref == "skip" && outcomes == ["skip"]
+
+    unless UpstreamLedger::PASSING.include?(ref) || ref == "skip"
+      cause = previous_kind == "upstream-fail" ? previous["cause"] : nil
       return { "status" => "upstream-fail",
                "cause" => cause || "mini_racer 0.22.1: #{ref}: #{reference["message"]}".strip, }
     end
+    return previous.slice(*STATUS_KEYS) if previous_kind == "deviation"
 
-    outcomes = candidates.map { _1["status"] }.uniq
-    return { "status" => "pass" } if outcomes.all? { UpstreamLedger::PASSING.include?(_1) }
-    return { "status" => "flaky:flaky-#{id.split("#").last}" } if outcomes.any? { UpstreamLedger::PASSING.include?(_1) }
-
-    kind = outcomes.any? { UpstreamLedger::CRASHING.include?(_1) } ? "crash" : "xfail"
-    previous_kind, previous_target = existing&.fetch("status", nil).to_s.split(":", 2)
-    return { "status" => existing["status"] } if previous_kind == "deviation"
-
+    kind = outcomes.any? { |o| UpstreamLedger::CRASHING.include?(o) } ? "crash" : "xfail"
     target = %w[xfail crash].include?(previous_kind) ? previous_target : milestone_for(id)
     { "status" => "#{kind}:#{target}" }
   end
+end
 
-  # The most common status across legs is the base; legs that differ become
-  # overrides. Hand-set timeouts survive a merge.
-  def collapse(per_leg, existing)
-    return nil if per_leg.empty?
+# Folds fresh results into the ledger without losing what they do not cover:
+# tests and legs absent from the results keep their entries, and per-leg
+# fields such as timeout_s survive.
+module LedgerMerge
+  module_function
 
-    preferred = "ruby-3.4-linux-x86_64"
-    counts = per_leg.values.tally
-    base = counts.max_by { |status, count| [count, per_leg[preferred] == status ? 1 : 0] }.first
-    entry = base.dup
-    entry["timeout_s"] = existing["timeout_s"] if existing&.key?("timeout_s")
-    overrides = per_leg.reject { |_, status| status == base }
-    entry["overrides"] = overrides.sort.to_h unless overrides.empty?
-    entry
+  def merge(existing, rows, prune: false, allow_regressions: false)
+    ledger = existing.transform_values { |entry| Marshal.load(Marshal.dump(entry)) }
+    warnings = []
+    by_test = rows.reject { |row| row["id"].start_with?("__") }.group_by { |row| row["id"] }
+    by_test.each do |id, results|
+      per_leg = statuses(id, results, ledger[id], allow_regressions, warnings)
+      ledger[id] = apply(ledger[id], per_leg) unless per_leg.empty?
+    end
+    if prune
+      (ledger.keys - by_test.keys).each do |id|
+        ledger.delete(id)
+        warnings << "#{id}: pruned, no result in this merge"
+      end
+    end
+    [ledger, warnings]
+  end
+
+  def statuses(id, results, entry, allow_regressions, warnings)
+    results.group_by { |row| row["leg"] }.each_with_object({}) do |(leg, leg_rows), per_leg|
+      reference = leg_rows.find { |row| row["mode"] == "reference" }
+      candidates = leg_rows.select { |row| row["mode"] == "candidate" }
+      next unless reference && !candidates.empty?
+
+      previous = UpstreamLedger.effective(entry, leg)
+      status = MilestoneRules.status_for(id, reference, candidates, previous)
+      if previous&.fetch("status", nil) == "pass" && status["status"] != "pass" && !allow_regressions
+        warnings << "#{id}: passed on #{leg}, now #{status["status"]}; kept pass (ALLOW_REGRESSIONS=1 records it)"
+        status = { "status" => "pass" }
+      end
+      per_leg[leg] = status
+    end
+  end
+
+  def apply(entry, per_leg)
+    entry ||= {}
+    overrides = entry.fetch("overrides", {})
+    base = if per_leg.key?(MilestoneRules::PREFERRED_LEG) || entry["status"].nil?
+             per_leg.values.tally.max_by do |status, count|
+               [count, per_leg[MilestoneRules::PREFERRED_LEG] == status ? 1 : 0]
+             end.first
+           else
+             entry.slice(*MilestoneRules::STATUS_KEYS)
+           end
+    merged = entry.except("overrides", *MilestoneRules::STATUS_KEYS).merge(base)
+    legs = (overrides.keys + per_leg.keys).uniq
+    new_overrides = legs.each_with_object({}) do |leg, out|
+      extra = (overrides[leg] || {}).except(*MilestoneRules::STATUS_KEYS)
+      status = per_leg[leg] || overrides[leg]&.slice(*MilestoneRules::STATUS_KEYS) || {}
+      status = {} if status == base
+      override = extra.merge(status)
+      out[leg] = override unless override.empty?
+    end
+    merged["overrides"] = new_overrides.sort.to_h unless new_overrides.empty?
+    merged
   end
 end

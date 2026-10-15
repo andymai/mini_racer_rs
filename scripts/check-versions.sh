@@ -28,6 +28,10 @@ for module in mini_racer execjs; do
   pinned=$(taplo get -f tools/versions.toml "upstream.$module.commit")
   recorded=$(git ls-tree HEAD "vendor/$module" | awk '{ print $3 }')
   [ "$recorded" = "$pinned" ] || mismatch "vendor/$module is at ${recorded:-nothing}, tools/versions.toml pins $pinned"
+  if [ -e "vendor/$module/.git" ]; then
+    checked_out=$(git -C "vendor/$module" rev-parse HEAD)
+    [ "$checked_out" = "$pinned" ] || mismatch "vendor/$module checkout is at $checked_out; run git submodule update"
+  fi
 done
 upstream_tag=$(taplo get -f tools/versions.toml upstream.mini_racer.tag)
 [ "$upstream_tag" = "v$parity" ] || mismatch "tools/versions.toml pins mini_racer $upstream_tag, MiniRacer::VERSION is $parity"
