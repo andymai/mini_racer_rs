@@ -28,8 +28,8 @@ Each test in `test/upstream/mini_racer.status.toml` has a `status`; `overrides."
 | `pass` | passes; anything else is a regression |
 | `upstream-skip` | the test skips itself here |
 | `upstream-fail` | the real mini_racer fails here too (`cause` required) |
-| `xfail:<M>` | fails until milestone `<M>` in `test/upstream/milestones.toml` |
-| `crash:<M>` | hangs or crashes until `<M>`; set `timeout_s` to keep runs short |
+| `xfail:<M>` | fails, errors or skips (never crashes or hangs) until milestone `<M>` in `test/upstream/milestones.toml` |
+| `crash:<M>` | hangs, crashes or fails until `<M>`; set `timeout_s` to keep runs short |
 | `deviation:<id>` | fails on purpose; `<id>` names a recorded deviation |
 | `flaky:<anchor>` | result varies by seed; any outcome is accepted |
 
@@ -39,7 +39,7 @@ An `xfail` or `crash` test that starts passing fails strict mode on purpose: upd
 
 1. Add the `ledger-generate` label to the PR; `.github/workflows/ledger-generate.yml` runs the reference once and three candidate seeds on every leg.
 2. `gh run watch <run-id>`, then `gh run download <run-id> -D tmp/ledger-<sha>`.
-3. `bundle exec rake ledger:merge DIR=tmp/ledger-<sha>`. Tests and legs without results keep their entries; milestones, causes, deviations and `timeout_s` survive. A test that passed and now fails is kept as `pass` with a warning unless `ALLOW_REGRESSIONS=1`; `PRUNE=1` removes tests with no result.
+3. `bundle exec rake ledger:merge DIR=tmp/ledger-<sha>`. The ledger's `legs` list records every leg merged so far; a test's base status is the one most of those legs share, so a merge from fewer legs never changes what the others inherit. Tests and legs without results keep their statuses; milestones, causes, deviations and `timeout_s` survive. A test that passed and now fails is kept as `pass` with a warning unless `ALLOW_REGRESSIONS=1`; `PRUNE=1` removes tests and legs with no result.
 4. Review the diff, commit it, and remove the label.
 
 Locally, write runs into a fresh directory with `--out <dir>/<name>.jsonl` (one reference, several candidate seeds) and merge that directory; old runs in it would count as extra seeds.

@@ -20,7 +20,7 @@ The runner reads the events while the suite runs. A test that exceeds its limit 
 
 ## Scripts
 
-`test/upstream/scripts.status.toml` lists upstream's standalone scripts with their expected exit, timeout and milestone. Until that milestone is marked `done` in `test/upstream/milestones.toml` a script's outcome is printed and recorded; afterwards a wrong exit fails the run. `test/test_crash.rb` is weekly and runs only with `--weekly`.
+`test/upstream/scripts.status.toml` lists upstream's standalone scripts with their expected exit, timeout and milestone. Until that milestone is marked `done` in `test/upstream/milestones.toml` a script's outcome is printed and written to `tmp/upstream/scripts-<leg>.jsonl` (or `--out`); afterwards a wrong exit fails the run. `test/test_crash.rb` is weekly and runs only with `--weekly`.
 
 ## Vendored files
 

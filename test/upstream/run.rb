@@ -225,7 +225,8 @@ end
 def run_scripts(options)
   entries = Tomlrb.load_file(options[:scripts_ledger]).fetch("scripts")
   done = Tomlrb.load_file(UpstreamLedger::MILESTONES).fetch("milestones").select { |_, m| m["done"] }.keys
-  entries.filter_map do |script, entry|
+  rows = []
+  problems = entries.filter_map do |script, entry|
     next if entry["weekly"] && !options[:weekly]
 
     log = File.join(WORK, "#{File.basename(script, ".rb")}-#{LEG}.log")
@@ -243,8 +244,14 @@ def run_scripts(options)
               else "recorded (#{entry["milestone"]} pending)"
               end
     puts "#{script.ljust(28)} #{outcome.ljust(10)} #{verdict}"
+    rows << { "id" => script, "mode" => "scripts", "leg" => LEG, "status" => outcome, "verdict" => verdict,
+              "expected_exit" => entry["expected_exit"], "milestone" => entry["milestone"], }
     "#{script}: #{outcome}, expected exit #{entry["expected_exit"]}" if enforced && !ok
   end
+  out = options[:out] || File.join(WORK, "scripts-#{LEG}.jsonl")
+  File.write(out, rows.map { |row| "#{JSON.generate(row)}\n" }.join)
+  puts "results: #{out}"
+  problems
 end
 
 def ledger_problems(ledger, results, options)

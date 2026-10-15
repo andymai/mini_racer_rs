@@ -68,28 +68,34 @@ module MilestoneRules
 end
 
 # Folds fresh results into the ledger without losing what they do not cover:
-# tests and legs absent from the results keep their entries, and per-leg
-# fields such as timeout_s survive.
+# tests and legs absent from the results keep their statuses, and per-leg
+# fields such as timeout_s survive. The ledger records every leg it has seen,
+# because a leg that matches the base has no entry of its own.
 module LedgerMerge
   REGRESSION_KINDS = %w[xfail crash flaky].freeze
+  Result = Data.define(:tests, :legs, :warnings)
 
   module_function
 
-  def merge(existing, rows, prune: false, allow_regressions: false)
+  def merge(existing, rows, legs: [], prune: false, allow_regressions: false)
     ledger = existing.transform_values { |entry| Marshal.load(Marshal.dump(entry)) }
     warnings = []
+    result_legs = rows.map { |row| row["leg"] }.uniq
+    override_legs = ledger.values.flat_map { |entry| entry.fetch("overrides", {}).keys }
+    known = prune ? result_legs : (legs + result_legs + override_legs).uniq
     by_test = rows.reject { |row| row["id"].start_with?("__") }.group_by { |row| row["id"] }
     by_test.each do |id, results|
       per_leg = statuses(id, results, ledger[id], allow_regressions, warnings)
-      ledger[id] = apply(ledger[id], per_leg) unless per_leg.empty?
+      ledger[id] = apply(ledger[id], per_leg, known) unless per_leg.empty?
     end
     if prune
       (ledger.keys - by_test.keys).each do |id|
         ledger.delete(id)
         warnings << "#{id}: pruned, no result in this merge"
       end
+      (legs - known).each { |leg| warnings << "#{leg}: pruned, no result in this merge" }
     end
-    [ledger, warnings]
+    Result.new(tests: ledger, legs: known.sort, warnings: warnings)
   end
 
   def statuses(id, results, entry, allow_regressions, warnings)
@@ -111,23 +117,23 @@ module LedgerMerge
     end
   end
 
-  def apply(entry, per_leg)
+  # The base is the status most legs share, voted over every known leg, so a
+  # merge covering some legs never changes what the others inherit.
+  def apply(entry, per_leg, legs)
     entry ||= {}
+    keys = MilestoneRules::STATUS_KEYS
     overrides = entry.fetch("overrides", {})
-    base = if per_leg.key?(MilestoneRules::PREFERRED_LEG) || entry["status"].nil?
-             per_leg.values.tally.max_by do |status, count|
-               [count, per_leg[MilestoneRules::PREFERRED_LEG] == status ? 1 : 0]
-             end.first
-           else
-             entry.slice(*MilestoneRules::STATUS_KEYS)
-           end
-    merged = entry.except("overrides", *MilestoneRules::STATUS_KEYS).merge(base)
-    legs = (overrides.keys + per_leg.keys).uniq
+    previous_base = entry.slice(*keys)
+    current = legs.to_h do |leg|
+      [leg, per_leg[leg] || (UpstreamLedger.effective(entry, leg).slice(*keys) unless previous_base.empty?)]
+    end.compact
+    base = current.values.tally.max_by do |status, count|
+      [count, current[MilestoneRules::PREFERRED_LEG] == status ? 1 : 0, status == previous_base ? 1 : 0]
+    end.first
+    merged = entry.except("overrides", *keys).merge(base)
     new_overrides = legs.each_with_object({}) do |leg, out|
-      extra = (overrides[leg] || {}).except(*MilestoneRules::STATUS_KEYS)
-      status = per_leg[leg] || overrides[leg]&.slice(*MilestoneRules::STATUS_KEYS) || {}
-      status = {} if status == base
-      override = extra.merge(status)
+      status = current.fetch(leg, base)
+      override = (overrides[leg] || {}).except(*keys).merge(status == base ? {} : status)
       out[leg] = override unless override.empty?
     end
     merged["overrides"] = new_overrides.sort.to_h unless new_overrides.empty?
