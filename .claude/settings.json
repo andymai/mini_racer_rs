@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/block-bypass.sh"
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/block-bypass.py"
           }
         ]
       }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/check-boundaries-on-manifest.sh"
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/check-boundaries-on-manifest.py"
           }
         ]
       }

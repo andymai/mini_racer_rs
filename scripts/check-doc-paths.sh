@@ -9,6 +9,12 @@ allowed=(
   "lib/mini_racer_rs/mini_racer_rs.so"
 )
 
+# Candidate paths come from every backtick span and fenced code block, split into
+# words, so a path inside a command (`scripts/gate.sh --full`) is checked too.
+fenced_blocks() {
+  awk '/^```/ { fenced = !fenced; next } fenced { print }' "$1"
+}
+
 fail=0
 for doc in CLAUDE.md .claude/skills/*/*.md; do
   [ -f "$doc" ] || continue
@@ -21,9 +27,11 @@ for doc in CLAUDE.md .claude/skills/*/*.md; do
       echo "VIOLATION [doc-path]: $doc names $path, which does not exist"
       fail=1
     fi
-  done < <(grep -oE '`[A-Za-z0-9_.][A-Za-z0-9_./-]*`' "$doc" | tr -d '`' |
-    grep -E '/|\.(rs|rb|sh|toml|ya?ml|json|md|lock|gemspec|sha256)$' |
-    grep -vE '^\.\.?$|::' | sort -u || true)
+  done < <({ grep -oE '`[^`]+`' "$doc" | tr -d '`'; fenced_blocks "$doc"; } |
+    tr -s ' \t()"' '\n' |
+    grep -E '^\.?[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_.-]+)*/?$' |
+    grep -E '/|\.(rs|rb|sh|py|toml|ya?ml|json|md|lock|gemspec|sha256)$' |
+    grep -vE '::|^https?|\.\.' | sort -u || true)
 done
 
 if [ "$fail" -ne 0 ]; then

@@ -12,6 +12,11 @@ step() {
   "$@"
 }
 
+passed() {
+  echo "Gate passed ($mode)."
+  exit 0
+}
+
 for tool in cargo taplo jq bundle npx; do
   command -v "$tool" >/dev/null || { echo "gate: $tool is not installed" >&2; exit 1; }
 done
@@ -33,14 +38,14 @@ step scripts/check-platforms.sh
 step scripts/check-doc-paths.sh
 step scripts/test-claude-hooks.sh
 step cargo clippy --workspace --all-targets --locked -- -D warnings
-[ "$mode" = --quick ] && exit 0
+[ "$mode" = --quick ] && passed
 
 step cargo nextest run --workspace --exclude mini_racer_rs --locked
 step cargo test --doc --workspace --exclude mini_racer_rs --locked
 step bundle exec rake compile
 step scripts/check-exports.sh
 step bundle exec rake test
-[ "$mode" = default ] && exit 0
+[ "$mode" = default ] && passed
 
 msrv=$(taplo get -f tools/versions.toml toolchains.msrv)
 step scripts/test-boundaries.sh
@@ -51,4 +56,4 @@ step cargo machete
 RUSTDOCFLAGS="-D warnings" step cargo doc --workspace --no-deps --locked
 step gem build mini_racer_rs.gemspec --output tmp/mini_racer_rs.gem
 step gem build shim/mini_racer.gemspec --output tmp/mini_racer-shim.gem
-echo "Gate passed ($mode)."
+passed

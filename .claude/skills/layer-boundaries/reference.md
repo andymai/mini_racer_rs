@@ -1,6 +1,6 @@
 # Layer Boundaries reference
 
-Every check prints `VIOLATION [<tag>]: <detail>` and exits nonzero. `scripts/test-boundaries.sh` plants one violation per tag in a scratch copy.
+Every check prints `VIOLATION [<tag>]: <detail>` (or `[settings]`) and exits nonzero. `scripts/test-boundaries.sh` plants a violation for every tag below except `settings`, which reads live GitHub settings.
 
 | Script | Tag | Means | Fix |
 |---|---|---|---|
@@ -28,3 +28,4 @@ Every check prints `VIOLATION [<tag>]: <detail>` and exits nonzero. `scripts/tes
 | `scripts/check-versions.sh` | `version` | Version literals disagree | Make them agree |
 | `scripts/check-platforms.sh` | `platform` | Target lists disagree | Make them agree |
 | `scripts/check-doc-paths.sh` | `doc-path` | A path named in `CLAUDE.md` or a skill does not exist | Fix the path or the doc |
+| `scripts/check-repo-settings.sh` | `settings` | A GitHub setting differs from the expected value (run locally with an admin token) | Restore the setting |

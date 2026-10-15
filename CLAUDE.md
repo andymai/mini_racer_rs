@@ -14,7 +14,7 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 - Behavior that differs from mini_racer 0.22.1 is a deliberate deviation with a failing-first test and a recorded reason.
 - No en or em dashes anywhere: code, comments, docs, commit messages. `scripts/check-prose.sh` enforces it.
 - Comments explain a non-obvious why and nothing else.
-- Never `--no-verify`, `HUSKY=0`, or a hook edit to get past a failing hook; `.claude/hooks/block-bypass.sh` refuses the first two.
+- Never `--no-verify`, `HUSKY=0`, or a hook edit to get past a failing hook; `.claude/hooks/block-bypass.py` refuses them (a tripwire; CI is the gate).
 - Public prose (README, docs, gemspec text, the repository description, anything filed upstream) goes through the `codex-write` skill and Andy's approval. PR titles and bodies go through codex-write and open once the fact-check and checker pass.
 
 ## Layers

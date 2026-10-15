@@ -111,6 +111,9 @@ CASES = [
     ("extension still imports madvise", "check-exports.sh fake.so", "madvise", [
         cc("fake.so", "int madvise(void *, unsigned long, int);\nint Init_mini_racer_rs(void) { return madvise(0, 0, 0); }\n"),
     ]),
+    ("export missing from the allowlist", "check-exports.sh fake.so", "allowlist", [
+        cc("fake.so", "void Init_mini_racer_rs(void) {}\nvoid planted_export(void) {}\n"),
+    ]),
     ("mangled symbol exported", "check-exports.sh fake.so", "mangled", [
         cc("fake.so", "void Init_mini_racer_rs(void) {}\nvoid planted(void) __asm__(\"_ZN7planted4testEv\");\nvoid planted(void) {}\n"),
     ]),

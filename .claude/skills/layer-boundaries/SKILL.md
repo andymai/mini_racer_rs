@@ -23,7 +23,7 @@ scripts/test-boundaries.sh      # plants one violation per rule and expects each
 | Code | Crate |
 |---|---|
 | Parsing or writing V8's serialization format, Ruby-free | `mini_racer_wire` |
-| Handoff, termination and fork protocol types (loom-checked), Ruby-free | `mini_racer_sync` |
+| Handoff, termination and fork protocol types, Ruby-free; each protocol gets a loom model beside it | `mini_racer_sync` |
 | Anything that calls `v8`, owns isolates, threads, or process state | `mini_racer_engine` |
 | Anything that touches Ruby (magnus, rb-sys, VALUEs, the GVL) | `mini_racer_rs` |
 

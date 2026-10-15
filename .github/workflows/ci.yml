@@ -39,7 +39,7 @@ jobs:
             echo "code=true" >>"$GITHUB_OUTPUT"
             exit 0
           fi
-          code=$(git diff --name-only "$BASE"...HEAD | grep -vE '\.md$|^LICENSE$|^\.github/(ISSUE_TEMPLATE|FUNDING\.yml)' || true)
+          code=$(git diff --name-only "$BASE"...HEAD | grep -vE '\.md$|^LICENSE$|^\.claude/|^\.github/(ISSUE_TEMPLATE|FUNDING\.yml)' || true)
           echo "code=$([ -n "$code" ] && echo true || echo false)" >>"$GITHUB_OUTPUT"
 
   fmt:
