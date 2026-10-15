@@ -7,6 +7,8 @@ cd "$(dirname "$0")/.."
 # Build outputs the docs describe on purpose.
 allowed=(
   "lib/mini_racer_rs/mini_racer_rs.so"
+  "target/"
+  "tmp/"
 )
 
 # Candidate paths come from every backtick span and fenced code block, split into
