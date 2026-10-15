@@ -38,6 +38,7 @@ run 2 'git commit -m ";" -n'
 run 2 'git -C "$PWD"/.worktrees/feat commit -n -m x'
 run 2 $'git commit -m "fix: x" \\\n  -n'
 run 2 'echo "$(git commit -n -m x)"'
+run 2 'git commit -n -m "fix: x" # a comment'
 
 run 0 'git commit -m "fix: x"'
 run 0 'git commit --amend --no-edit'
@@ -54,6 +55,8 @@ run 0 'git status'
 run 0 'cargo nextest run --workspace'
 run 0 $'git commit -F - <<\'MSG\'\nfix: x\n\nbody -n --no-verify\nMSG'
 run 0 $'git commit -m "fix: x\n\nsecond line"'
+run 0 "git commit -m 'docs: explain \$(git commit -n -m x)'"
+run 0 "git commit -m 'docs: update guidance' # never use --no-verify"
 
 manifest() {
   local expected="$1" project="$2" file="$3" status=0

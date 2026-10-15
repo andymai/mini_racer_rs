@@ -55,6 +55,9 @@ def words_and_separators(command):
         elif c in " \t\r":
             flush()
             i += 1
+        elif c == "#" and not started:
+            end = command.find("\n", i)
+            i = n if end < 0 else end
         elif c in OPERATOR_CHARS or c in "<>":
             flush()
             j = i
@@ -72,11 +75,16 @@ def words_and_separators(command):
 
 
 # The shell runs $(...) and `...` even inside double quotes, so their contents
-# are checked as commands of their own.
+# are checked as commands of their own; single quotes and escapes keep them literal.
 def substitutions(command):
     found, i, n = [], 0, len(command)
     while i < n:
-        if command.startswith("$(", i):
+        if command[i] == "\\":
+            i += 2
+        elif command[i] == "'":
+            end = command.find("'", i + 1)
+            i = n if end < 0 else end + 1
+        elif command.startswith("$(", i):
             depth, j = 1, i + 2
             while j < n and depth:
                 depth += {"(": 1, ")": -1}.get(command[j], 0)
