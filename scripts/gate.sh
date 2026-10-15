@@ -35,6 +35,7 @@ step scripts/check-prose.sh
 step scripts/check-action-pins.sh
 step scripts/check-versions.sh
 step scripts/check-platforms.sh
+step scripts/check-vendored.sh
 step scripts/check-doc-paths.sh
 step scripts/test-claude-hooks.sh
 step cargo clippy --workspace --all-targets --locked -- -D warnings
@@ -45,10 +46,12 @@ step cargo test --doc --workspace --exclude mini_racer_rs --locked
 step bundle exec rake compile
 step scripts/check-exports.sh
 step bundle exec rake test
+step bundle exec ruby test/upstream/run.rb --strict
 [ "$mode" = default ] && passed
 
 msrv=$(taplo get -f tools/versions.toml toolchains.msrv)
 step scripts/test-boundaries.sh
+step bundle exec ruby test/upstream/run.rb --scripts
 step cargo "+$msrv" check --workspace --all-targets --locked
 step cargo deny check
 step cargo audit

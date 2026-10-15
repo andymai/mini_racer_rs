@@ -1,0 +1,83 @@
+GEM
+  remote: https://rubygems.org/
+  specs:
+    activesupport (8.1.4)
+      base64
+      bigdecimal
+      concurrent-ruby (~> 1.0, >= 1.3.1)
+      connection_pool (>= 2.2.5)
+      drb
+      i18n (>= 1.6, < 2)
+      json
+      logger (>= 1.4.2)
+      minitest (>= 5.1)
+      securerandom (>= 0.3)
+      tzinfo (~> 2.0, >= 2.0.5)
+      uri (>= 0.13.1)
+    base64 (0.3.0)
+    bigdecimal (4.1.3)
+    concurrent-ruby (1.3.8)
+    connection_pool (3.0.2)
+    drb (2.2.3)
+    i18n (1.15.2)
+      concurrent-ruby (~> 1.0)
+    json (3.1.0)
+    libv8-node (24.12.0.1)
+    libv8-node (24.12.0.1-aarch64-linux)
+    libv8-node (24.12.0.1-aarch64-linux-musl)
+    libv8-node (24.12.0.1-arm64-darwin)
+    libv8-node (24.12.0.1-x86_64-darwin)
+    libv8-node (24.12.0.1-x86_64-linux)
+    libv8-node (24.12.0.1-x86_64-linux-musl)
+    logger (1.7.0)
+    mini_racer (0.22.1)
+      libv8-node (~> 24.12.0.1)
+    minitest (5.27.0)
+    securerandom (0.4.1)
+    tzinfo (2.0.6)
+      concurrent-ruby (~> 1.0)
+    tzinfo-data (1.2026.5)
+      tzinfo (>= 1.0.0)
+    uri (1.1.2)
+
+PLATFORMS
+  aarch64-linux
+  aarch64-linux-musl
+  arm64-darwin
+  ruby
+  x86_64-darwin
+  x86_64-linux
+  x86_64-linux-musl
+
+DEPENDENCIES
+  activesupport (~> 8.0)
+  mini_racer (= 0.22.1)
+  minitest (~> 5.25)
+  tzinfo-data
+
+CHECKSUMS
+  activesupport (8.1.4) sha256=891dd3fe43c4fc8391934b237b1189bb1f661c932a84a840043db9d46a4e80df
+  base64 (0.3.0) sha256=27337aeabad6ffae05c265c450490628ef3ebd4b67be58257393227588f5a97b
+  bigdecimal (4.1.3) sha256=61ebe1e5e559bdc3cc6f2c0ee7f427321fc838f59611c294356eb04d6e21cf66
+  concurrent-ruby (1.3.8) sha256=b2f1be836e968ccc78ccfce277ea79c72a88633f22306782c16ff23fb415d1e1
+  connection_pool (3.0.2) sha256=33fff5ba71a12d2aa26cb72b1db8bba2a1a01823559fb01d29eb74c286e62e0a
+  drb (2.2.3) sha256=0b00d6fdb50995fe4a45dea13663493c841112e4068656854646f418fda13373
+  i18n (1.15.2) sha256=00f9eb62412fe593b2a65a97daa75300d37abb8f7202ec748e94b6d46a9dd1b5
+  json (3.1.0) sha256=3ce7ccf8fde58960177a3a756c31f292a4c1e1dedee884547096a5b0604e3bd8
+  libv8-node (24.12.0.1) sha256=d93d23b861bfe5de3ba829e34a142402fb83b4c3592dd58d9ac4e027588d739a
+  libv8-node (24.12.0.1-aarch64-linux) sha256=22bd0246cde85d70c88cf772727ac3677a20ac1d169105f82efe5f1f7c39f755
+  libv8-node (24.12.0.1-aarch64-linux-musl) sha256=791b5960f79525e87d1bd1e5f2bf3715ef2a38bac6c97f297853e98a8411ba89
+  libv8-node (24.12.0.1-arm64-darwin) sha256=124904a46b4a15c01ac024b4cf537dcf199cfb49a309cc59f66315e156e48339
+  libv8-node (24.12.0.1-x86_64-darwin) sha256=5eee594393e7a27dc230a7fca5f9f72fc11ed58bce655624a683f4d027bf2d16
+  libv8-node (24.12.0.1-x86_64-linux) sha256=e1236be4765edc109bd6ecef2989cf781bdcbac6f6e2cb3236ec9568540a9cfa
+  libv8-node (24.12.0.1-x86_64-linux-musl) sha256=7563175534c40893815bfd28e8fe27e12ff1656700c7208f53de06d14001712b
+  logger (1.7.0) sha256=196edec7cc44b66cfb40f9755ce11b392f21f7967696af15d274dde7edff0203
+  mini_racer (0.22.1) sha256=c0a7baa4035fe57488bf9856bdafb657c99997cbe0441b1838cfd886fe21518a
+  minitest (5.27.0) sha256=2d3b17f8a36fe7801c1adcffdbc38233b938eb0b4966e97a6739055a45fa77d5
+  securerandom (0.4.1) sha256=cc5193d414a4341b6e225f0cb4446aceca8e50d5e1888743fac16987638ea0b1
+  tzinfo (2.0.6) sha256=8daf828cc77bcf7d63b0e3bdb6caa47e2272dcfaf4fbfe46f8c3a9df087a829b
+  tzinfo-data (1.2026.5) sha256=0bdc3c5a540b1704f73a7b5c9be5c90bd0a5866c8e9e8e8a7885977d23a81645
+  uri (1.1.2) sha256=89292e98eabbef6248b0a0ed5e7e398e152f83f17560023a6d94a7f492b169fb
+
+BUNDLED WITH
+  4.0.1

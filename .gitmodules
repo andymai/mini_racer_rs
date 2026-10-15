@@ -1,0 +1,6 @@
+[submodule "vendor/mini_racer"]
+	path = vendor/mini_racer
+	url = https://github.com/rubyjs/mini_racer.git
+[submodule "vendor/execjs"]
+	path = vendor/execjs
+	url = https://github.com/rails/execjs.git

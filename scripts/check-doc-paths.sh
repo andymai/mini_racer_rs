@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # Agents load CLAUDE.md and the skills as ground truth, so every repository path
 # they name in backticks must exist. A renamed or split file is the usual drift.
+# Upstream test paths are written relative to vendor/mini_racer, the directory
+# test/upstream/run.rb resolves them against, so they may resolve there instead.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# Build outputs the docs describe on purpose.
+# Build outputs the docs describe on purpose; an entry ending in / covers
+# everything under it.
 allowed=(
   "lib/mini_racer_rs/mini_racer_rs.so"
   "target/"
@@ -23,9 +26,12 @@ for doc in CLAUDE.md .claude/skills/*/*.md; do
   while IFS= read -r path; do
     [ -n "$path" ] || continue
     for skip in "${allowed[@]}"; do
-      [ "$path" = "$skip" ] && continue 2
+      case "$skip" in
+        */) [[ "$path" == "$skip"* ]] && continue 2 ;;
+        *) [ "$path" = "$skip" ] && continue 2 ;;
+      esac
     done
-    if [ ! -e "$path" ]; then
+    if [ ! -e "$path" ] && [ ! -e "vendor/mini_racer/$path" ]; then
       echo "VIOLATION [doc-path]: $doc names $path, which does not exist"
       fail=1
     fi

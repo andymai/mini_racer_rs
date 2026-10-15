@@ -38,6 +38,7 @@ Gem::Specification.new do |spec|
     "ext/mini_racer_rs/src/**/*.rs",
     "ext/mini_racer_rs/v8-archives.sha256",
     "lib/**/*.rb",
+    "licenses/*",
   ]
   spec.require_paths = ["lib"]
   spec.extensions = ["ext/mini_racer_rs/extconf.rb"]
