@@ -1,0 +1,94 @@
+name: Ledger generate
+
+# Produces the raw results that `rake ledger:merge` turns into
+# test/upstream/mini_racer.status.toml: one reference run of the real
+# mini_racer 0.22.1 and three candidate seeds, on every leg CI checks.
+# Runs on demand, or on a PR while it carries the ledger-generate label.
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [labeled, synchronize]
+
+concurrency:
+  group: ledger-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CI: "true"
+
+permissions: {}
+
+jobs:
+  cruby:
+    name: Ruby ${{ matrix.ruby }} (${{ matrix.os }})
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'ledger-generate')
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+        ruby: ["3.3", "3.4", "4.0"]
+        include:
+          - os: ubuntu-24.04-arm
+            ruby: "3.4"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: true
+      - uses: ./.github/actions/setup
+        with:
+          ruby: ${{ matrix.ruby }}
+      - name: Install the real mini_racer 0.22.1
+        run: BUNDLE_GEMFILE=tools/reference/Gemfile BUNDLE_PATH=tools/reference/vendor/bundle bundle install
+      - run: bundle exec rake compile
+      - name: Reference and candidate runs
+        run: |
+          mkdir -p results
+          bundle exec ruby test/upstream/run.rb --reference --seed 1 --out "results/reference-1.jsonl"
+          for seed in 1 2 3; do
+            bundle exec ruby test/upstream/run.rb --seed "$seed" --out "results/candidate-$seed.jsonl"
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ledger-${{ matrix.os }}-${{ matrix.ruby }}
+          path: results
+          retention-days: 14
+
+  truffleruby:
+    name: TruffleRuby
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'ledger-generate')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      BUNDLE_WITHOUT: lint
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: true
+      - uses: ruby/setup-ruby@651ff0d62c5c79bed6d53ec518387aae20e72c1a # v1.329.0
+        with:
+          ruby-version: truffleruby+graalvm-40.0.0
+          bundler-cache: true
+      - run: truffleruby-polyglot-get js
+      - name: Install the real mini_racer 0.22.1
+        run: BUNDLE_GEMFILE=tools/reference/Gemfile BUNDLE_PATH=tools/reference/vendor/bundle bundle install
+      - name: Reference and candidate runs
+        run: |
+          mkdir -p results
+          bundle exec ruby test/upstream/run.rb --reference --seed 1 --out "results/reference-1.jsonl"
+          for seed in 1 2 3; do
+            bundle exec ruby test/upstream/run.rb --seed "$seed" --out "results/candidate-$seed.jsonl"
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ledger-truffleruby
+          path: results
+          retention-days: 14

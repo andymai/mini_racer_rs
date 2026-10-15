@@ -167,11 +167,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          submodules: true
       - uses: ./.github/actions/setup
         with:
           v8: "false"
           tools: taplo-cli
       - run: scripts/check-versions.sh
+      - run: scripts/check-vendored.sh
       - run: scripts/check-action-pins.sh
       - run: scripts/check-platforms.sh
       - run: scripts/check-prose.sh
@@ -301,9 +303,12 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, macos-15]
-        ruby: ["3.4"]
+        ruby: ["3.3", "3.4", "4.0"]
+        include:
+          - os: ubuntu-24.04-arm
+            ruby: "3.4"
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 60
     permissions:
       contents: read
     env:
@@ -312,6 +317,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          submodules: true
       - uses: ./.github/actions/setup
         with:
           ruby: ${{ matrix.ruby }}
@@ -325,9 +331,23 @@ jobs:
             exit 1
           fi
       - run: bundle exec rake test
+      # mini_racer's own suite, unmodified; every result must match the ledger.
+      - name: Upstream suite (strict)
+        run: bundle exec ruby test/upstream/run.rb --strict --seed "${{ github.run_number }}"
+      - name: Upstream scripts (recorded until their milestone)
+        if: matrix.os == 'ubuntu-24.04' && matrix.ruby == '3.4'
+        run: bundle exec ruby test/upstream/run.rb --scripts
+      - name: Keep upstream run logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: upstream-${{ matrix.os }}-${{ matrix.ruby }}
+          path: tmp/upstream
+          retention-days: 7
       # S1: the source gem installs into an empty GEM_HOME and loads. The setup
       # action's pre-fetched V8 variables are dropped so extconf's pin is what runs.
       - name: Install the source gem from scratch
+        if: matrix.ruby == '3.4'
         run: |
           unset RUSTY_V8_ARCHIVE RUSTY_V8_SRC_BINDING_PATH RUSTY_V8_ARCHIVE_SHA256
           mkdir -p tmp
@@ -339,12 +359,38 @@ jobs:
           cd "$RUNNER_TEMP"
           ruby -e 'require "mini_racer"; p MiniRacer::Context.new.eval("1+1")' | grep -qx 2
 
+  # TruffleRuby runs upstream's own TruffleRuby backend, vendored unchanged; this
+  # proves the loader picks it and the harness guard holds on a second engine.
+  truffleruby:
+    name: TruffleRuby
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      BUNDLE_WITHOUT: lint
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: true
+      - uses: ruby/setup-ruby@651ff0d62c5c79bed6d53ec518387aae20e72c1a # v1.329.0
+        with:
+          ruby-version: truffleruby+graalvm-40.0.0
+          bundler-cache: true
+      - run: truffleruby-polyglot-get js
+      - run: bundle exec ruby -Itest/ruby -Ilib test/ruby/harness_guard_test.rb
+      - name: Upstream suite (strict)
+        run: bundle exec ruby test/upstream/run.rb --strict --seed "${{ github.run_number }}"
+
   # !cancelled() rather than always(): a run superseded by a newer push must
   # not report a failing gate for its commit.
   ci-pass:
     name: CI Pass
     if: ${{ !cancelled() }}
-    needs: [changes, fmt, taplo, rubocop, machete, deny, audit, boundaries, repo-checks, msrv, rustdoc, clippy, rust-test, gem-verify, ruby]
+    needs: [changes, fmt, taplo, rubocop, machete, deny, audit, boundaries, repo-checks, msrv, rustdoc, clippy, rust-test, gem-verify, ruby, truffleruby]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

@@ -61,8 +61,13 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | Export allowlists | `ext/mini_racer_rs/exports.allow.linux`, `ext/mini_racer_rs/exports.allow.macos` |
 | V8 archive pins | `ext/mini_racer_rs/v8-archives.sha256`, `scripts/fetch-v8-archive.sh` |
 | CI | `.github/workflows/ci.yml`, `.github/actions/setup/action.yml` |
+| Upstream suite runner, guard, reporter | `test/upstream/run.rb`, `test/upstream/preload.rb`, `test/upstream/reporter.rb` |
+| Per-test parity ledger | `test/upstream/mini_racer.status.toml`, `test/upstream/milestones.toml` |
+| Ledger generation | `.github/workflows/ledger-generate.yml`, `rakelib/ledger.rake`, `test/upstream/milestone_rules.rb` |
+| Upstream source (never edited) | `vendor/mini_racer` (v0.22.1), `vendor/execjs` (v2.10.2) |
+| Vendored TruffleRuby backend | `lib/mini_racer/truffleruby.rb`, `lib/mini_racer/shared.rb` |
 
-Skills: `.claude/skills/pr-workflow` (branch to merge), `.claude/skills/layer-boundaries` (dependencies, fences, check failures).
+Skills: `.claude/skills/pr-workflow` (branch to merge), `.claude/skills/layer-boundaries` (dependencies, fences, check failures), `.claude/skills/parity-suite` (upstream suite and ledger).
 
 ## Commands
 
@@ -76,13 +81,14 @@ bundle exec rake compile           # build the extension into lib/mini_racer_rs/
 bundle exec rake test              # Ruby tests (compiles first)
 cargo nextest run --workspace --exclude mini_racer_rs
 scripts/check-exports.sh --write   # after changing #[no_mangle] items or bumping v8
+bundle exec ruby test/upstream/run.rb --strict   # mini_racer's own suite against the ledger
 ```
 
 ## Which tests to run
 
 - `crates/mini_racer_wire`: `cargo nextest run -p mini_racer_wire`.
 - `crates/mini_racer_engine`: `cargo nextest run -p mini_racer_engine`. Flag-dependent assertions live in `crates/mini_racer_engine/tests/flags.rs`, one test per process.
-- `ext/` or `lib/`: `bundle exec rake test`, then `scripts/check-exports.sh`.
+- `ext/` or `lib/`: `bundle exec rake test`, then `scripts/check-exports.sh`, then `bundle exec ruby test/upstream/run.rb --strict`.
 - `scripts/`, `layers.toml`, any `Cargo.toml`: `scripts/check-boundaries.sh` and `scripts/test-boundaries.sh`.
 - `.github/`: `scripts/check-action-pins.sh`.
 
@@ -95,5 +101,6 @@ scripts/check-exports.sh --write   # after changing #[no_mangle] items or bumpin
 - V8's platform and flags are process-global and freeze at first use, so tests that set flags run in their own process.
 - `mini_racer_rs.gemspec` lists files by explicit globs; a new file outside them is missing from the gem.
 - Source builds need libclang; with the `libclang` gem, `ext/mini_racer_rs/extconf.rb` also passes GCC's include directory to bindgen.
-- Each git worktree needs its own `npm ci` before the commit hooks can run.
+- Each git worktree needs its own `npm ci` before the commit hooks can run, and `git submodule update --init` before the upstream suite can run.
+- The upstream suite runs from `vendor/mini_racer` with `BUNDLE_GEMFILE`, `RUBYOPT` and `MINI_RACER_RS_UPSTREAM_REPORT` set by `test/upstream/run.rb`; run it through that script, not with `rake test` inside the submodule.
 - In a forked child, contexts inherited from the parent raise `MiniRacer::RuntimeError` (`single-threaded runner: ...`).
