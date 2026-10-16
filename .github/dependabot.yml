@@ -20,8 +20,11 @@ updates:
       - dependency-name: rb-sys
     open-pull-requests-limit: 5
 
+  # The transitive check's bundle stays out: it pins rtlcss exactly and takes
+  # the other two gems by path, and Dependabot evaluates path gemspecs with
+  # File.read stubbed out, which the shim's version lookup cannot survive.
   - package-ecosystem: bundler
-    directories: [/, /test/consumers/transitive]
+    directory: /
     schedule:
       interval: weekly
     cooldown:
@@ -32,6 +35,9 @@ updates:
         update-types: [minor, patch]
     ignore:
       - dependency-name: rb_sys
+      # mini_racer 0.22.1's suite runs on both bundles and requires ~> 5.0.
+      - dependency-name: minitest
+        update-types: [version-update:semver-major]
     open-pull-requests-limit: 5
 
   # The reference bundle is the parity baseline: mini_racer and its libv8-node
@@ -49,6 +55,8 @@ updates:
     ignore:
       - dependency-name: mini_racer
       - dependency-name: libv8-node
+      - dependency-name: minitest
+        update-types: [version-update:semver-major]
     open-pull-requests-limit: 3
 
   - package-ecosystem: npm
