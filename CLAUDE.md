@@ -69,7 +69,10 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | Per-test parity ledgers | `test/upstream/mini_racer.status.toml`, `test/upstream/execjs.status.toml`, `test/upstream/milestones.toml` |
 | Ledger generation | `.github/workflows/ledger-generate.yml`, `rakelib/ledger.rake`, `test/upstream/milestone_rules.rb` |
 | Upstream source (never edited) | `vendor/mini_racer` (v0.22.1), `vendor/execjs` (v2.10.2) |
-| Differential run against the real gem | `test/diff/run.rb`, `test/diff/worker.rb`, `test/diff/canonical.rb`, `test/diff/generate.rb`, `test/diff/shrink.rb`, `test/diff/ledger.rb` |
+| Differential run against the real gem | `test/diff/run.rb`, `test/diff/workers.rb`, `test/diff/worker.rb`, `test/diff/canonical.rb`, `test/diff/generate.rb`, `test/diff/shrink.rb`, `test/diff/ledger.rb` |
+| Consumer workloads (Babel, Terser, Handlebars, React) and their ledger | `test/consumers/workloads.rb`, `test/consumers/js/`, `test/consumers/candidate.status.toml` |
+| rtlcss resolving through the shim to mini_racer_rs | `test/consumers/transitive/` |
+| Benchmarks against the real gem (informational) | `bench/run.rb`, `bench/measure.rb`, `bench/payload.rb` |
 | Differential ledgers and corpus | `test/diff/candidate.status.toml`, `test/diff/divergences.toml`, `test/diff/corpus/` |
 | Vendored TruffleRuby backend | `lib/mini_racer/truffleruby.rb`, `lib/mini_racer/shared.rb` |
 | Public surface status per id, deviation reasons | `compat.toml`, `compat/surface.json` |
@@ -98,6 +101,9 @@ bundle exec rake compat:check      # compat.toml against the reference surface a
 bundle exec rake compat:render     # regenerate everything compat.toml generates
 bundle exec rake compat:verify     # compat:check plus a fresh reflection of the real gem (needs tools/reference)
 bundle exec ruby test/diff/run.rb --twin --strict   # the real gem and this one on the same values (needs tools/reference)
+bundle exec ruby test/diff/run.rb --set consumers --twin --strict   # real libraries (npm run build in test/consumers/js first)
+BUNDLE_GEMFILE=$PWD/test/consumers/transitive/Gemfile bundle exec ruby test/consumers/transitive/check.rb
+bundle exec ruby bench/run.rb     # medians against the real gem; --quick for a smoke run
 ```
 
 ## Which tests to run
@@ -105,7 +111,7 @@ bundle exec ruby test/diff/run.rb --twin --strict   # the real gem and this one 
 - `crates/mini_racer_wire`: `cargo nextest run -p mini_racer_wire`, then `scripts/fuzz-smoke.sh 20`.
 - `crates/mini_racer_sync`: `cargo nextest run -p mini_racer_sync`, then the loom command above.
 - `crates/mini_racer_engine`: `cargo nextest run -p mini_racer_engine`. Flag-dependent assertions live in `crates/mini_racer_engine/tests/flags.rs`, one test per process.
-- `ext/` or `lib/`: `bundle exec rake test`, then `scripts/check-exports.sh`, then `bundle exec ruby test/upstream/run.rb --strict` with and without `--suite execjs`, then `bundle exec ruby test/diff/run.rb --strict`, then `bundle exec rake compat:check`.
+- `ext/` or `lib/`: `bundle exec rake test`, then `scripts/check-exports.sh`, then `bundle exec ruby test/upstream/run.rb --strict` with and without `--suite execjs`, then `bundle exec ruby test/diff/run.rb --strict` with and without `--set consumers`, then `bundle exec rake compat:check`.
 - `compat.toml`: `bundle exec rake compat:render`, then `bundle exec rake compat:check`.
 - `scripts/`, `layers.toml`, any `Cargo.toml`: `scripts/check-boundaries.sh`, `scripts/test-boundaries.sh` and `scripts/check-deny.sh`.
 - `.github/`: `scripts/check-action-pins.sh`.
@@ -126,4 +132,5 @@ bundle exec ruby test/diff/run.rb --twin --strict   # the real gem and this one 
 - In a forked child, contexts inherited from the parent raise `MiniRacer::RuntimeError` (`single-threaded runner: ...`).
 - A `compat.toml` status describes CRuby. Implementing a planned method without marking it `done` fails `compat:check` with `TODO_BUT_IMPLEMENTED`; a planned method that exists before what it calls works (`write_heap_snapshot`) lists that in `depends_on`.
 - `rake` needs the lint group installed; without it (the TruffleRuby CI job), run `tools/compat/reflect.rb` and `tools/compat/check.rb` directly.
-- mini_racer 0.22.1 aborts the whole process (signal 6) on some values, such as a `Map` with a function key; the differential run records that as a `crash` outcome, and worker stderr is in `tmp/diff/<role>-worker.log`.
+- mini_racer 0.22.1 aborts the whole process (signal 6) on some values, such as a `Map` with a function key; the differential run records that as a `crash` outcome, and worker stderr is in `tmp/diff/<role>-worker.log`. A worker that exits with a status instead is a harness failure and stops the run.
+- Plain V8 has no `MessageChannel` or `TextEncoder`, which React's server renderer reaches for when it loads; `test/consumers/js/entries/ssr-globals.js` provides the stand-ins SSR setups on mini_racer use. Bundles are built into `tmp/consumers/bundles` by `npm run build` in `test/consumers/js`.

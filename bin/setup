@@ -19,6 +19,8 @@ git submodule update --init
 bundle install
 (cd tools/reference && BUNDLE_PATH=vendor/bundle bundle install)
 npm ci
+(cd test/consumers/js && npm ci && npm run build)
+BUNDLE_GEMFILE="$PWD/test/consumers/transitive/Gemfile" bundle install
 # shellcheck source=scripts/fetch-v8-archive.sh
 . scripts/fetch-v8-archive.sh
 bundle exec rake compile

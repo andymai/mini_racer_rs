@@ -58,6 +58,12 @@ msrv=$(taplo get -f tools/versions.toml toolchains.msrv)
 step scripts/test-boundaries.sh
 step bundle exec ruby test/upstream/run.rb --scripts
 step bundle exec ruby test/diff/run.rb --twin --strict
+step npm --prefix test/consumers/js ci --silent
+step npm --prefix test/consumers/js run build --silent
+step bundle exec ruby test/diff/run.rb --set consumers --twin --strict
+BUNDLE_GEMFILE="$PWD/test/consumers/transitive/Gemfile" step bundle install --quiet
+BUNDLE_GEMFILE="$PWD/test/consumers/transitive/Gemfile" step bundle exec ruby test/consumers/transitive/check.rb
+step bundle exec ruby bench/run.rb --quick
 step cargo "+$msrv" check --workspace --all-targets --locked
 step scripts/check-deny.sh
 step cargo audit
