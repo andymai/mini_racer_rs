@@ -51,9 +51,10 @@ extern "C" fn park_for_fork(isolate: v8::UnsafeRawIsolatePtr, _data: *mut std::f
 
 /// Runs the engine's fork handlers inside every `fork()` of the process.
 pub fn register_fork_handlers() {
-    // SAFETY: both handlers are plain functions that live as long as the
+    // SAFETY: the handlers are plain functions that live as long as the
     // process and never unwind.
-    let registered = unsafe { libc::pthread_atfork(Some(on_prepare), Some(on_parent), None) };
+    let registered =
+        unsafe { libc::pthread_atfork(Some(on_prepare), Some(on_parent), Some(on_child)) };
     debug_assert_eq!(registered, 0, "pthread_atfork");
 }
 
@@ -65,6 +66,12 @@ extern "C" fn on_prepare() {
 
 extern "C" fn on_parent() {
     if std::panic::catch_unwind(crate::process::fork::parent).is_err() {
+        std::process::abort();
+    }
+}
+
+extern "C" fn on_child() {
+    if std::panic::catch_unwind(crate::process::fork::child).is_err() {
         std::process::abort();
     }
 }

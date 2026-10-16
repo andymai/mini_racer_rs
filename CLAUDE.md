@@ -47,10 +47,10 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | V8 initialization and version | `crates/mini_racer_engine/src/process.rs` |
 | Runner thread, script evaluation, attach and the callback trampoline, mini_racer's error formats | `crates/mini_racer_engine/src/runner.rs` |
 | Sanitizing results, the filter's safe context, serializing with the filter retry | `crates/mini_racer_engine/src/serialize.rs` |
-| Context handle, dispatch, nested dispatch from callbacks, the `Host` contract, stop, dispose, fork guard | `crates/mini_racer_engine/src/context.rs` |
+| Context handle, dispatch, nested dispatch from callbacks, the `Host` contract, stop, dispose | `crates/mini_racer_engine/src/context.rs` |
 | Control block shared by a handle and its runner, request types, context config | `crates/mini_racer_engine/src/control.rs` |
 | Timeout watchdog thread | `crates/mini_racer_engine/src/process/watchdog.rs` |
-| Forks: per-process generations, quiescing runners inside `fork()` (`pthread_atfork`), taking idle contexts over in the child | `crates/mini_racer_engine/src/process/fork.rs`, `crates/mini_racer_engine/src/sys.rs`, `crates/mini_racer_engine/src/context.rs` (`Lineage`, `adopt`) |
+| Forks: the fork epoch, per-process generations, quiescing runners inside `fork()` (`pthread_atfork`), taking idle contexts over in the child, dispatches orphaned by a fork from a callback | `crates/mini_racer_engine/src/process/fork.rs`, `crates/mini_racer_engine/src/sys.rs`, `crates/mini_racer_engine/src/context.rs` (`Lineage`, `adopt`) |
 | Building and warming up startup snapshots | `crates/mini_racer_engine/src/snapshot.rs` |
 | Engine errors | `crates/mini_racer_engine/src/error.rs` |
 | `madvise` wrapper (fork safety) | `crates/mini_racer_engine/src/sys.rs`, `crates/mini_racer_engine/build.rs` |
@@ -165,7 +165,7 @@ bundle exec ruby -Ilib test/stress/fork_loop.rb    # 500 forks with idle context
 - Source builds need libclang; with the `libclang` gem, `ext/mini_racer_rs/extconf.rb` also passes GCC's include directory to bindgen.
 - Each git worktree needs its own `npm ci` before the commit hooks can run, and `git submodule update --init` before the upstream suites or `rake test` (the ExecJS autodetect test) can run.
 - The upstream suites run from their submodule (`vendor/mini_racer` or `vendor/execjs`) with `BUNDLE_GEMFILE`, `RUBYOPT`, `MINI_RACER_RS_UPSTREAM_REPORT`, `MINI_RACER_RS_UPSTREAM_ROOT` and, for ExecJS, `EXECJS_RUNTIME` set by `test/upstream/run.rb`; run them through that script, not with `rake test` inside the submodule.
-- A forked child takes over a single-threaded context only if its runner was idle at a fork that went through `Process._fork`; every other inherited context raises `MiniRacer::RuntimeError` (`single-threaded runner: ...`), and nothing inherited is ever locked or freed in the child.
+- A forked child takes over a single-threaded context only if its runner was idle at a fork that went through `Process._fork` or `Process.daemon`; every other inherited context raises `MiniRacer::RuntimeError` (`single-threaded runner: ...`). The child never frees or waits on anything inherited: it reads atomics and try-locks only. Processes are told apart by `process::fork::epoch()`, never by pid.
 - A `compat.toml` status describes CRuby. Implementing a planned method without marking it `done` fails `compat:check` with `TODO_BUT_IMPLEMENTED`; a planned method that exists before what it calls works (`write_heap_snapshot`) lists that in `depends_on`.
 - `rake` needs the lint group installed; without it (the TruffleRuby CI job), run `tools/compat/reflect.rb` and `tools/compat/check.rb` directly.
 - mini_racer 0.22.1 aborts the whole process (signal 6) on some values, such as a `Map` with a function key; the differential run records that as a `crash` outcome, and worker stderr is in `tmp/diff/<role>-worker.log`. A worker that exits with a status instead is a harness failure and stops the run.

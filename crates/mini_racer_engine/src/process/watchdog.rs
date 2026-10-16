@@ -41,7 +41,7 @@ struct Timers {
 }
 
 struct Watchdog {
-    pid: u32,
+    epoch: u64,
     timers: Mutex<Timers>,
     changed: Condvar,
 }
@@ -63,13 +63,13 @@ impl Watchdog {
 // the parent's watchdog state but not its thread, so it starts its own and
 // leaves the inherited one untouched.
 fn current() -> Result<Arc<Watchdog>, EngineError> {
-    let pid = std::process::id();
+    let epoch = super::fork::epoch();
     let mut slot = lock(&WATCHDOG);
-    if let Some(watchdog) = slot.as_ref().filter(|watchdog| watchdog.pid == pid) {
+    if let Some(watchdog) = slot.as_ref().filter(|watchdog| watchdog.epoch == epoch) {
         return Ok(Arc::clone(watchdog));
     }
     let watchdog = Arc::new(Watchdog {
-        pid,
+        epoch,
         timers: Mutex::default(),
         changed: Condvar::new(),
     });

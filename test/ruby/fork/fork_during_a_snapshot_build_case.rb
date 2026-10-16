@@ -7,8 +7,11 @@ require_relative "prelude"
 MiniRacer::Platform.set_flags!(:single_threaded)
 idle = MiniRacer::Context.new
 idle.eval("var answer = 42")
-builder = Thread.new { MiniRacer::Snapshot.new("var a = []; for (let i = 0; i < 3e7; i++) a.push(i % 7)") }
+# A plain loop checks for interrupts on every iteration and outlasts the fork.
+builder = Thread.new { MiniRacer::Snapshot.new("const end = Date.now() + 2000; while (Date.now() < end) {}") }
 sleep 0.3
+raise "the build ended before the fork" unless builder.alive?
+
 started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 child { raise "idle" unless idle.eval("answer") == 42 }
 elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started

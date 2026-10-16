@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -43,12 +43,26 @@ pub trait Host {
 
 pub struct WaitHandle<'a> {
     channel: &'a Channel<Wire>,
+    epoch: u64,
 }
 
 impl<'a> WaitHandle<'a> {
+    fn new(channel: &'a Channel<Wire>) -> Self {
+        Self {
+            channel,
+            epoch: fork::epoch(),
+        }
+    }
+
+    // A fork from a callback leaves the child waiting on a runner it does not
+    // have; it stops waiting and the dispatch ends orphaned.
+    fn forked(&self) -> bool {
+        fork::epoch() != self.epoch
+    }
+
     #[must_use]
     pub fn ready(&self) -> bool {
-        self.channel.ready(Side::Ruby)
+        self.channel.ready(Side::Ruby) || self.forked()
     }
 
     /// Spins up to `budget`; returns whether the runner answered meanwhile.
@@ -91,24 +105,42 @@ pub struct ContextHandle {
 // child that takes an idle context over gives it a block of its own and never
 // touches the inherited one, whose locks threads that are gone may hold.
 struct Lineage {
-    pid: u32,
+    epoch: u64,
     held: Held,
     next: OnceLock<Box<Self>>,
 }
 
 enum Held {
     Block(Arc<ControlBlock>),
-    // Disposed before the fork that led here.
+    // Disposed, or being disposed, before the fork that led here.
     Disposed,
-    // In use at the fork, or after a fork that did not wait for the runners.
-    Orphaned,
+    Orphaned(Orphan),
+}
+
+// An inherited context left to the parent.
+struct Orphan {
+    in_use: bool,
+    disposed: AtomicBool,
+}
+
+const fn orphaned(in_use: bool, disposed: bool) -> Held {
+    Held::Orphaned(Orphan {
+        in_use,
+        disposed: AtomicBool::new(disposed),
+    })
+}
+
+impl Orphan {
+    fn disposed(&self) -> bool {
+        self.disposed.load(Ordering::Acquire)
+    }
 }
 
 impl Lineage {
-    // The link for `pid`, without making one.
-    fn find(&self, pid: u32) -> Result<&Self, &Self> {
+    // The link for `epoch`, or else the last one, without making one.
+    fn find(&self, epoch: u64) -> Result<&Self, &Self> {
         let mut lineage = self;
-        while lineage.pid != pid {
+        while lineage.epoch != epoch {
             match lineage.next.get() {
                 Some(next) => lineage = next,
                 None => return Err(lineage),
@@ -169,7 +201,7 @@ impl ContextHandle {
         start(&block, generation, Start::Fresh(snapshot))?;
         let handle = Self {
             lineage: Lineage {
-                pid: std::process::id(),
+                epoch: fork::epoch(),
                 held: Held::Block(block),
                 next: OnceLock::new(),
             },
@@ -268,7 +300,8 @@ impl ContextHandle {
                 Ok(())
             }
             Held::Disposed => Err(EngineError::Disposed),
-            Held::Orphaned => Ok(()),
+            Held::Orphaned(orphan) if orphan.disposed() => Err(EngineError::Disposed),
+            Held::Orphaned(_) => Ok(()),
         }
     }
 
@@ -287,11 +320,12 @@ impl ContextHandle {
             Held::Block(block) => block,
             Held::Disposed => return Ok(()),
             // mini_racer refuses a single-threaded context a child inherited in use.
-            Held::Orphaned => {
-                return match platform::mode() {
-                    Mode::SingleThreaded => Err(EngineError::DisposeBusy),
-                    Mode::MultiThreaded => Ok(()),
-                };
+            Held::Orphaned(orphan) if orphan.in_use && platform::mode() == Mode::SingleThreaded => {
+                return Err(EngineError::DisposeBusy);
+            }
+            Held::Orphaned(orphan) => {
+                orphan.disposed.store(true, Ordering::Release);
+                return Ok(());
             }
         };
         if self.session.callbacks.load(Ordering::Relaxed) > 0 {
@@ -303,11 +337,13 @@ impl ContextHandle {
             Err(ChannelError::Closed) => return Ok(()),
             Err(error) => return Err(protocol(error)),
         }
-        let wait = WaitHandle {
-            channel: &block.channel,
-        };
+        let wait = WaitHandle::new(&block.channel);
         loop {
             host.wait_blocking(&wait);
+            if wait.forked() {
+                // The child finds the context disposing, so disposed.
+                return Ok(());
+            }
             match block.channel.recv_ruby() {
                 Ok(Some(ToRuby::Response(response))) => return response.map(drop),
                 Err(ChannelError::Closed) => return Ok(()),
@@ -323,51 +359,61 @@ impl ContextHandle {
     /// Answers without taking an inherited context over.
     #[must_use]
     pub fn is_disposed(&self) -> bool {
-        match self.lineage.find(std::process::id()) {
+        match self.lineage.find(fork::epoch()) {
             Ok(lineage) => match &lineage.held {
                 Held::Block(block) => block.channel.is_closed() || block.term.is_disposing(),
                 Held::Disposed => true,
-                Held::Orphaned => false,
+                Held::Orphaned(orphan) => orphan.disposed(),
             },
             Err(inherited) => match &inherited.held {
-                Held::Block(block) => block.channel.is_closed(),
+                Held::Block(block) => {
+                    block.channel.is_closed()
+                        || block
+                            .term
+                            .inherited()
+                            .is_some_and(|(_, disposing)| disposing)
+                }
                 Held::Disposed => true,
-                Held::Orphaned => false,
+                Held::Orphaned(orphan) => orphan.disposed(),
             },
         }
     }
 
     // What this process holds of the context, taking it over first in a
     // forked child.
+    // A process the context passed through unused (a daemon's intermediate
+    // child) gets no link: its fork left the block exactly as inherited, and
+    // the generation's quiesced flag already covers every fork on the way.
     fn held(&self) -> &Held {
-        let pid = std::process::id();
-        let mut lineage = &self.lineage;
-        while lineage.pid != pid {
-            let inherited = &lineage.held;
-            lineage = lineage
-                .next
-                .get_or_init(|| Box::new(self.inherit(inherited, pid)));
+        let epoch = fork::epoch();
+        match self.lineage.find(epoch) {
+            Ok(lineage) => &lineage.held,
+            Err(last) => {
+                &last
+                    .next
+                    .get_or_init(|| Box::new(self.inherit(&last.held, epoch)))
+                    .held
+            }
         }
-        &lineage.held
     }
 
-    fn inherit(&self, inherited: &Held, pid: u32) -> Lineage {
+    // Only atomics and try-locks touch what was inherited.
+    fn inherit(&self, inherited: &Held, epoch: u64) -> Lineage {
         let held = match inherited {
-            // The closed flag is an atomic, safe to read in what was inherited.
             Held::Block(block) if block.channel.is_closed() => Held::Disposed,
-            Held::Block(block) => adopt(block).map_or(Held::Orphaned, Held::Block),
+            Held::Block(block) => match block.term.inherited() {
+                Some((_, true)) => Held::Disposed,
+                // A parent thread may have claimed the context and not sent yet.
+                Some((stop, false)) if self.session.owner.load(Ordering::Acquire) == 0 => {
+                    adopt(block, stop)
+                }
+                _ => orphaned(true, false),
+            },
             Held::Disposed => Held::Disposed,
-            Held::Orphaned => Held::Orphaned,
+            Held::Orphaned(orphan) => orphaned(orphan.in_use, orphan.disposed()),
         };
-        if matches!(held, Held::Block(_)) {
-            // A thread of the parent may have claimed the context just before
-            // the fork, without sending anything.
-            self.session.owner.store(0, Ordering::Release);
-            self.session.callbacks.store(0, Ordering::Relaxed);
-            self.session.waits.store(0, Ordering::Relaxed);
-        }
         Lineage {
-            pid,
+            epoch,
             held,
             next: OnceLock::new(),
         }
@@ -382,7 +428,8 @@ impl ContextHandle {
         let block = match self.held() {
             Held::Block(block) => block,
             Held::Disposed => return Err(EngineError::Disposed),
-            Held::Orphaned => return Err(EngineError::Orphaned),
+            Held::Orphaned(orphan) if orphan.disposed() => return Err(EngineError::Disposed),
+            Held::Orphaned(_) => return Err(EngineError::Orphaned),
         };
         let thread = process::thread_token();
         match self.session.owner.load(Ordering::Acquire) {
@@ -405,11 +452,17 @@ impl ContextHandle {
         }
         self.session.owner.store(thread, Ordering::Release);
         let owning = Owning(&self.session.owner);
+        let wait = WaitHandle::new(&block.channel);
         let result = match block.channel.request(request(Depth::Outermost(dispatch))) {
-            Ok(()) => self.await_response(block, false, host),
+            Ok(()) => self.await_response(block, &wait, false, host),
             Err(error) => Err(channel(error)),
         };
         drop(owning);
+        if wait.forked() {
+            // The runner and the watchdog that armed the dispatch are the
+            // parent's, and may have held its locks at the fork.
+            return result;
+        }
         // A no-op unless the runner died before disarming it.
         block.term.end(dispatch);
         watchdog::clear(block, dispatch);
@@ -425,9 +478,10 @@ impl ContextHandle {
         if block.term.is_disposing() {
             return Err(EngineError::Disposed);
         }
+        let wait = WaitHandle::new(&block.channel);
         block.channel.request(request).map_err(channel)?;
         let _waiting = Counted::enter(&self.session.waits);
-        self.await_response(block, true, host)
+        self.await_response(block, &wait, true, host)
     }
 
     // Once the dispatch is abandoned, callbacks still in flight are answered
@@ -439,12 +493,10 @@ impl ContextHandle {
     fn await_response(
         &self,
         block: &ControlBlock,
+        wait: &WaitHandle<'_>,
         nested: bool,
         host: &mut impl Host,
     ) -> Result<Vec<u8>, EngineError> {
-        let wait = WaitHandle {
-            channel: &block.channel,
-        };
         let mut cancelled = false;
         let mut disposed = false;
         let abandon = |cancelled: &mut bool| {
@@ -456,9 +508,16 @@ impl ContextHandle {
             }
         };
         loop {
-            if cancelled {
-                host.wait_blocking(&wait);
-            } else if host.wait(&wait) == WaitOutcome::Cancel {
+            let outcome = if cancelled {
+                host.wait_blocking(wait);
+                WaitOutcome::Ready
+            } else {
+                host.wait(wait)
+            };
+            if wait.forked() {
+                return Err(EngineError::Orphaned);
+            }
+            if outcome == WaitOutcome::Cancel {
                 abandon(&mut cancelled);
                 continue;
             }
@@ -479,6 +538,9 @@ impl ContextHandle {
                     } else {
                         let _running = Counted::enter(&self.session.callbacks);
                         let reply = host.callback(&request);
+                        if wait.forked() {
+                            return Err(EngineError::Orphaned);
+                        }
                         disposed = block.term.is_disposing();
                         if disposed {
                             CallbackReply::Abort
@@ -507,7 +569,7 @@ impl Drop for ContextHandle {
         if let Ok(Lineage {
             held: Held::Block(block),
             ..
-        }) = self.lineage.find(std::process::id())
+        }) = self.lineage.find(fork::epoch())
         {
             block.term.dispose();
             block.channel.close();
@@ -537,19 +599,32 @@ fn start(
 
 // A forked child takes over a context whose runner was idle, with nothing in
 // flight, at a fork that waited for every runner; any other stays the parent's.
-fn adopt(inherited: &ControlBlock) -> Option<Arc<ControlBlock>> {
-    let generation = fork::current();
-    if !generation.quiesced()
-        || inherited.phase.get() != Phase::Deposited
-        || !inherited.channel.idle()
-    {
-        return None;
+// A stop requested before the fork carries over, as in mini_racer.
+fn adopt(inherited: &ControlBlock, stop: bool) -> Held {
+    if inherited.phase.get() != Phase::Deposited || !inherited.channel.idle() {
+        return orphaned(true, false);
     }
-    let isolate = lock(&inherited.custody).take()?;
+    let generation = fork::current();
+    if !generation.quiesced() {
+        return orphaned(false, false);
+    }
+    let Some(isolate) = inherited
+        .custody
+        .try_lock()
+        .ok()
+        .and_then(|mut custody| custody.take())
+    else {
+        return orphaned(true, false);
+    };
     let block = Arc::new(ControlBlock::new(inherited.config.clone()));
     *lock(&block.custody) = Some(isolate);
-    start(&block, generation, Start::Adopted).ok()?;
-    Some(block)
+    if stop {
+        block.term.request(Interrupt::Stop);
+    }
+    match start(&block, generation, Start::Adopted) {
+        Ok(()) => Held::Block(block),
+        Err(_) => orphaned(true, false),
+    }
 }
 
 fn protocol(error: ChannelError) -> EngineError {

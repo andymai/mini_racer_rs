@@ -233,7 +233,8 @@ impl<P: Protocol> Channel<P> {
         ready(self.state.load(Ordering::Acquire), side)
     }
 
-    /// Open, Ruby's turn, and nothing in flight.
+    /// Open, Ruby's turn, and no request or callback open. A thread that has
+    /// claimed the context but not sent yet still counts as idle.
     #[must_use]
     pub fn idle(&self) -> bool {
         let state = self.state.load(Ordering::Acquire);

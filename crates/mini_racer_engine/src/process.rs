@@ -27,7 +27,12 @@ pub fn ensure_initialized() {
         // Unprotected: on PKU-capable CPUs the protected platform requires every
         // V8 thread to descend from the initializing thread, which Ruby threads
         // and per-context runners do not.
-        let platform = v8::new_unprotected_default_platform(0, false).make_shared();
+        // `--single-threaded` gives the workers no tasks, so one is enough.
+        let workers = match platform::mode() {
+            platform::Mode::SingleThreaded => 1,
+            platform::Mode::MultiThreaded => 0,
+        };
+        let platform = v8::new_unprotected_default_platform(workers, false).make_shared();
         v8::V8::initialize_platform(platform);
         v8::V8::initialize();
         crate::sys::register_fork_handlers();

@@ -136,6 +136,7 @@ fn serve(
         serialize::contexts(scope, from_snapshot)
     };
     let Some((context, filter)) = contexts else {
+        drop(isolate);
         return refuse(block, "context setup failed");
     };
     let runtime = Arc::new(Runtime::new(block, generation, context, filter));
@@ -159,11 +160,14 @@ fn adopt(
     shared: v8::SharedIsolate,
 ) -> bool {
     generation.resume(block);
+    let inherited = shared.lock().get_slot::<Arc<Runtime>>().cloned();
+    let Some(inherited) = inherited else {
+        // Disposed here, before the runner counts as idle to a fork.
+        drop(shared);
+        return refuse(block, "inherited isolate has no context");
+    };
     let runtime = {
         let mut locker = shared.lock();
-        let Some(inherited) = locker.get_slot::<Arc<Runtime>>().cloned() else {
-            return refuse(block, "inherited isolate has no context");
-        };
         let runtime = Arc::new(Runtime::new(
             block,
             generation,
