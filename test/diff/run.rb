@@ -5,7 +5,9 @@
 # be a known gap in the ledger. --set consumers runs real libraries (Babel,
 # Terser, Handlebars, React) instead of generated values, against their own
 # ledger. --twin also runs a second copy of the real gem, which must agree with
-# the first, or the harness itself is unsound.
+# the first, or the harness itself is unsound. --explore runs a fresh seed's
+# cases with no ledger and fails on any divergence the accepted ones miss; its
+# cases share no object, which keeps it clear of behavior:object-ids@ruby.
 
 require "fileutils"
 require "json"
@@ -24,6 +26,7 @@ LEDGERS = { "values" => File.join(__dir__, "candidate.status.toml"),
 DIVERGENCES = File.join(__dir__, "divergences.toml")
 CORPUS = File.join(__dir__, "corpus")
 FAILED = %w[raise crash timeout].freeze
+NEW_OUTCOMES = %w[diverged crashed].freeze
 WORK = DiffWorkers::WORK
 
 options = { set: "values", seed: 1, js: 200, ruby: 100, twin: false, strict: false, write_ledger: false, shrink: false }
@@ -40,6 +43,9 @@ OptionParser.new do |opts|
   end
   opts.on("--shrink", "Minimize each new divergence into test/diff/corpus") do
     options.merge!(shrink: true, generated: true)
+  end
+  opts.on("--explore", "Generated cases only, none sharing an object; fail on any divergence or crash") do
+    options.merge!(explore: true, generated: true)
   end
   opts.on("--out PATH") { |path| options[:out] = path }
 end.parse!
@@ -71,6 +77,9 @@ problems = DiffLedger.divergence_problems(divergences, compat_entries)
 abort problems.join("\n") unless problems.empty?
 
 ledger_path = LEDGERS.fetch(options[:set])
+if options[:explore] && (options[:strict] || options[:write_ledger])
+  abort "diff: --explore checks no ledger, so it takes neither --strict nor --write-ledger"
+end
 if options[:set] == "consumers" && options[:generated]
   abort "diff: --set consumers runs fixed workloads; --seed, --js, --ruby and --shrink apply to the values set"
 end
@@ -81,7 +90,9 @@ cases = if options[:set] == "consumers"
             abort "diff: #{e.message}"
           end
         else
-          DiffGenerate.cases(seed: options[:seed], javascript: options[:js], ruby: options[:ruby]) + load_corpus
+          generated = DiffGenerate.cases(seed: options[:seed], javascript: options[:js], ruby: options[:ruby],
+                                         shared: !options[:explore],)
+          options[:explore] ? generated : generated + load_corpus
         end
 duplicates = cases.map { |kase| kase.fetch("id") }.tally.select { |_, n| n > 1 }.keys
 abort "duplicate case ids: #{duplicates.join(", ")}" unless duplicates.empty?
@@ -144,6 +155,12 @@ end
 
 abort "diff: the two copies of the real gem disagree on #{twin_mismatches.join(", ")}" unless twin_mismatches.empty?
 puts "diff: both copies of the real gem agree on every case" if twin
+
+if options[:explore]
+  found = results.select { |result| NEW_OUTCOMES.include?(result["class"]) }
+  abort "diff: #{found.size} new outcome(s): #{found.map { |result| result["id"] }.join(", ")}" unless found.empty?
+  puts "diff: no divergence outside the accepted ones"
+end
 
 if options[:write_ledger]
   previous = load_ledger(ledger_path)

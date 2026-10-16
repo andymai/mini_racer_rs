@@ -50,6 +50,31 @@ class DiffLedgerTest < Minitest::Test
                                                  [["array", [["nil"], time, %w[int 6]]]], [lost],)
   end
 
+  def test_a_lost_reference_may_come_back_as_an_equal_copy
+    lost = { "id" => "lost", "compat" => "behavior:object-ids@ruby", "structure" => "lost-reference" }
+    one = ["array", [%w[int 1]]]
+    nested = ["hash", [[%w[string UTF-8 text k], one]]]
+
+    assert_equal "accepted:lost", DiffLedger.classify([["array", [one, one]]], [["array", [one, ["ref", 1]]]], [lost])
+    assert_equal "accepted:lost",
+                 DiffLedger.classify([["array", [nested, nested]]], [["array", [nested, ["ref", 1]]]], [lost])
+    assert_equal "diverged", DiffLedger.classify([["array", [one, ["array", [%w[int 2]]]]]],
+                                                 [["array", [one, ["ref", 1]]]], [lost],)
+    assert_equal "diverged", DiffLedger.classify([["array", [one, one]]], [["array", [one, ["ref", 7]]]], [lost])
+  end
+
+  def test_a_lost_string_reference_needs_an_equal_string_before_it
+    lost = { "id" => "lost", "compat" => "behavior:object-ids@ruby", "structure" => "lost-reference" }
+    bytes = %w[string UTF-8 text a+]
+    # Outcomes come from JSON, so no two nodes are the same object.
+    twice = ["array", [bytes.dup, bytes.dup]]
+
+    assert_equal "accepted:lost", DiffLedger.classify([["array", [bytes, ["nil"]]]], [twice], [lost])
+    assert_equal "diverged", DiffLedger.classify([["array", [["nil"], bytes]]], [twice], [lost])
+    assert_equal "diverged", DiffLedger.classify([["array", [bytes, ["nil"]]]],
+                                                 [["array", [bytes, %w[string UTF-8 text b]]]], [lost],)
+  end
+
   def test_an_accepted_divergence_must_cite_a_compat_deviation
     compat = { "behavior:v8-version@ruby" => { "status" => "deviation" } }
 
