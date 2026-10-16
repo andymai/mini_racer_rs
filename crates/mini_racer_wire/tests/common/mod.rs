@@ -62,7 +62,7 @@ pub struct Frame {
 fn text_of(text: Text<'_>) -> String {
     match text {
         Text::Utf8(bytes) => String::from_utf8_lossy(bytes).into_owned(),
-        Text::Latin1(bytes) => text::latin1_to_utf8(bytes).into_owned(),
+        Text::Latin1(bytes) => text::latin1_to_utf8(bytes),
         Text::Utf16Le(bytes) => text::utf16le_to_utf8(bytes).unwrap_or_else(|| {
             let units: Vec<String> = bytes
                 .chunks(2)

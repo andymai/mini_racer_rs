@@ -1,24 +1,20 @@
-use std::borrow::Cow;
-
-// Returned HTML is mostly ASCII, so ASCII is copied up to a block at a time
-// and everything else a character at a time.
-const BLOCK: usize = 32;
+// Returned HTML is mostly ASCII, so input is checked for ASCII a block at a
+// time and ASCII is copied in bulk; only blocks holding anything else are
+// converted a character at a time.
+const LATIN1_BLOCK: usize = 32;
+// Each block's count of non-ASCII bytes is summed in a u8.
+const _: () = assert!(LATIN1_BLOCK <= u8::MAX as usize);
+const UTF16_WINDOW: usize = 8;
+const NARROW_BYTES: usize = 64;
 
 fn ascii(bytes: &[u8]) -> &str {
-    std::str::from_utf8(bytes).expect("an ASCII block is UTF-8")
+    std::str::from_utf8(bytes).expect("ASCII is UTF-8")
 }
 
-/// Borrows when every byte is ASCII.
 #[must_use]
-pub fn latin1_to_utf8(bytes: &[u8]) -> Cow<'_, str> {
-    if bytes.is_ascii() {
-        return Cow::Borrowed(ascii(bytes));
-    }
-    if bytes.len() < BLOCK {
-        return Cow::Owned(bytes.iter().copied().map(char::from).collect());
-    }
+pub fn latin1_to_utf8(bytes: &[u8]) -> String {
     let wide: usize = bytes
-        .chunks(BLOCK)
+        .chunks(LATIN1_BLOCK)
         .map(|block| {
             usize::from(
                 block
@@ -31,7 +27,7 @@ pub fn latin1_to_utf8(bytes: &[u8]) -> Cow<'_, str> {
     let mut out = String::with_capacity(bytes.len().saturating_add(wide));
     let mut span = 0;
     let mut at: usize = 0;
-    for block in bytes.chunks(BLOCK) {
+    for block in bytes.chunks(LATIN1_BLOCK) {
         let next = at.saturating_add(block.len());
         if !block.is_ascii() {
             out.push_str(ascii(bytes.get(span..at).unwrap_or_default()));
@@ -43,11 +39,11 @@ pub fn latin1_to_utf8(bytes: &[u8]) -> Cow<'_, str> {
         at = next;
     }
     out.push_str(ascii(bytes.get(span..).unwrap_or_default()));
-    Cow::Owned(out)
+    out
 }
 
-const fn unit(pair: [u8; 2]) -> u16 {
-    u16::from_le_bytes(pair)
+fn units(pairs: &[[u8; 2]]) -> impl Iterator<Item = u16> {
+    pairs.iter().map(|&pair| u16::from_le_bytes(pair))
 }
 
 #[must_use]
@@ -56,55 +52,51 @@ pub fn utf16le_to_utf8(bytes: &[u8]) -> Option<String> {
     if !rest.is_empty() {
         return None;
     }
-    if pairs.len() < BLOCK {
-        return char::decode_utf16(pairs.iter().map(|&pair| unit(pair)))
-            .collect::<Result<String, _>>()
+    if pairs.len() < UTF16_WINDOW {
+        return char::decode_utf16(units(pairs))
+            .collect::<Result<_, _>>()
             .ok();
     }
     let mut out = String::with_capacity(pairs.len());
+    let mut narrow = [0; NARROW_BYTES];
+    let mut filled: usize = 0;
     let mut cursor = pairs;
-    while let Some((&pair, after)) = cursor.split_first() {
-        let first = unit(pair);
-        if first >= 0x80 {
-            let decoded = if (0xD800..0xE000).contains(&first) {
-                let (&low, after) = after.split_first()?;
-                cursor = after;
-                let high = u32::from(first).wrapping_sub(0xD800);
-                let low = u32::from(unit(low)).wrapping_sub(0xDC00);
-                if high >= 0x400 || low >= 0x400 {
-                    return None;
-                }
-                char::from_u32(
-                    high.wrapping_shl(10)
-                        .wrapping_add(low)
-                        .wrapping_add(0x1_0000),
-                )?
-            } else {
-                cursor = after;
-                char::from_u32(u32::from(first))?
-            };
-            out.push(decoded);
-        } else if after.first().is_none_or(|&next| unit(next) >= 0x80) {
-            out.push(char::from(pair[0]));
-            cursor = after;
-        } else {
-            let block = cursor.get(..BLOCK).unwrap_or(cursor);
-            let run = if block.iter().fold(0, |any, &pair| any | unit(pair)) < 0x80 {
-                block.len()
-            } else {
-                block
-                    .iter()
-                    .position(|&pair| unit(pair) >= 0x80)
-                    .unwrap_or(block.len())
-            };
-            let mut narrow = [0; BLOCK];
-            for (slot, &[low, _]) in narrow.iter_mut().zip(block) {
+    while let Some(&first) = cursor.first() {
+        let window = cursor.get(..UTF16_WINDOW).unwrap_or(cursor);
+        let taken = if u16::from_le_bytes(first) < 0x80
+            && units(window).fold(0, |any, unit| any | unit) < 0x80
+        {
+            if filled.saturating_add(window.len()) > NARROW_BYTES {
+                out.push_str(ascii(narrow.get(..filled).unwrap_or_default()));
+                filled = 0;
+            }
+            let slots = narrow.get_mut(filled..).unwrap_or_default();
+            for (slot, &[low, _]) in slots.iter_mut().zip(window) {
                 *slot = low;
             }
-            out.push_str(ascii(narrow.get(..run).unwrap_or_default()));
-            cursor = cursor.get(run..).unwrap_or_default();
-        }
+            filled = filled.saturating_add(window.len());
+            window.len()
+        } else {
+            if filled > 0 {
+                out.push_str(ascii(narrow.get(..filled).unwrap_or_default()));
+                filled = 0;
+            }
+            // Each following window that starts outside ASCII joins the span,
+            // so a surrogate pair is never split at the span's end.
+            let mut end = window.len();
+            while let Some(&next) = cursor.get(end)
+                && u16::from_le_bytes(next) >= 0x80
+            {
+                end = end.saturating_add(UTF16_WINDOW).min(cursor.len());
+            }
+            for decoded in char::decode_utf16(units(cursor.get(..end).unwrap_or_default())) {
+                out.push(decoded.ok()?);
+            }
+            end
+        };
+        cursor = cursor.get(taken..).unwrap_or_default();
     }
+    out.push_str(ascii(narrow.get(..filled).unwrap_or_default()));
     Some(out)
 }
 
@@ -117,7 +109,6 @@ mod tests {
     #[test]
     fn latin1_maps_bytes_to_code_points() {
         assert_eq!(latin1_to_utf8(b"abc"), "abc");
-        assert!(matches!(latin1_to_utf8(b"abc"), Cow::Borrowed(_)));
         assert_eq!(latin1_to_utf8(&[0x63, 0x61, 0x66, 0xE9]), "café");
     }
 
@@ -136,33 +127,37 @@ mod tests {
     }
 
     #[test]
-    fn utf16_decodes_a_pair_across_the_block_edge() {
-        let text = format!("{}😀{}", "a".repeat(BLOCK - 1), "b".repeat(BLOCK));
+    fn utf16_decodes_a_pair_across_the_window_edge() {
+        let text = format!(
+            "{}é{}😀{}",
+            "a".repeat(UTF16_WINDOW - 2),
+            "b".repeat(UTF16_WINDOW),
+            "c".repeat(UTF16_WINDOW)
+        );
+        assert_eq!(
+            utf16(&text).get((2 * UTF16_WINDOW - 1) * 2..2 * UTF16_WINDOW * 2),
+            Some([0x3D, 0xD8].as_slice())
+        );
         assert_eq!(utf16le_to_utf8(&utf16(&text)), Some(text));
-        let mut lone = utf16(&"a".repeat(BLOCK - 1));
+        let mut lone = utf16(&format!("é{}", "a".repeat(UTF16_WINDOW - 2)));
         lone.extend_from_slice(&[0x3D, 0xD8]);
+        lone.extend(utf16(&"b".repeat(UTF16_WINDOW)));
         assert_eq!(utf16le_to_utf8(&lone), None);
     }
 
-    // Long ASCII runs with other characters between them, so whole ASCII
-    // blocks, mixed blocks and pairs on block edges all come up.
+    // ASCII runs of every length, with other characters between them, so
+    // whole ASCII blocks, mixed blocks and pairs on block edges all come up.
     fn runs<T: std::fmt::Debug>(
         other: impl Strategy<Value = Vec<T>>,
         ascii: impl Fn(u8) -> T + Clone,
     ) -> impl Strategy<Value = Vec<T>> {
-        proptest::collection::vec((0usize..80, other), 0..24).prop_map(move |segments| {
-            segments
-                .into_iter()
-                .flat_map(|(run, extra)| {
-                    b"abcdefghijklmnopqrstuvwxyz"
-                        .iter()
-                        .cycle()
-                        .take(run)
-                        .map(|&byte| ascii.clone()(byte))
-                        .chain(extra)
-                })
-                .collect()
-        })
+        proptest::collection::vec((proptest::collection::vec(0u8..0x80, 0..80), other), 0..24)
+            .prop_map(move |segments| {
+                segments
+                    .into_iter()
+                    .flat_map(|(run, extra)| run.into_iter().map(ascii.clone()).chain(extra))
+                    .collect()
+            })
     }
 
     fn units_by_char(units: &[u16]) -> Option<String> {
@@ -181,9 +176,9 @@ mod tests {
         #[test]
         fn utf16_matches_decoding_each_unit(units in runs(
             prop_oneof![
-                8 => proptest::collection::vec(0x80u16..0xD800, 1..3),
-                2 => proptest::collection::vec(0xE000u16..=0xFFFF, 1..3),
-                4 => (0xD800u16..0xDC00, 0xDC00u16..0xE000).prop_map(|(high, low)| vec![high, low]),
+                16 => proptest::collection::vec(0x80u16..0xD800, 1..3),
+                4 => proptest::collection::vec(0xE000u16..=0xFFFF, 1..3),
+                8 => (0xD800u16..0xDC00, 0xDC00u16..0xE000).prop_map(|(high, low)| vec![high, low]),
                 1 => (0xD800u16..0xE000).prop_map(|lone| vec![lone]),
             ],
             u16::from,
