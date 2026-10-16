@@ -14,7 +14,10 @@ cd crates/mini_racer_wire
 cargo "+$toolchain" fetch --locked --manifest-path fuzz/Cargo.toml
 targets=$(cargo "+$toolchain" fuzz list)
 [ -n "$targets" ] || { echo "fuzz-smoke: cargo fuzz list found no targets" >&2; exit 1; }
+# cargo fuzz defaults to the triple it was itself built for, which for a
+# prebuilt binary can be musl.
+host=$(rustc "+$toolchain" -vV | sed -n 's/^host: //p')
 for target in $targets; do
   echo "==> fuzz $target (${seconds}s)"
-  cargo "+$toolchain" fuzz run "$target" -- -max_total_time="$seconds"
+  cargo "+$toolchain" fuzz run --target "$host" "$target" -- -max_total_time="$seconds"
 done
