@@ -25,7 +25,7 @@ A release is a merged release-please PR. Merging it tags `vX.Y.Z` and publishes 
 
 ## Before the first release
 
-1. The release-kun App secrets `RELEASE_KUN_APP_ID` and `RELEASE_KUN_APP_PRIVATE_KEY`, as Actions and Dependabot secrets. Without them release-please opens its PR with `GITHUB_TOKEN`: CI never runs on it, its lockfiles stay unsynced, and the tag it makes starts no workflow, so publishing needs "Publish a tag by hand".
+1. The release-kun App secrets `RELEASE_KUN_APP_ID` and `RELEASE_KUN_APP_PRIVATE_KEY`, as Actions and Dependabot secrets. Without them the Release Please workflow only leaves a notice: workflows here may not create pull requests with `GITHUB_TOKEN`.
 2. A dry run on `main`, then a committed release/size-budget.toml with `max_bytes` set to the largest gem times 1.15, at most 75,000,000.
 3. Within 12 hours before the first tag: a pending trusted publisher on RubyGems.org for `mini_racer_rs`, repository andymai/mini_racer_rs, workflow file release.yml, environment `rubygems`. Pending publishers expire after 12 hours.
 4. Only then set `RELEASE_HOLD` to `false`.

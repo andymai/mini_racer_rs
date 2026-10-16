@@ -23,13 +23,16 @@ jobs:
       contents: write
       pull-requests: write
     env:
-      # The release-kun App identity makes release PRs trigger CI (PRs opened
-      # with GITHUB_TOKEN never do) and lets the pipeline merge them; the
-      # main ruleset asks for no approval, and nothing publishes without the
-      # rubygems environment's reviewer. Without the App secrets, the release
-      # PR opens with GITHUB_TOKEN and a human finishes it.
+      # The release-kun App opens release PRs (workflows here may not create
+      # pull requests with GITHUB_TOKEN, and PRs it opened would run no CI),
+      # and the pipeline merges them; the main ruleset asks for no approval,
+      # and nothing publishes without the rubygems environment's reviewer.
       HAS_APP: ${{ secrets.RELEASE_KUN_APP_ID != '' && secrets.RELEASE_KUN_APP_PRIVATE_KEY != '' }}
     steps:
+      - name: Wait for the release-kun App
+        if: env.HAS_APP != 'true'
+        run: echo "::notice::No release-kun App secrets, so no release PR is opened or updated."
+
       - name: Mint release-kun App token
         id: app-token
         if: env.HAS_APP == 'true'
@@ -40,8 +43,9 @@ jobs:
 
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         id: release
+        if: env.HAS_APP == 'true'
         with:
-          token: ${{ steps.app-token.outputs.token || github.token }}
+          token: ${{ steps.app-token.outputs.token }}
           manifest-file: .release-please-manifest.json
           config-file: release-please-config.json
 
