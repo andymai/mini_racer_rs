@@ -20,8 +20,11 @@ updates:
       - dependency-name: rb-sys
     open-pull-requests-limit: 5
 
+  # The transitive check's bundle stays out: it pins rtlcss exactly and takes
+  # the other two gems by path, and Dependabot evaluates path gemspecs with
+  # File.read stubbed out, which the shim's version lookup cannot survive.
   - package-ecosystem: bundler
-    directories: [/, /test/consumers/transitive]
+    directory: /
     schedule:
       interval: weekly
     cooldown:
