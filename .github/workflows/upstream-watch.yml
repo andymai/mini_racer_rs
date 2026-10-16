@@ -1,0 +1,48 @@
+name: Upstream Watch
+
+# Weekly: opens an issue from .github/upstream-release.md when RubyGems.org
+# lists a mini_racer release newer than the one tools/versions.toml targets,
+# unless an issue for that release is already open.
+
+on:
+  schedule:
+    - cron: "0 8 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  watch:
+    name: Watch mini_racer releases
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Compare with the target
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          target=$(sed -nE '/^\[upstream\.mini_racer\]$/,/^\[/{s/^tag = "v([^"]+)"$/\1/p}' tools/versions.toml)
+          latest=$(curl -fsS -A "mini_racer_rs CI (github.com/andymai/mini_racer_rs)" \
+            https://rubygems.org/api/v1/versions/mini_racer.json |
+            jq -r '.[] | select(.prerelease | not) | .number' | sort -V | tail -n 1)
+          [[ "$target" =~ ^[0-9]+(\.[0-9]+)+$ ]] || { echo "::error::no mini_racer target in tools/versions.toml"; exit 1; }
+          [[ "$latest" =~ ^[0-9]+(\.[0-9]+)+$ ]] || { echo "::error::unexpected version '$latest'"; exit 1; }
+          if [ "$(printf '%s\n%s\n' "$target" "$latest" | sort -V | tail -n 1)" = "$target" ]; then
+            echo "mini_racer $latest is not newer than the target $target."
+            exit 0
+          fi
+          title="mini_racer $latest released"
+          open=$(gh issue list --state open --search "\"$title\" in:title" --json number --jq length)
+          if [ "$open" != 0 ]; then
+            echo "An issue for mini_racer $latest is already open."
+            exit 0
+          fi
+          body=$(sed -e "s/{{ version }}/$latest/g" -e "s/{{ target }}/$target/g" .github/upstream-release.md)
+          gh issue create --title "$title" --body "$body"
