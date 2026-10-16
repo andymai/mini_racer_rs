@@ -1,6 +1,6 @@
 use magnus::value::ReprValue;
 use magnus::{Error, ExceptionClass, Module, RModule, Ruby};
-use mini_racer_engine::{EngineError, FlagError, JsErrorKind};
+use mini_racer_engine::{EngineError, FlagError, JsErrorKind, TerminationCause};
 
 use crate::gc_root::StaticRoot;
 
@@ -41,9 +41,10 @@ roots! {
     PARSE = "MiniRacer"::"ParseError";
     RUNTIME = "MiniRacer"::"RuntimeError";
     TERMINATED = "MiniRacer"::"ScriptTerminatedError";
+    OUT_OF_MEMORY = "MiniRacer"::"V8OutOfMemoryError";
     DISPOSED = "MiniRacer"::"ContextDisposedError";
     PLATFORM_INITIALIZED = "MiniRacer"::"PlatformAlreadyInitialized";
-    INTERNAL = "MiniRacerRs"::"InternalError";
+    INTERNAL = "MiniRacer"::"InternalError";
 }
 
 pub fn engine(ruby: &Ruby, error: EngineError) -> Error {
@@ -52,12 +53,23 @@ pub fn engine(ruby: &Ruby, error: EngineError) -> Error {
             let root = match js.kind {
                 JsErrorKind::Parse => &PARSE,
                 JsErrorKind::Runtime => &RUNTIME,
-                JsErrorKind::Terminated => &TERMINATED,
+                JsErrorKind::Terminated(
+                    TerminationCause::Stop
+                    | TerminationCause::Timeout
+                    | TerminationCause::Cancelled,
+                ) => &TERMINATED,
+                JsErrorKind::Terminated(
+                    TerminationCause::MaxMemory | TerminationCause::HeapExhausted,
+                ) => &OUT_OF_MEMORY,
             };
             Error::new(root.get(ruby), js.message)
         }
         EngineError::Disposed => Error::new(DISPOSED.get(ruby), "disposed context"),
         EngineError::Orphaned => Error::new(RUNTIME.get(ruby), EngineError::Orphaned.to_string()),
+        EngineError::Busy => Error::new(INTERNAL.get(ruby), EngineError::Busy.to_string()),
+        EngineError::DisposeBusy => {
+            Error::new(RUNTIME.get(ruby), EngineError::DisposeBusy.to_string())
+        }
         EngineError::Internal(message) => Error::new(INTERNAL.get(ruby), message),
     }
 }

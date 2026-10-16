@@ -1,13 +1,27 @@
 #![allow(clippy::panic, reason = "test helpers fail the test by panicking")]
 
 use mini_racer_engine::process::platform;
-use mini_racer_engine::{ContextHandle, EngineError, JsErrorKind, WaitOutcome};
+use mini_racer_engine::{
+    ContextConfig, ContextHandle, EngineError, Host, JsErrorKind, WaitHandle, WaitOutcome,
+};
+
+struct Parking;
+
+impl Host for Parking {
+    fn wait(&mut self, wait: &WaitHandle<'_>) -> WaitOutcome {
+        self.wait_blocking(wait);
+        WaitOutcome::Ready
+    }
+
+    fn wait_blocking(&mut self, wait: &WaitHandle<'_>) {
+        while !wait.ready() {
+            wait.park();
+        }
+    }
+}
 
 fn eval(context: &ContextHandle, source: &str) -> Result<Vec<u8>, EngineError> {
-    match context.eval(source.to_owned())?.wait() {
-        WaitOutcome::Done(result) => result,
-        WaitOutcome::Interrupted => panic!("nothing interrupts this wait"),
-    }
+    context.eval(source.to_owned(), &mut Parking)
 }
 
 fn runtime_error(result: Result<Vec<u8>, EngineError>) -> String {
@@ -24,7 +38,7 @@ fn flags_apply_before_initialization() {
     platform::push_flag(b"use_strict", None).expect("flag");
     platform::push_flag(b"stack_size", Some(b"4096")).expect("flag");
     assert_eq!(platform::stack_size_kb(), Some(4096));
-    let context = ContextHandle::spawn().expect("spawn");
+    let context = ContextHandle::spawn(ContextConfig::default(), &mut Parking).expect("spawn");
     assert!(runtime_error(eval(&context, "x = 1")).starts_with("ReferenceError"));
     let overflow = runtime_error(eval(&context, "function f(n) { return f(n + 1) + 1 } f(0)"));
     assert!(overflow.starts_with("RangeError"), "{overflow}");

@@ -4,7 +4,7 @@
 
 | Engine | Done | Planned | Deviation |
 |---|---|---|---|
-| CRuby | 26 | 28 | 4 |
+| CRuby | 31 | 23 | 5 |
 | TruffleRuby | 58 | 0 | 0 |
 
 ## Surface
@@ -18,7 +18,7 @@
 | `class:MiniRacer::Error < StandardError` | done | done |
 | `class:MiniRacer::EvalError < MiniRacer::Error` | done | done |
 | `class:MiniRacer::FailedV8Conversion < Object` | n/a | done |
-| `class:MiniRacer::InternalError < MiniRacer::EvalError` | planned (S2) | n/a |
+| `class:MiniRacer::InternalError < MiniRacer::EvalError` | done | n/a |
 | `class:MiniRacer::Isolate < Object` | n/a | done |
 | `class:MiniRacer::JavaScriptFunction < Object` | planned (S3) | done |
 | `class:MiniRacer::ParseError < MiniRacer::EvalError` | done | done |
@@ -41,7 +41,7 @@
 | `imethod:MiniRacer::Context#attach` | planned (S3b) | done |
 | `imethod:MiniRacer::Context#call` | planned (S3) | done |
 | `imethod:MiniRacer::Context#call_await` | planned (M4) | done |
-| `imethod:MiniRacer::Context#dispose` | planned (S2) | done |
+| `imethod:MiniRacer::Context#dispose` | done | done |
 | `imethod:MiniRacer::Context#eval` | done | done |
 | `imethod:MiniRacer::Context#eval_await` | planned (M4) | done |
 | `imethod:MiniRacer::Context#eval_in_context` | n/a | done |
@@ -52,7 +52,7 @@
 | `imethod:MiniRacer::Context#low_memory_notification` | planned (M3) | done |
 | `imethod:MiniRacer::Context#perform_microtask_checkpoint` | planned (M4) | n/a |
 | `imethod:MiniRacer::Context#pump_message_loop` | planned (M4) | n/a |
-| `imethod:MiniRacer::Context#stop` | planned (S2) | done |
+| `imethod:MiniRacer::Context#stop` | done | done |
 | `imethod:MiniRacer::Context#write_heap_snapshot` | planned (M3) | done |
 | `imethod:MiniRacer::FailedV8Conversion#info` | n/a | done |
 | `imethod:MiniRacer::Isolate#init_with_snapshot` | n/a | done |
@@ -70,10 +70,10 @@
 | `kwarg:MiniRacer::Context#eval_await:filename` | planned (M4) | n/a |
 | `kwarg:MiniRacer::Context#initialize:ensure_gc_after_idle` | planned (M3) | done |
 | `kwarg:MiniRacer::Context#initialize:isolate` | n/a | done |
-| `kwarg:MiniRacer::Context#initialize:marshal_stack_depth` | planned (S2) | done |
+| `kwarg:MiniRacer::Context#initialize:marshal_stack_depth` | done | done |
 | `kwarg:MiniRacer::Context#initialize:max_memory` | planned (M3) | done |
 | `kwarg:MiniRacer::Context#initialize:snapshot` | planned (S3b) | done |
-| `kwarg:MiniRacer::Context#initialize:timeout` | planned (S2) | done |
+| `kwarg:MiniRacer::Context#initialize:timeout` | done | done |
 | `kwarg:MiniRacer::Context#initialize:verbose_exceptions` | planned (M3) | n/a |
 | `module:MiniRacer` | done | done |
 | `module:MiniRacer::Loader` | deviation | n/a |
@@ -87,6 +87,12 @@
 ### `behavior:platforms@ruby`
 
 mini_racer_rs supports glibc Linux on x86_64 and aarch64, plus macOS on arm64 and x86_64. Installation stops on musl-based Linux, including Alpine, and on Windows, with a message naming the supported platforms.
+
+Pending review.
+
+### `behavior:timeout-watchdog@ruby`
+
+mini_racer_rs raises MiniRacer::InternalError when its single process-wide watchdog thread cannot start, and the timed script does not run. mini_racer 0.22.1 starts a watchdog thread for each eval or call on a context created with timeout:; if creation fails, it prints mini_racer: watchdog: pthread_create: <error> to stderr and runs the script without a time limit. This difference prevents a failed watchdog from silently removing the bound often placed on untrusted JavaScript.
 
 Pending review.
 

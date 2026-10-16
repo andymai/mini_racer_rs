@@ -15,7 +15,7 @@ class VocabularyTest < Minitest::Test
     MiniRacer::RuntimeError => MiniRacer::EvalError,
     MiniRacer::ScriptError => MiniRacer::EvalError,
     MiniRacer::SnapshotError => MiniRacer::Error,
-    MiniRacerRs::InternalError => MiniRacer::Error,
+    MiniRacer::InternalError => MiniRacer::EvalError,
   }.freeze
 
   def test_error_hierarchy_matches_upstream

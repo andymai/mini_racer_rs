@@ -70,6 +70,28 @@ pub fn check_ints(_ruby: &Ruby) -> Result<(), Error> {
     .map(|_| ())
 }
 
+// Mutex#lock releases the GVL while it waits and runs interrupts; magnus wraps
+// it in protect, so a Thread#kill comes back as the Err (I6).
+pub fn mutex_lock(_ruby: &Ruby, mutex: magnus::Mutex) -> Result<(), Error> {
+    mutex.lock()
+}
+
+// Ruby's GC cannot see an isolate's native memory, so it is reported here;
+// without it, contexts left to finalizers pile up between collections.
+pub fn adjust_memory(_ruby: &Ruby, bytes: isize) {
+    // SAFETY: the `&Ruby` argument proves this thread holds the GVL.
+    unsafe { rb_sys::rb_gc_adjust_memory_usage(rb_sys::ssize_t::try_from(bytes).unwrap_or(0)) };
+}
+
+/// For a free function, which runs with the GVL held but no `Ruby` handle.
+/// Only decreases are allowed there, and they never start a collection.
+pub fn release_memory(bytes: usize) {
+    let diff = rb_sys::ssize_t::try_from(bytes).map_or(0, |n| -n);
+    // SAFETY: free functions run during GC with the GVL held, and a negative
+    // adjustment only lowers the malloc counter without triggering GC.
+    unsafe { rb_sys::rb_gc_adjust_memory_usage(diff) };
+}
+
 pub fn dbl2big(_ruby: &Ruby, n: f64) -> Value {
     // SAFETY: rb_dbl2big allocates a Bignum and requires the GVL, which the
     // `&Ruby` argument proves this thread holds.

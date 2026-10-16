@@ -46,17 +46,21 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | Flag normalization, single-threaded detection, stack size | `crates/mini_racer_engine/src/process/platform.rs` |
 | V8 initialization and version | `crates/mini_racer_engine/src/process.rs` |
 | Runner thread, script evaluation, serialization | `crates/mini_racer_engine/src/runner.rs` |
-| Context handle, waiting, termination, fork guard | `crates/mini_racer_engine/src/context.rs` |
+| Context handle, dispatch, the `Host` wait contract, stop, dispose, fork guard | `crates/mini_racer_engine/src/context.rs` |
+| Control block shared by a handle and its runner, request types, context config | `crates/mini_racer_engine/src/control.rs` |
+| Timeout watchdog thread | `crates/mini_racer_engine/src/process/watchdog.rs` |
 | Engine errors | `crates/mini_racer_engine/src/error.rs` |
 | `madvise` wrapper (fork safety) | `crates/mini_racer_engine/src/sys.rs`, `crates/mini_racer_engine/build.rs` |
 | Wire decoding and text transcoding | `crates/mini_racer_wire/src/decode.rs`, `crates/mini_racer_wire/src/text.rs` |
 | Wire fuzz targets | `crates/mini_racer_wire/fuzz/fuzz_targets/`, `scripts/fuzz-smoke.sh` |
-| Runner-to-caller result handoff, mutex poison policy | `crates/mini_racer_sync/src/handoff.rs`, `crates/mini_racer_sync/src/lock.rs` |
+| Mutex poison policy | `crates/mini_racer_sync/src/lock.rs` |
 | Turn-taking channel between a Ruby thread and a runner, parking | `crates/mini_racer_sync/src/channel.rs`, `crates/mini_racer_sync/src/parker.rs` |
 | Termination causes, stop consumption, timeout scoping | `crates/mini_racer_sync/src/termination.rs` |
 | std or loom primitives for protocol code | `crates/mini_racer_sync/src/primitives.rs` |
 | Loom models | `crates/mini_racer_sync/tests/loom.rs` |
-| `MiniRacer::Context` methods | `ext/mini_racer_rs/src/context.rs` |
+| `MiniRacer::Context` methods, per-context lock | `ext/mini_racer_rs/src/context.rs` |
+| Waiting from a Ruby thread: spin, GVL release, park, interrupts | `ext/mini_racer_rs/src/host.rs` |
+| `Context.new` option rules (Ruby-free) | `ext/mini_racer_rs/src/options.rs` |
 | `MiniRacer::Platform.set_flags!` | `ext/mini_racer_rs/src/platform.rs` |
 | JavaScript to Ruby values | `ext/mini_racer_rs/src/decode.rs` |
 | Error class mapping | `ext/mini_racer_rs/src/errors.rs` |
@@ -77,6 +81,7 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | Consumer workloads (Babel, Terser, Handlebars, React) and their ledger | `test/consumers/workloads.rb`, `test/consumers/js/`, `test/consumers/candidate.status.toml` |
 | rtlcss resolving through the shim to mini_racer_rs | `test/consumers/transitive/` |
 | Benchmarks against the real gem (informational) | `bench/run.rb`, `bench/measure.rb`, `bench/payload.rb` |
+| Memory and lifecycle stress runs | `test/stress/round_trips.rb`, `test/stress/churn.rb` |
 | Differential ledgers and corpus | `test/diff/candidate.status.toml`, `test/diff/divergences.toml`, `test/diff/corpus/` |
 | Vendored TruffleRuby backend | `lib/mini_racer/truffleruby.rb`, `lib/mini_racer/shared.rb` |
 | Public surface status per id, deviation reasons | `compat.toml`, `compat/surface.json` |
@@ -110,6 +115,8 @@ bundle exec ruby test/diff/run.rb --twin --strict   # the real gem and this one 
 bundle exec ruby test/diff/run.rb --set consumers --twin --strict   # real libraries (npm run build in test/consumers/js first)
 BUNDLE_GEMFILE=$PWD/test/consumers/transitive/Gemfile bundle exec ruby test/consumers/transitive/check.rb
 bundle exec ruby bench/run.rb     # medians against the real gem; --quick for a smoke run
+bundle exec ruby -Ilib test/stress/round_trips.rb   # 1M evals after a 500k warm-up; fails on RSS growth over 5%
+bundle exec ruby -Ilib test/stress/churn.rb 8 600   # 8 threads creating, evaluating and releasing contexts for 10 min
 ```
 
 ## Which tests to run
@@ -117,7 +124,7 @@ bundle exec ruby bench/run.rb     # medians against the real gem; --quick for a 
 - `crates/mini_racer_wire`: `cargo nextest run -p mini_racer_wire`, then `scripts/fuzz-smoke.sh 20`.
 - `crates/mini_racer_sync`: `cargo nextest run -p mini_racer_sync`, then the loom command above.
 - `crates/mini_racer_engine`: `cargo nextest run -p mini_racer_engine`. Flag-dependent assertions live in `crates/mini_racer_engine/tests/flags.rs`, one test per process.
-- `ext/` or `lib/`: `bundle exec rake test`, then `scripts/check-exports.sh`, then `bundle exec ruby test/upstream/run.rb --strict` with and without `--suite execjs`, then `bundle exec ruby test/diff/run.rb --strict` with and without `--set consumers`, then `bundle exec rake compat:check`.
+- `ext/` or `lib/`: `cargo test -p mini_racer_rs --lib` (the Ruby-free option rules and number classification), `bundle exec rake test`, then `scripts/check-exports.sh`, then `bundle exec ruby test/upstream/run.rb --strict` with and without `--suite execjs`, then `bundle exec ruby test/diff/run.rb --strict` with and without `--set consumers`, then `bundle exec rake compat:check`.
 - `compat.toml`: `bundle exec rake compat:render`, then `bundle exec rake compat:check`.
 - `scripts/`, `layers.toml`, any `Cargo.toml`: `scripts/check-boundaries.sh`, `scripts/test-boundaries.sh` and `scripts/check-deny.sh`.
 - `.github/`: `scripts/check-action-pins.sh`.

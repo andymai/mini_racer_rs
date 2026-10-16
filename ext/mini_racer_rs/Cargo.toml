@@ -20,6 +20,7 @@ magnus.workspace = true
 mini_racer_engine.workspace = true
 mini_racer_wire.workspace = true
 rb-sys.workspace = true
+thiserror.workspace = true
 
 [lints]
 workspace = true

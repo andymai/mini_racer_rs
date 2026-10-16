@@ -13,11 +13,11 @@ end
 
 require_relative "mini_racer_rs/version"
 require_relative "mini_racer_rs/vocabulary"
-require_relative "mini_racer_rs/internal_error"
 
 if RUBY_ENGINE == "truffleruby"
   require_relative "mini_racer/truffleruby"
 else
+  require_relative "mini_racer_rs/internal_error"
   native = ["#{RUBY_VERSION[/\A\d+\.\d+/]}/mini_racer_rs", "mini_racer_rs"].find do |name|
     File.file?(File.join(__dir__, "mini_racer_rs", "#{name}.#{RbConfig::CONFIG["DLEXT"]}"))
   end

@@ -266,8 +266,8 @@ jobs:
           ruby: "3.4"
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
-  # The extension crate is excluded: its test binary would need libruby linked.
-  # Ruby-level behaviour is covered by the ruby job.
+  # The extension crate is excluded: its test binary links libruby, so its
+  # unit tests run in the Ruby jobs.
   rust-test:
     name: Rust Tests
     needs: changes
@@ -405,6 +405,8 @@ jobs:
             exit 1
           fi
       - run: bundle exec rake test
+      - name: Extension unit tests
+        run: cargo test -p mini_racer_rs --lib --locked
       - name: Compatibility ledger
         run: bundle exec rake compat:check
       - name: Install the real mini_racer 0.22.1

@@ -3,6 +3,8 @@ mod decode;
 mod errors;
 mod gc_root;
 mod guard;
+mod host;
+mod options;
 mod platform;
 #[allow(
     unsafe_code,

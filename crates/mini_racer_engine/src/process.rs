@@ -1,4 +1,5 @@
 pub mod platform;
+pub(crate) mod watchdog;
 
 use std::sync::Once;
 
