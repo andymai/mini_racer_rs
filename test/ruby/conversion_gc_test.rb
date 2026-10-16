@@ -73,6 +73,20 @@ class ConversionGcTest < Minitest::Test
     assert_equal [5, true, [1, "two"], ["x"], [3, "four"], "caf\u00e9", true, true], result
   end
 
+  # Only the context holds the callable, and its arguments and result exist
+  # only while the callback runs.
+  def test_callbacks_survive_collections_and_moves
+    @context.attach("pair", proc { |a, b| [{ "a" => a, "b" => b, "text" => +"caf\u00e9" }, a] })
+    GC.verify_compaction_references(expand_heap: true, toward: :empty)
+    result = stressed do
+      @context.eval("(() => { const s = {k: [1, 'two']}; const r = pair(s, s); return [r, r[0].a === r[1]] })()")
+    end
+
+    shared = { "k" => [1, "two"] }
+
+    assert_equal [[{ "a" => shared, "b" => shared, "text" => "caf\u00e9" }, shared], true], result
+  end
+
   private
 
   # Built here so the nested values are reachable only through their parents,

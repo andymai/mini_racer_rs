@@ -4,7 +4,9 @@
 use std::error::Error;
 use std::path::Path;
 
-use mini_racer_engine::{ContextConfig, ContextHandle, Host, WaitHandle, WaitOutcome};
+use mini_racer_engine::{
+    CallbackReply, ContextConfig, ContextHandle, Host, WaitHandle, WaitOutcome,
+};
 
 struct Parking;
 
@@ -18,6 +20,10 @@ impl Host for Parking {
         while !wait.ready() {
             wait.park();
         }
+    }
+
+    fn callback(&mut self, _request: &[u8]) -> CallbackReply {
+        CallbackReply::Abort
     }
 }
 

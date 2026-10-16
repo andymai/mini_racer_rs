@@ -2,7 +2,8 @@
 
 use mini_racer_engine::process::platform;
 use mini_racer_engine::{
-    ContextConfig, ContextHandle, EngineError, Host, JsErrorKind, WaitHandle, WaitOutcome,
+    CallbackReply, ContextConfig, ContextHandle, EngineError, Host, JsErrorKind, WaitHandle,
+    WaitOutcome,
 };
 
 struct Parking;
@@ -17,6 +18,10 @@ impl Host for Parking {
         while !wait.ready() {
             wait.park();
         }
+    }
+
+    fn callback(&mut self, _request: &[u8]) -> CallbackReply {
+        CallbackReply::Abort
     }
 }
 

@@ -17,6 +17,9 @@ pub enum JsErrorKind {
     /// V8 could not read the request itself.
     Internal,
     Terminated(TerminationCause),
+    /// The exception escaping the dispatch is the one V8 threw for a raising
+    /// callback, so the caller raises the Ruby exception it kept instead.
+    HostException,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

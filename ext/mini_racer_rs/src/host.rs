@@ -1,10 +1,15 @@
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use magnus::{Error, Ruby};
-use mini_racer_engine::{Host, WaitHandle, WaitOutcome};
+use magnus::error::ErrorType;
+use magnus::value::ReprValue;
+use magnus::{Class, Error, Exception, Integer, RArray, RString, Ruby, Value};
+use mini_racer_engine::{
+    CallbackReply, EngineError, Host, JsError, JsErrorKind, JsText, WaitHandle, WaitOutcome,
+};
 
-use crate::{errors, rb_raw};
+use crate::encode::{self, EncodeError};
+use crate::{context, decode, errors, rb_raw};
 
 struct SpinBudget {
     gvl: Duration,
@@ -33,10 +38,15 @@ fn budget() -> &'static SpinBudget {
 /// Waits for a runner from a Ruby thread: spins holding the GVL, then releases
 /// it, spins and parks. A Ruby interrupt wakes the park; traps run and the wait
 /// goes on, while an exception (Timeout, Thread#raise, #kill) cancels the
-/// dispatch and is raised once the engine has its response.
+/// dispatch and is raised once the engine has its response. Callbacks run the
+/// context's attached callables.
 pub struct RubyHost<'r> {
     ruby: &'r Ruby,
     pending: Option<Error>,
+    callables: Option<RArray>,
+    // The exception the latest callback raised, raised again if V8 reports
+    // that it escaped, as mini_racer keeps one per dispatch.
+    raised: Option<Error>,
 }
 
 impl<'r> RubyHost<'r> {
@@ -44,14 +54,77 @@ impl<'r> RubyHost<'r> {
         Self {
             ruby,
             pending: None,
+            callables: None,
+            raised: None,
         }
     }
 
-    /// The Ruby exception that cancelled the dispatch; it outranks whatever the
-    /// engine returned.
-    pub fn finish<T>(self, result: Result<T, Error>) -> Result<T, Error> {
-        self.pending.map_or(result, Err)
+    pub const fn with_callables(ruby: &'r Ruby, callables: RArray) -> Self {
+        Self {
+            ruby,
+            pending: None,
+            callables: Some(callables),
+            raised: None,
+        }
     }
+
+    /// The Ruby exception that cancelled the dispatch outranks whatever the
+    /// engine returned.
+    pub fn finish<T>(self, result: Result<T, EngineError>) -> Result<T, Error> {
+        if let Some(pending) = self.pending {
+            return Err(pending);
+        }
+        match (result, self.raised) {
+            (
+                Err(EngineError::Js(JsError {
+                    kind: JsErrorKind::HostException,
+                    ..
+                })),
+                Some(raised),
+            ) => Err(raised),
+            (result, _) => result.map_err(|error| errors::engine(self.ruby, error)),
+        }
+    }
+
+    // mini_racer's order: the id comes off the end of the arguments, and a
+    // reply it cannot send raises its internal error with the encoder's text.
+    fn run(&self, request: &[u8]) -> Result<Vec<u8>, Error> {
+        let ruby = self.ruby;
+        let bad = || errors::runtime(ruby, "bad callback id");
+        let args = RArray::from_value(decode::value(ruby, request)?).ok_or_else(bad)?;
+        let id = Integer::from_value(args.pop::<Value>()?).ok_or_else(bad)?;
+        let id = isize::try_from(id.to_i64()?).map_err(|_| bad())?;
+        let callables = self.callables.ok_or_else(bad)?;
+        if id < 0 || id.cast_unsigned() >= callables.len() {
+            return Err(bad());
+        }
+        let callable = callables.entry::<Value>(id)?;
+        let result = rb_raw::call_with_array(ruby, callable, args)?;
+        encode::encode(ruby, result).map_err(|error| match error {
+            EncodeError::Unsupported(message) => errors::internal(ruby, message),
+            EncodeError::Raised(error) => error,
+        })
+    }
+}
+
+fn exception(ruby: &Ruby, error: &Error) -> Option<Exception> {
+    match error.error_type() {
+        ErrorType::Jump(_) => None,
+        ErrorType::Exception(exception) => Some(*exception),
+        ErrorType::Error(class, message) => class
+            .new_instance((ruby.str_new(message),))
+            .map_or_else(|error| exception(ruby, &error), Some),
+    }
+}
+
+// What V8 throws for a raising callback: the exception's to_s, in its own
+// encoding, or mini_racer's fallback text.
+fn message(ruby: &Ruby, exception: Exception) -> JsText {
+    exception
+        .funcall::<_, _, RString>("to_s", ())
+        .ok()
+        .and_then(|text| context::js_text(ruby, text).ok())
+        .unwrap_or_else(|| JsText::from("Ruby exception"))
 }
 
 impl Host for RubyHost<'_> {
@@ -105,5 +178,21 @@ impl Host for RubyHost<'_> {
                 self.pending.get_or_insert(error);
             }
         }
+    }
+
+    // A throw or Thread#kill out of the callable aborts the dispatch and
+    // resumes once it is over.
+    fn callback(&mut self, request: &[u8]) -> CallbackReply {
+        let error = match self.run(request) {
+            Ok(reply) => return CallbackReply::Value(reply),
+            Err(error) => error,
+        };
+        let Some(exception) = exception(self.ruby, &error) else {
+            self.pending.get_or_insert(error);
+            return CallbackReply::Abort;
+        };
+        let message = message(self.ruby, exception);
+        self.raised = Some(Error::from(exception));
+        CallbackReply::Raised(message)
     }
 }

@@ -17,13 +17,24 @@ module DiffShapes
   # mini_racer resolves V8's back references against a shorter list, so where
   # the candidate returns an object it already returned, the reference has nil,
   # an object it already returned, or the empty Array it holds an error's place
-  # with. Every other part must be equal.
-  def lost_reference?(expected, actual)
-    return true if expected == actual
+  # with. Neither gem sends a repeated Time to JavaScript as a back reference,
+  # so a Date that went through a callback comes back as an equal Time instead.
+  # Every other part must be equal.
+  def lost_reference?(expected, actual, seen = [])
+    if expected == actual
+      collect(actual, seen)
+      return true
+    end
     return lost?(expected) if repeat?(actual)
+    return lost?(expected) if actual.is_a?(Array) && actual.first == "time" && seen.include?(actual)
     return false unless expected.is_a?(Array) && actual.is_a?(Array) && expected.size == actual.size
 
-    expected.zip(actual).all? { |want, got| lost_reference?(want, got) }
+    expected.zip(actual).all? { |want, got| lost_reference?(want, got, seen) }.tap { seen << actual }
+  end
+
+  def collect(node, seen)
+    seen << node
+    node.each { |child| collect(child, seen) if child.is_a?(Array) } if node.is_a?(Array)
   end
 
   def repeat?(node)

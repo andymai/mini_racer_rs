@@ -65,6 +65,11 @@ pub fn engine(ruby: &Ruby, error: EngineError) -> Error {
                 JsErrorKind::Terminated(
                     TerminationCause::MaxMemory | TerminationCause::HeapExhausted,
                 ) => &OUT_OF_MEMORY,
+                // mini_racer raises its disposed error when a callback's
+                // exception escapes but none is kept for it.
+                JsErrorKind::HostException => {
+                    return raised(ruby, DISPOSED.get(ruby), "disposed context");
+                }
             };
             Error::new(root.get(ruby), js.message)
         }
@@ -119,6 +124,6 @@ pub fn runtime(ruby: &Ruby, message: impl AsRef<[u8]>) -> Error {
     raised(ruby, RUNTIME.get(ruby), message)
 }
 
-pub fn internal(ruby: &Ruby, message: &str) -> Error {
+pub fn internal(ruby: &Ruby, message: impl AsRef<[u8]>) -> Error {
     raised(ruby, INTERNAL.get(ruby), message)
 }

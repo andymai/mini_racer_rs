@@ -4,7 +4,7 @@
 
 | Engine | Done | Planned | Deviation |
 |---|---|---|---|
-| CRuby | 35 | 19 | 10 |
+| CRuby | 36 | 18 | 12 |
 | TruffleRuby | 58 | 0 | 0 |
 
 ## Surface
@@ -38,7 +38,7 @@
 | `feature:json` | done | done |
 | `feature:pathname` | done | done |
 | `imethod:MiniRacer::Binary#data` | done | done |
-| `imethod:MiniRacer::Context#attach` | planned (S3b) | done |
+| `imethod:MiniRacer::Context#attach` | done | done |
 | `imethod:MiniRacer::Context#call` | done | done |
 | `imethod:MiniRacer::Context#call_await` | planned (M4) | done |
 | `imethod:MiniRacer::Context#dispose` | done | done |
@@ -87,6 +87,18 @@
 ### `behavior:bigint-objects@ruby`
 
 mini_racer_rs returns a BigInt wrapper object's wrapped value as an Integer: `Object(1n)` returns `1`, and `[Object(-5n)]` returns `[-5]`. mini_racer 0.22.1 instead raises `MiniRacer::RuntimeError` with the message `bad tag: z`. Returning the primitive value makes BigInt wrappers consistent with Boolean, Number, and String wrapper objects, which both gems already return as their primitive values.
+
+Pending review.
+
+### `behavior:callback-error-text@ruby`
+
+When a callback attached with `Context#attach` raises, JavaScript receives an `Error` whose message is the Ruby exception's `to_s`, but the gems handle non-ASCII text differently. mini_racer_rs gives V8 the text in the string's own encoding: UTF-8 as UTF-8, ISO-8859-1 as Latin-1, and UTF-16LE as two-byte text. mini_racer 0.22.1 gives V8 the string's bytes as Latin-1, whatever their encoding. With a callback `t` that raises `"café"`, `try { t() } catch (e) { e.message }` returns `"café"` from mini_racer_rs and `"cafÃ©"` from mini_racer 0.22.1. A UTF-16LE message has a NUL after each letter in mini_racer 0.22.1. ASCII messages are identical. If JavaScript does not catch the exception, both gems raise the original Ruby exception from `eval` or `call`, with its message unchanged.
+
+Pending review.
+
+### `behavior:callback-jump@ruby`
+
+mini_racer_rs terminates the JavaScript execution with `Error: terminated` when a callback attached with `Context#attach` leaves by `throw` or `Thread#kill`, then continues the throw or kill after `Context#eval` or `Context#call` returns. The context remains usable. For example, `catch(:out) { context.eval("thrower(); 'not reached'") }` returns `5` when `thrower` calls `throw :out, 5`. With mini_racer 0.22.1, the same throw never returns, and the process hangs until it is killed. If the callback calls `Thread.current.kill`, mini_racer_rs ends the thread, while mini_racer 0.22.1 instead makes `Context#eval` raise `TypeError` with the message `exception class/object expected`, and the thread is not killed.
 
 Pending review.
 

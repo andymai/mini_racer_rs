@@ -1,11 +1,13 @@
+use std::cell::RefCell;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use mini_racer_sync::{DispatchId, DispatchKind, Halt, Side, TermCell, TerminationCause, ToV8};
+use mini_racer_sync::{DispatchKind, Halt, Side, TerminationCause, ToV8};
 use v8::ValueDeserializerHelper;
 
-use crate::control::{ControlBlock, IsolateTerminator, JsText, Request};
+use crate::control::{CallbackReply, ControlBlock, Depth, IsolateTerminator, JsText, Request};
 use crate::serialize::{self, Filter, Tc};
 use crate::spin::spin_until;
 use crate::{EngineError, JsError, JsErrorKind};
@@ -23,6 +25,16 @@ impl Drop for Closing<'_> {
         self.0.term.uninstall();
         self.0.channel.close();
     }
+}
+
+// What a callback needs to reach from inside V8, kept in an isolate slot.
+struct Runtime {
+    block: Arc<ControlBlock>,
+    context: v8::Global<v8::Context>,
+    filter: Filter,
+    // The exception last thrown for a raising callback; mini_racer keeps one
+    // per isolate and compares what escapes a dispatch against it.
+    raised: RefCell<Option<v8::Global<v8::Value>>>,
 }
 
 pub fn run(block: &Arc<ControlBlock>) {
@@ -44,71 +56,99 @@ pub fn run(block: &Arc<ControlBlock>) {
 }
 
 // Returns whether it stopped for an explicit dispose.
-fn serve(block: &ControlBlock) -> bool {
+fn serve(block: &Arc<ControlBlock>) -> bool {
     let mut isolate = v8::Isolate::new(v8::CreateParams::default());
     let contexts = {
         v8::scope!(let scope, &mut isolate);
         serialize::contexts(scope)
     };
     let Some((context, filter)) = contexts else {
-        if next(block).is_some() {
+        if receive(block).is_some() {
             let _ = block.channel.respond(Err(EngineError::Internal(
                 "context setup failed".to_owned(),
             )));
         }
         return false;
     };
+    let runtime = Rc::new(Runtime {
+        block: Arc::clone(block),
+        context,
+        filter,
+        raised: RefCell::default(),
+    });
+    isolate.set_slot(Rc::clone(&runtime));
     // Installed only once the context exists, so nothing terminates its setup.
     block
         .term
         .install(IsolateTerminator(isolate.thread_safe_handle()));
     let disposed = loop {
-        let Some(request) = next(block) else {
-            break false;
+        let request = match receive(block) {
+            Some(ToV8::Request(Request::Dispose)) => break true,
+            Some(ToV8::Request(request)) => request,
+            // No callback is outstanding here, so there is nothing to reply to.
+            Some(ToV8::Reply(_)) => continue,
+            None => break false,
         };
-        let response = match request {
-            Request::Init { dispatch } => match block.term.end(dispatch) {
-                Some(_) => Err(EngineError::Disposed),
-                None => Ok(Vec::new()),
-            },
-            Request::Eval {
-                filename,
-                source,
-                dispatch,
-            } => {
-                v8::scope_with_context!(let scope, &mut isolate, &context);
-                script(scope, &block.term, dispatch, |tc| {
-                    evaluate(tc, &filter, &filename, &source)
-                })
-            }
-            Request::Call { request, dispatch } => {
-                v8::scope_with_context!(let scope, &mut isolate, &context);
-                script(scope, &block.term, dispatch, |tc| {
-                    invoke(tc, &filter, &request)
-                })
-            }
-            Request::Dispose => break true,
+        let response = {
+            v8::scope_with_context!(let scope, &mut isolate, &runtime.context);
+            handle(scope, &runtime, request)
         };
         if block.channel.respond(response).is_err() {
             break false;
         }
     };
     block.term.uninstall();
-    drop(filter);
-    drop(context);
+    drop(isolate.remove_slot::<Rc<Runtime>>());
+    drop(runtime);
     drop(isolate);
     disposed
 }
 
-fn next(block: &ControlBlock) -> Option<Request> {
+fn receive(block: &ControlBlock) -> Option<ToV8<crate::control::Wire>> {
     spin_until(IDLE_SPIN, || block.channel.ready(Side::V8));
     loop {
         match block.channel.recv_v8() {
-            Ok(Some(ToV8::Request(request))) => return Some(request),
-            Ok(Some(ToV8::Reply(reply))) => match reply {},
+            Ok(Some(message)) => return Some(message),
             Ok(None) => block.channel.park(Side::V8, None),
             Err(_) => return None,
         }
+    }
+}
+
+// Requests from the top of the runner loop and from inside a callback alike.
+fn handle(
+    scope: &mut v8::PinScope<'_, '_>,
+    runtime: &Runtime,
+    request: Request,
+) -> Result<Vec<u8>, EngineError> {
+    match request {
+        Request::Init { depth } => match depth {
+            Depth::Outermost(dispatch) => match runtime.block.term.end(dispatch) {
+                Some(_) => Err(EngineError::Disposed),
+                None => Ok(Vec::new()),
+            },
+            Depth::Nested => Err(EngineError::Busy),
+        },
+        Request::Eval {
+            filename,
+            source,
+            depth,
+        } => script(scope, runtime, depth, DispatchKind::Script, |tc| {
+            evaluate(tc, &runtime.filter, &filename, &source)
+        }),
+        Request::Call { request, depth } => {
+            script(scope, runtime, depth, DispatchKind::Script, |tc| {
+                invoke(tc, &runtime.filter, &request)
+            })
+        }
+        Request::Attach { request, depth } => {
+            script(scope, runtime, depth, DispatchKind::Maintenance, |tc| {
+                attach(tc, &request)
+            })
+        }
+        // The extension refuses a dispose from inside a callback before it
+        // gets here.
+        Request::Dispose => Err(EngineError::DisposeBusy),
     }
 }
 
@@ -120,22 +160,48 @@ fn halted(halt: Halt) -> EngineError {
     }
 }
 
-// Runs a script dispatch: nothing starts once it is halted, and serializing
-// runs getters, so the dispatch stays armed through `run`; the verdict then
-// replaces whatever the script produced.
+// Runs a dispatch: nothing starts once it is halted, and serializing runs
+// getters, so an outermost dispatch stays armed through `run`; the verdict then
+// replaces whatever the script produced. A nested dispatch reports a halt but
+// leaves its cause to the dispatch it runs in. An exception that escapes as
+// the one a raising callback threw takes precedence, as in mini_racer.
 fn script(
     scope: &mut v8::PinScope<'_, '_>,
-    term: &TermCell<IsolateTerminator>,
-    dispatch: DispatchId,
+    runtime: &Runtime,
+    depth: Depth,
+    kind: DispatchKind,
     run: impl FnOnce(&mut Tc<'_, '_, '_, '_>) -> Result<Vec<u8>, EngineError>,
 ) -> Result<Vec<u8>, EngineError> {
+    let term = &runtime.block.term;
     v8::tc_scope!(let tc, scope);
-    let result = if term.check(DispatchKind::Script).is_some() {
+    let result = if term.check(kind).is_some() {
         Err(EngineError::Internal("halted without a cause".to_owned()))
     } else {
         run(tc)
     };
-    term.end(dispatch).map_or(result, |halt| Err(halted(halt)))
+    let raised = result.is_err() && kind == DispatchKind::Script && escaped(tc, runtime);
+    let halt = match depth {
+        Depth::Outermost(dispatch) => term.end(dispatch),
+        Depth::Nested => term.check(kind),
+    };
+    if raised {
+        return Err(EngineError::from(JsError {
+            kind: JsErrorKind::HostException,
+            message: String::new(),
+        }));
+    }
+    halt.map_or(result, |halt| Err(halted(halt)))
+}
+
+fn escaped(tc: &Tc<'_, '_, '_, '_>, runtime: &Runtime) -> bool {
+    let Some(exception) = tc.exception() else {
+        return false;
+    };
+    runtime
+        .raised
+        .borrow()
+        .as_ref()
+        .is_some_and(|raised| v8::Local::new(tc, raised).same_value(exception))
 }
 
 fn evaluate(
@@ -215,6 +281,166 @@ fn invoke(
     serialize::reply(tc, filter, value).ok_or_else(|| runtime(tc))
 }
 
+// mini_racer's attach: any failure is an internal error. Each dotted segment
+// but the last that is not an object or function becomes a new object, and
+// the callback is set on the last.
+fn attach(tc: &Tc<'_, '_, '_, '_>, request: &[u8]) -> Result<Vec<u8>, EngineError> {
+    let context = tc.get_current_context();
+    let internal = |tc: &Tc<'_, '_, '_, '_>| failure(tc, JsErrorKind::Internal);
+    let deserializer = v8::ValueDeserializer::new(tc, Box::new(Reader), request);
+    if deserializer.read_header(context) != Some(true) {
+        return Err(internal(tc));
+    }
+    let request = deserializer
+        .read_value(context)
+        .and_then(|request| request.to_object(tc))
+        .ok_or_else(|| internal(tc))?;
+    let path = request
+        .get_index(tc, 0)
+        .and_then(|name| name.to_string(tc))
+        .ok_or_else(|| internal(tc))?
+        .to_rust_string_lossy(tc);
+    let id = request
+        .get_index(tc, 1)
+        .filter(|id| id.is_int32())
+        .ok_or_else(|| internal(tc))?;
+    let mut object = context.global(tc);
+    let mut keys = path.split('.').peekable();
+    while let Some(key) = keys.next() {
+        let key = v8::String::new(tc, key).ok_or_else(|| internal(tc))?;
+        if keys.peek().is_none() {
+            let function = v8::Function::builder(trampoline)
+                .data(id)
+                .build(tc)
+                .ok_or_else(|| internal(tc))?;
+            if object.set(tc, key.into(), function.into()) != Some(true) {
+                return Err(internal(tc));
+            }
+            break;
+        }
+        let value = object.get(tc, key.into()).ok_or_else(|| internal(tc))?;
+        object = if let Ok(inner) = v8::Local::<v8::Object>::try_from(value) {
+            inner
+        } else {
+            let inner = v8::Object::new(tc);
+            if object.set(tc, key.into(), inner.into()) != Some(true) {
+                return Err(internal(tc));
+            }
+            inner
+        };
+    }
+    Ok(Vec::new())
+}
+
+// An attached function: its arguments go to Ruby with its id, and requests
+// Ruby makes meanwhile are served here until the reply comes. A panic closes
+// the channel, as one in the runner loop does.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the signature V8 calls a function callback with"
+)]
+fn trampoline<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: v8::FunctionCallbackArguments<'s>,
+    rv: v8::ReturnValue<'s, v8::Value>,
+) {
+    let Some(runtime) = scope.get_slot::<Rc<Runtime>>().cloned() else {
+        return;
+    };
+    let outcome = catch_unwind(AssertUnwindSafe(|| callback(scope, &runtime, &args, rv)));
+    if outcome.is_err() {
+        scope.terminate_execution();
+        runtime.block.channel.close();
+    }
+}
+
+fn callback<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    runtime: &Runtime,
+    args: &v8::FunctionCallbackArguments<'s>,
+    mut rv: v8::ReturnValue<'s, v8::Value>,
+) {
+    let count = args.length();
+    // mini_racer builds the request in the safe context, out of reach of a
+    // tampered Array.prototype.
+    let request = {
+        let safe = v8::Local::new(scope, &runtime.filter.context);
+        let scope = &mut v8::ContextScope::new(scope, safe);
+        v8::Array::new(scope, count.saturating_add(1))
+    };
+    let mut index = 0;
+    for position in 0..count {
+        let value = serialize::sanitize(scope, args.get(position));
+        if request.set_index(scope, index, value).is_none() {
+            return;
+        }
+        index = index.saturating_add(1);
+    }
+    if request.set_index(scope, index, args.data()).is_none() {
+        return;
+    }
+    let Some(bytes) = serialize::write(scope, request.into()) else {
+        return;
+    };
+    if runtime.block.channel.callback(bytes).is_err() {
+        scope.terminate_execution();
+        return;
+    }
+    loop {
+        match receive(&runtime.block) {
+            Some(ToV8::Reply(CallbackReply::Value(bytes))) => {
+                let context = scope.get_current_context();
+                let deserializer = v8::ValueDeserializer::new(scope, Box::new(Reader), &bytes);
+                if deserializer.read_header(context) == Some(true)
+                    && let Some(value) = deserializer.read_value(context)
+                {
+                    rv.set(value);
+                }
+                return;
+            }
+            Some(ToV8::Reply(CallbackReply::Raised(message))) => {
+                let exception = error(scope, &message);
+                runtime
+                    .raised
+                    .replace(Some(v8::Global::new(scope, exception)));
+                scope.throw_exception(exception);
+                return;
+            }
+            // As mini_racer answers a cancelled callback: the throw stops the
+            // script at once, and the termination takes over at V8's next
+            // interrupt check.
+            Some(ToV8::Reply(CallbackReply::Abort)) => {
+                scope.terminate_execution();
+                let exception = error(scope, &JsText::from("terminated"));
+                scope.throw_exception(exception);
+                return;
+            }
+            Some(ToV8::Request(request)) => {
+                let response = {
+                    let context = v8::Local::new(scope, &runtime.context);
+                    let scope = &mut v8::ContextScope::new(scope, context);
+                    handle(scope, runtime, request)
+                };
+                if runtime.block.channel.respond(response).is_err() {
+                    scope.terminate_execution();
+                    return;
+                }
+            }
+            None => {
+                scope.terminate_execution();
+                return;
+            }
+        }
+    }
+}
+
+fn error<'s>(scope: &v8::PinScope<'s, '_>, message: &JsText) -> v8::Local<'s, v8::Value> {
+    let message = string(scope, message)
+        .or_else(|| v8::String::new(scope, "Ruby exception"))
+        .unwrap_or_else(|| v8::String::empty(scope));
+    v8::Exception::error(scope, message)
+}
+
 // The message mini_racer builds for each kind: a parse error with where it
 // happened, a runtime error with its stack when the exception has one.
 fn failure(tc: &Tc<'_, '_, '_, '_>, kind: JsErrorKind) -> EngineError {
@@ -223,7 +449,10 @@ fn failure(tc: &Tc<'_, '_, '_, '_>, kind: JsErrorKind) -> EngineError {
     }
     let message = match kind {
         JsErrorKind::Parse => parse_message(tc),
-        JsErrorKind::Runtime | JsErrorKind::Internal | JsErrorKind::Terminated(_) => tc
+        JsErrorKind::Runtime
+        | JsErrorKind::Internal
+        | JsErrorKind::Terminated(_)
+        | JsErrorKind::HostException => tc
             .stack_trace()
             .and_then(|trace| trace.to_string(tc))
             .map(|trace| trace.to_rust_string_lossy(tc)),

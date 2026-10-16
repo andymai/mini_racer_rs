@@ -1,7 +1,7 @@
 use std::ffi::{c_int, c_void};
 
-use magnus::rb_sys::{AsRawValue, FromRawValue, protect};
-use magnus::{Error, RString, Ruby, Value};
+use magnus::rb_sys::{AsRawId, AsRawValue, FromRawValue, protect};
+use magnus::{Error, RArray, RString, Ruby, Value};
 
 use crate::guard::{Panicked, guard};
 
@@ -177,6 +177,20 @@ pub fn ruby_type(_ruby: &Ruby, value: Value) -> RubyType {
 /// containers by; stable only while the object is pinned.
 pub fn identity(value: Value) -> u64 {
     value.as_raw()
+}
+
+/// `receiver.call(*args)`, with Ruby reading the arguments from `args`
+/// itself, so they stay where the GC sees them for the whole call.
+pub fn call_with_array(ruby: &Ruby, receiver: Value, args: RArray) -> Result<Value, Error> {
+    let call = ruby.intern("call");
+    let raw = protect(|| {
+        // SAFETY: the `&Ruby` argument proves this thread holds the GVL, both
+        // values are live on this stack, and `protect` catches any non-local
+        // exit the call raises.
+        unsafe { rb_sys::rb_apply(receiver.as_raw(), call.as_raw(), args.as_raw()) }
+    })?;
+    // SAFETY: `raw` is the live value the call returned.
+    Ok(unsafe { Value::from_raw(raw) })
 }
 
 /// A Symbol's name as a String, without calling `Symbol#to_s`.

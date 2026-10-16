@@ -4,8 +4,10 @@ require "json"
 
 # Seeded cases for the differential run. A JS case is a value tree rendered to
 # source and evaluated; a Ruby case is a list of value trees made canonical and
-# passed through Context#call. Trees, not source or canonical values, are kept
-# so the shrinker can cut them down without breaking shared references.
+# passed through Context#call. Each also has a twin that goes through an
+# attached callback: JS values as its arguments and back as its result, Ruby
+# values as its result. Trees, not source or canonical values, are kept so the
+# shrinker can cut them down without breaking shared references.
 module DiffGenerate
   JS_LEAVES = [
     "undefined", "null", "true", "false", "0", "-0", "1", "-1", "2147483647", "-2147483648", "2147483648",
@@ -36,7 +38,8 @@ module DiffGenerate
       { "id" => "rb-#{seed}-#{n}", "kind" => "ruby",
         "args" => Array.new(random.rand(1..3)) { ruby_tree(random, 3) }, }
     end
-    js_cases + ruby_cases
+    direct = js_cases + ruby_cases
+    direct + direct.map { |kase| kase.merge("id" => kase.fetch("id").sub("-", "-cb-"), "via" => "callback") }
   end
 
   def js_tree(random, depth)
@@ -104,14 +107,22 @@ module DiffGenerate
   end
 
   ECHO = "globalThis.__diff_echo = (...args) => args"
+  CALLBACK = "__diff_callback"
 
   # A setup step's value is not compared, only whether it raised.
   def steps(kase)
-    case kase.fetch("kind")
-    when "js" then [{ "op" => "eval", "source" => render(kase.fetch("tree")) }]
-    when "ruby"
+    args = -> { kase.fetch("args").map { |arg| canonical(arg) } }
+    case [kase.fetch("kind"), kase["via"]]
+    when ["js", nil] then [{ "op" => "eval", "source" => render(kase.fetch("tree")) }]
+    when %w[js callback]
+      [{ "op" => "attach", "name" => CALLBACK, "callable" => "echo", "setup" => true },
+       { "op" => "eval", "source" => "#{CALLBACK}(#{render(kase.fetch("tree"))})" },]
+    when ["ruby", nil]
       [{ "op" => "eval", "source" => ECHO, "setup" => true },
-       { "op" => "call", "path" => "__diff_echo", "args" => kase.fetch("args").map { |arg| canonical(arg) } },]
+       { "op" => "call", "path" => "__diff_echo", "args" => args.call },]
+    when %w[ruby callback]
+      [{ "op" => "attach", "name" => CALLBACK, "callable" => "values", "args" => args.call, "setup" => true },
+       { "op" => "eval", "source" => "#{CALLBACK}()" },]
     else kase.fetch("steps")
     end
   end

@@ -1,11 +1,12 @@
 use std::sync::{Arc, Mutex};
+use std::thread::ThreadId;
 use std::time::Duration;
 
 use mini_racer_sync::{
-    Channel, ChannelError, DispatchId, DispatchKind, Interrupt, Side, TermCell, TermError, ToRuby,
+    Channel, ChannelError, DispatchKind, Interrupt, Side, TermCell, TermError, ToRuby, lock,
 };
 
-use crate::control::{ContextConfig, ControlBlock, JsText, Request, Wire};
+use crate::control::{CallbackReply, ContextConfig, ControlBlock, Depth, JsText, Request, Wire};
 use crate::process::{self, platform, watchdog};
 use crate::spin::spin_until;
 use crate::{EngineError, runner};
@@ -28,6 +29,11 @@ pub trait Host {
     fn wait(&mut self, wait: &WaitHandle<'_>) -> WaitOutcome;
     /// Returns once `wait.ready()` holds, whatever interrupts arrive.
     fn wait_blocking(&mut self, wait: &WaitHandle<'_>);
+    /// Runs the callback `request` names: an array of its arguments with its
+    /// id last, in V8's wire format. Dispatches it makes on this context from
+    /// this thread run nested inside the current one. `Abort` cancels the
+    /// dispatch.
+    fn callback(&mut self, request: &[u8]) -> CallbackReply;
 }
 
 pub struct WaitHandle<'a> {
@@ -74,6 +80,33 @@ impl Unparker<'_> {
 pub struct ContextHandle {
     block: Arc<ControlBlock>,
     pid: u32,
+    session: Mutex<Session>,
+}
+
+// The thread running the outermost dispatch and how many of its callbacks are
+// running; only that thread may dispatch while one is.
+#[derive(Default)]
+struct Session {
+    owner: Option<ThreadId>,
+    callbacks: u32,
+}
+
+struct InCallback<'a>(&'a Mutex<Session>);
+
+impl<'a> InCallback<'a> {
+    fn enter(session: &'a Mutex<Session>) -> Self {
+        let mut state = lock(session);
+        state.callbacks = state.callbacks.saturating_add(1);
+        drop(state);
+        Self(session)
+    }
+}
+
+impl Drop for InCallback<'_> {
+    fn drop(&mut self) {
+        let mut state = lock(self.0);
+        state.callbacks = state.callbacks.saturating_sub(1);
+    }
 }
 
 impl ContextHandle {
@@ -99,10 +132,11 @@ impl ContextHandle {
         let handle = Self {
             block,
             pid: std::process::id(),
+            session: Mutex::default(),
         };
         handle.dispatch(
             DispatchKind::Maintenance,
-            |dispatch| Request::Init { dispatch },
+            |depth| Request::Init { depth },
             host,
         )?;
         Ok(handle)
@@ -117,10 +151,10 @@ impl ContextHandle {
         let (filename, source) = (filename.into(), source.into());
         self.dispatch(
             DispatchKind::Script,
-            |dispatch| Request::Eval {
+            |depth| Request::Eval {
                 filename,
                 source,
-                dispatch,
+                depth,
             },
             host,
         )
@@ -131,9 +165,28 @@ impl ContextHandle {
     pub fn call(&self, request: Vec<u8>, host: &mut impl Host) -> Result<Vec<u8>, EngineError> {
         self.dispatch(
             DispatchKind::Script,
-            |dispatch| Request::Call { request, dispatch },
+            |depth| Request::Call { request, depth },
             host,
         )
+    }
+
+    /// `request` is the wire form `mini_racer` sends: an array of the dotted
+    /// path to define and the callback id `Host::callback` will be given.
+    pub fn attach(&self, request: Vec<u8>, host: &mut impl Host) -> Result<(), EngineError> {
+        self.dispatch(
+            DispatchKind::Maintenance,
+            |depth| Request::Attach { request, depth },
+            host,
+        )
+        .map(drop)
+    }
+
+    /// Whether this thread is inside one of this context's callbacks, where a
+    /// dispatch runs nested in the one that made the callback.
+    #[must_use]
+    pub fn in_callback(&self) -> bool {
+        let session = lock(&self.session);
+        session.callbacks > 0 && session.owner == Some(std::thread::current().id())
     }
 
     /// Terminates the running script, or the next one if none is running.
@@ -176,7 +229,9 @@ impl ContextHandle {
             host.wait_blocking(&wait);
             match self.block.channel.recv_ruby() {
                 Ok(Some(ToRuby::Response(_))) | Err(ChannelError::Closed) => return Ok(()),
-                Ok(Some(ToRuby::Callback(callback))) => match callback {},
+                Ok(Some(ToRuby::Callback(_))) => {
+                    let _ = self.block.channel.reply(CallbackReply::Abort);
+                }
                 Ok(None) => {}
                 Err(error) => return Err(protocol(error)),
             }
@@ -196,11 +251,23 @@ impl ContextHandle {
     fn dispatch(
         &self,
         kind: DispatchKind,
-        request: impl FnOnce(DispatchId) -> Request,
+        request: impl FnOnce(Depth) -> Request,
         host: &mut impl Host,
     ) -> Result<Vec<u8>, EngineError> {
         if self.orphaned() {
             return Err(EngineError::Orphaned);
+        }
+        let current = std::thread::current().id();
+        {
+            let session = lock(&self.session);
+            match session.owner {
+                Some(owner) if owner == current && session.callbacks > 0 => {
+                    drop(session);
+                    return self.nested(request(Depth::Nested), host);
+                }
+                Some(_) => return Err(EngineError::Busy),
+                None => {}
+            }
         }
         let block = &self.block;
         let dispatch = block.term.begin(kind).map_err(|error| match error {
@@ -214,13 +281,27 @@ impl ContextHandle {
             block.term.end(dispatch);
             return Err(error);
         }
-        if let Err(error) = block.channel.request(request(dispatch)) {
-            block.term.end(dispatch);
-            return Err(match error {
-                ChannelError::Closed => EngineError::Disposed,
-                error => protocol(error),
-            });
-        }
+        lock(&self.session).owner = Some(current);
+        let result = match block.channel.request(request(Depth::Outermost(dispatch))) {
+            Ok(()) => self.await_response(host),
+            Err(error) => Err(channel(error)),
+        };
+        lock(&self.session).owner = None;
+        // A no-op unless the runner died before disarming it.
+        block.term.end(dispatch);
+        watchdog::clear(block, dispatch);
+        result
+    }
+
+    fn nested(&self, request: Request, host: &mut impl Host) -> Result<Vec<u8>, EngineError> {
+        self.block.channel.request(request).map_err(channel)?;
+        self.await_response(host)
+    }
+
+    // Once the dispatch is abandoned, callbacks still in flight are answered
+    // with `Abort` without running, until the runner responds.
+    fn await_response(&self, host: &mut impl Host) -> Result<Vec<u8>, EngineError> {
+        let block = &self.block;
         let wait = WaitHandle {
             channel: &block.channel,
         };
@@ -230,27 +311,33 @@ impl ContextHandle {
                 host.wait_blocking(&wait);
             } else if host.wait(&wait) == WaitOutcome::Cancel {
                 cancelled = true;
-                block.term.request(Interrupt::Cancel(dispatch));
+                self.cancel();
                 continue;
             }
             match block.channel.recv_ruby() {
-                Ok(Some(ToRuby::Response(response))) => {
-                    // A no-op unless the runner died before disarming it.
-                    block.term.end(dispatch);
-                    watchdog::clear(block, dispatch);
-                    return response;
+                Ok(Some(ToRuby::Response(response))) => return response,
+                Ok(Some(ToRuby::Callback(request))) => {
+                    let reply = if cancelled {
+                        CallbackReply::Abort
+                    } else {
+                        let _running = InCallback::enter(&self.session);
+                        host.callback(&request)
+                    };
+                    if matches!(reply, CallbackReply::Abort) && !cancelled {
+                        cancelled = true;
+                        self.cancel();
+                    }
+                    block.channel.reply(reply).map_err(channel)?;
                 }
-                Ok(Some(ToRuby::Callback(callback))) => match callback {},
                 Ok(None) => {}
-                Err(error) => {
-                    block.term.end(dispatch);
-                    watchdog::clear(block, dispatch);
-                    return Err(match error {
-                        ChannelError::Closed => EngineError::Disposed,
-                        error => protocol(error),
-                    });
-                }
+                Err(error) => return Err(channel(error)),
             }
+        }
+    }
+
+    fn cancel(&self) {
+        if let Some(dispatch) = self.block.term.armed() {
+            self.block.term.request(Interrupt::Cancel(dispatch));
         }
     }
 }
@@ -271,4 +358,11 @@ impl Drop for ContextHandle {
 
 fn protocol(error: ChannelError) -> EngineError {
     EngineError::Internal(format!("channel protocol: {error}"))
+}
+
+fn channel(error: ChannelError) -> EngineError {
+    match error {
+        ChannelError::Closed => EngineError::Disposed,
+        error => protocol(error),
+    }
 }
