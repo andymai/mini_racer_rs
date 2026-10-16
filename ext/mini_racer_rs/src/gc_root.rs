@@ -37,6 +37,10 @@ impl<T: ReprValue> OwnedRoot<T> {
         self.0.get().map(|value| ruby.get_inner(value))
     }
 
+    pub fn take(&self, ruby: &Ruby) -> Option<T> {
+        self.0.take().map(|value| ruby.get_inner(value))
+    }
+
     pub fn mark(&self, marker: &Marker) {
         if let Some(value) = self.0.get() {
             marker.mark(value);

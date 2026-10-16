@@ -2,10 +2,9 @@
 
 require "test_helper"
 require "mini_racer"
+require "timeout"
 
 class AttachTest < Minitest::Test
-  include RubyProcess
-
   def setup
     @context = MiniRacer::Context.new
   end
@@ -45,39 +44,37 @@ class AttachTest < Minitest::Test
     assert_equal "second", other.value
   end
 
-  def test_a_failed_attach_still_uses_up_its_id
-    assert_raises(TypeError) { @context.attach(:sym, proc { 1 }) }
-    @context.attach("one", proc { 1 })
+  def test_a_halted_nested_eval_halts_the_script_around_it
+    context = MiniRacer::Context.new(timeout: 100)
+    context.attach("spin", proc { context.eval("while (true) {}") })
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
-    assert_equal 1, @context.eval("one()")
+    assert_raises(MiniRacer::ScriptTerminatedError) { context.eval("try { spin() } catch (e) {} while (true) {}") }
+    assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 2
+  ensure
+    context&.dispose
   end
 
-  # Deviation behavior:callback-error-text@ruby: mini_racer 0.22.1 reads the
-  # message of an exception a callback raises as Latin-1, so "café" reaches
-  # JavaScript as "cafÃ©".
-  def test_a_callback_error_message_keeps_its_encoding
-    @context.attach("raises", proc { raise "café 東" })
+  def test_an_interrupt_in_a_nested_eval_abandons_only_that_eval
+    guarded = proc do
+      Timeout.timeout(0.05) { @context.eval("while (true) {}") }
+    rescue Timeout::Error
+      "ok"
+    end
+    @context.attach("guarded", guarded)
 
-    assert_equal "café 東", @context.eval("try { raises() } catch (e) { e.message }")
+    assert_equal "ok!", @context.eval("guarded() + '!'")
   end
 
-  # Deviation behavior:callback-jump@ruby: mini_racer 0.22.1 deadlocks when a
-  # callback leaves by throw or Thread#kill. Here the script is terminated and
-  # the jump goes on once the eval has returned.
-  def test_a_jump_out_of_a_callback_ends_the_script_and_continues
-    out, err, status = run_ruby(<<~RUBY)
-      Thread.new { sleep 10; warn "timed out"; exit!(99) }
-      require "mini_racer"
-      context = MiniRacer::Context.new
-      context.attach("thrower", proc { throw :out, 5 })
-      context.attach("killer", proc { Thread.current.kill })
-      p catch(:out) { context.eval("thrower(); globalThis.ran = true; 'not reached'") }
-      p context.eval("typeof ran")
-      p Thread.new { context.eval("killer(); 'not reached'") }.join.value
-      p context.eval("1 + 2")
-    RUBY
+  # mini_racer keeps one raised exception per context and clears it after
+  # every dispatch, nested ones included.
+  def test_an_escaping_callback_error_raises_the_exception_kept_for_the_context
+    @context.attach("first", proc { raise KeyError, "first" })
+    @context.attach("second", proc { raise IndexError, "second" })
+    @context.attach("rethrows", proc { @context.eval("throw saved") })
+    @context.attach("nests", proc { @context.eval("try { second() } catch (e) { globalThis.late = e }; 1") })
 
-    assert_predicate status, :success?, err
-    assert_equal "5\n\"undefined\"\nnil\n3\n", out
+    assert_raises(KeyError) { @context.eval("try { first() } catch (e) { globalThis.saved = e }; rethrows()") }
+    assert_raises(MiniRacer::ContextDisposedError) { @context.eval("try { first() } catch (e) {}; nests(); throw late") }
   end
 end

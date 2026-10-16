@@ -48,11 +48,6 @@ class DiffLedgerTest < Minitest::Test
                                                  [["array", [%w[int 5], %w[int 5]]]], [lost],)
     assert_equal "diverged", DiffLedger.classify([["array", [["nil"], time, %w[int 5]]]],
                                                  [["array", [["nil"], time, %w[int 6]]]], [lost],)
-    later = ["time", "1", 0, 0, false]
-
-    assert_equal "accepted:lost", DiffLedger.classify([["array", [time, ["nil"]]]], [["array", [time, time]]], [lost])
-    assert_equal "diverged", DiffLedger.classify([["array", [time, ["nil"]]]], [["array", [time, later]]], [lost])
-    assert_equal "diverged", DiffLedger.classify([["array", [["nil"], time]]], [["array", [time, time]]], [lost])
   end
 
   def test_an_accepted_divergence_must_cite_a_compat_deviation

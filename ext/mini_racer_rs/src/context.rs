@@ -14,7 +14,7 @@ use mini_racer_engine::{ContextConfig, ContextHandle, EngineError, JsText};
 
 use crate::encode::{self, EncodeError};
 use crate::gc_root::OwnedRoot;
-use crate::host::RubyHost;
+use crate::host::{Callbacks, RubyHost};
 use crate::options::{self, OptionError, OptionValue};
 use crate::{decode, errors, export, rb_raw};
 
@@ -32,6 +32,7 @@ pub struct Context {
     lock: OwnedRoot<magnus::Mutex>,
     // What each attached name calls, indexed by the id V8 sends back.
     callables: OwnedRoot<RArray>,
+    raised: OwnedRoot<Value>,
     accounted: Cell<bool>,
     // Set before the GVL is released to wait for the runner, so a second
     // initialize cannot start while the first waits.
@@ -42,6 +43,7 @@ impl DataTypeFunctions for Context {
     fn mark(&self, marker: &Marker) {
         self.lock.mark(marker);
         self.callables.mark(marker);
+        self.raised.mark(marker);
     }
 }
 
@@ -167,17 +169,18 @@ impl Context {
             .ok_or_else(|| errors::internal(ruby, "context is not initialized"))
     }
 
-    // A callback's own calls into this context run inside the dispatch that
-    // made the callback, which already holds the lock. Otherwise trylock first:
-    // an uncontended call then works from a signal trap, where Mutex#lock raises.
+    // trylock first: an uncontended call then works from a signal trap, where
+    // Mutex#lock raises. A callback's own calls into this context run inside
+    // the dispatch that made the callback, which already holds the lock.
     fn acquire(&self, ruby: &Ruby) -> Result<Option<Locked>, Error> {
         let mutex = self.mutex(ruby)?;
+        if mutex.trylock() {
+            return Ok(Some(Locked(mutex)));
+        }
         if self.handle(ruby)?.in_callback() && mutex.funcall::<_, _, bool>("owned?", ())? {
             return Ok(None);
         }
-        if !mutex.trylock() {
-            rb_raw::mutex_lock(ruby, mutex)?;
-        }
+        rb_raw::mutex_lock(ruby, mutex)?;
         Ok(Some(Locked(mutex)))
     }
 
@@ -236,8 +239,6 @@ impl Context {
         decode::value(ruby, &bytes)
     }
 
-    // mini_racer keeps the callable before V8 defines the name, so a failed
-    // attach still uses up its id.
     fn attach(ruby: &Ruby, rb_self: &Self, name: Value, callable: Value) -> Result<Value, Error> {
         let handle = rb_self.handle(ruby)?;
         let callables = rb_self.callables(ruby)?;
@@ -264,7 +265,11 @@ impl Context {
         run: impl FnOnce(&mut RubyHost<'_>) -> Result<T, EngineError>,
     ) -> Result<T, Error> {
         let _locked = self.acquire(ruby)?;
-        let mut host = RubyHost::with_callables(ruby, self.callables(ruby)?);
+        let callbacks = Callbacks {
+            callables: self.callables(ruby)?,
+            raised: &self.raised,
+        };
+        let mut host = RubyHost::with_callbacks(ruby, callbacks);
         let result = run(&mut host);
         host.finish(result)
     }

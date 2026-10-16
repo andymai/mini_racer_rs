@@ -9,6 +9,7 @@ use mini_racer_engine::{
 };
 
 use crate::encode::{self, EncodeError};
+use crate::gc_root::OwnedRoot;
 use crate::{context, decode, errors, rb_raw};
 
 struct SpinBudget {
@@ -35,18 +36,22 @@ fn budget() -> &'static SpinBudget {
     })
 }
 
+/// What a context's callbacks run: its attached callables by id, and where
+/// the exception the latest callback raised is kept, as `mini_racer` keeps one
+/// per context and clears it after every dispatch, nested ones included.
+pub struct Callbacks<'r> {
+    pub callables: RArray,
+    pub raised: &'r OwnedRoot<Value>,
+}
+
 /// Waits for a runner from a Ruby thread: spins holding the GVL, then releases
 /// it, spins and parks. A Ruby interrupt wakes the park; traps run and the wait
 /// goes on, while an exception (Timeout, Thread#raise, #kill) cancels the
-/// dispatch and is raised once the engine has its response. Callbacks run the
-/// context's attached callables.
+/// dispatch and is raised once the engine has its response.
 pub struct RubyHost<'r> {
     ruby: &'r Ruby,
     pending: Option<Error>,
-    callables: Option<RArray>,
-    // The exception the latest callback raised, raised again if V8 reports
-    // that it escaped, as mini_racer keeps one per dispatch.
-    raised: Option<Error>,
+    callbacks: Option<Callbacks<'r>>,
 }
 
 impl<'r> RubyHost<'r> {
@@ -54,17 +59,15 @@ impl<'r> RubyHost<'r> {
         Self {
             ruby,
             pending: None,
-            callables: None,
-            raised: None,
+            callbacks: None,
         }
     }
 
-    pub const fn with_callables(ruby: &'r Ruby, callables: RArray) -> Self {
+    pub const fn with_callbacks(ruby: &'r Ruby, callbacks: Callbacks<'r>) -> Self {
         Self {
             ruby,
             pending: None,
-            callables: Some(callables),
-            raised: None,
+            callbacks: Some(callbacks),
         }
     }
 
@@ -74,16 +77,28 @@ impl<'r> RubyHost<'r> {
         if let Some(pending) = self.pending {
             return Err(pending);
         }
-        match (result, self.raised) {
+        let raised = self
+            .callbacks
+            .and_then(|callbacks| callbacks.raised.take(self.ruby))
+            .and_then(Exception::from_value);
+        match (result, raised) {
             (
                 Err(EngineError::Js(JsError {
                     kind: JsErrorKind::HostException,
                     ..
                 })),
                 Some(raised),
-            ) => Err(raised),
+            ) => Err(Error::from(raised)),
             (result, _) => result.map_err(|error| errors::engine(self.ruby, error)),
         }
+    }
+
+    // A captured throw resumes through Ruby's error info, which any protected
+    // call in between would clear, so nothing runs Ruby code until it does.
+    fn jumping(&self) -> bool {
+        self.pending
+            .as_ref()
+            .is_some_and(|pending| matches!(pending.error_type(), ErrorType::Jump(_)))
     }
 
     // mini_racer's order: the id comes off the end of the arguments, and a
@@ -94,7 +109,11 @@ impl<'r> RubyHost<'r> {
         let args = RArray::from_value(decode::value(ruby, request)?).ok_or_else(bad)?;
         let id = Integer::from_value(args.pop::<Value>()?).ok_or_else(bad)?;
         let id = isize::try_from(id.to_i64()?).map_err(|_| bad())?;
-        let callables = self.callables.ok_or_else(bad)?;
+        let callables = self
+            .callbacks
+            .as_ref()
+            .map(|callbacks| callbacks.callables)
+            .ok_or_else(bad)?;
         if id < 0 || id.cast_unsigned() >= callables.len() {
             return Err(bad());
         }
@@ -162,6 +181,12 @@ impl Host for RubyHost<'_> {
     // otherwise make every rb_nogvl return at once and keep the GVL held. An
     // exception they raise is kept and raised once the dispatch is over.
     fn wait_blocking(&mut self, wait: &WaitHandle<'_>) {
+        if self.jumping() {
+            while !wait.ready() {
+                wait.park();
+            }
+            return;
+        }
         while !wait.ready() {
             let parked = rb_raw::nogvl(
                 self.ruby,
@@ -192,7 +217,9 @@ impl Host for RubyHost<'_> {
             return CallbackReply::Abort;
         };
         let message = message(self.ruby, exception);
-        self.raised = Some(Error::from(exception));
+        if let Some(callbacks) = &self.callbacks {
+            callbacks.raised.set(self.ruby, exception.as_value());
+        }
         CallbackReply::Raised(message)
     }
 }

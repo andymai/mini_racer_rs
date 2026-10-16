@@ -2,8 +2,19 @@ pub mod platform;
 pub(crate) mod watchdog;
 
 use std::sync::Once;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 static INIT: Once = Once::new();
+static NEXT_THREAD: AtomicU64 = AtomicU64::new(1);
+
+thread_local! {
+    static THREAD: u64 = NEXT_THREAD.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Names the calling thread for the life of the process; never 0.
+pub(crate) fn thread_token() -> u64 {
+    THREAD.with(|token| *token)
+}
 
 pub fn ensure_initialized() {
     INIT.call_once(|| {

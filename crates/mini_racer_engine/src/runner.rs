@@ -27,7 +27,7 @@ impl Drop for Closing<'_> {
     }
 }
 
-// What a callback needs to reach from inside V8, kept in an isolate slot.
+// Kept in an isolate slot: the callback trampoline gets only the isolate.
 struct Runtime {
     block: Arc<ControlBlock>,
     context: v8::Global<v8::Context>,
@@ -115,7 +115,6 @@ fn receive(block: &ControlBlock) -> Option<ToV8<crate::control::Wire>> {
     }
 }
 
-// Requests from the top of the runner loop and from inside a callback alike.
 fn handle(
     scope: &mut v8::PinScope<'_, '_>,
     runtime: &Runtime,
@@ -127,7 +126,7 @@ fn handle(
                 Some(_) => Err(EngineError::Disposed),
                 None => Ok(Vec::new()),
             },
-            Depth::Nested => Err(EngineError::Busy),
+            Depth::Nested => Err(EngineError::Internal("setup inside a callback".to_owned())),
         },
         Request::Eval {
             filename,
@@ -227,17 +226,14 @@ struct Reader;
 
 impl v8::ValueDeserializerImpl for Reader {}
 
-// mini_racer's order: reading the request fails as an internal error, and
-// everything from the path walk on as a runtime error. Each dotted segment
-// but the last becomes an object, and the function is called on its parent.
-fn invoke(
-    tc: &mut Tc<'_, '_, '_, '_>,
-    filter: &Filter,
+// `call` and `attach` requests are an array whose first element is a dotted
+// path; failing to read one is an internal error in mini_racer.
+fn read_request<'s>(
+    tc: &Tc<'s, '_, '_, '_>,
     request: &[u8],
-) -> Result<Vec<u8>, EngineError> {
+) -> Result<(v8::Local<'s, v8::Object>, String), EngineError> {
     let context = tc.get_current_context();
     let internal = |tc: &Tc<'_, '_, '_, '_>| failure(tc, JsErrorKind::Internal);
-    let runtime = |tc: &Tc<'_, '_, '_, '_>| failure(tc, JsErrorKind::Runtime);
     let deserializer = v8::ValueDeserializer::new(tc, Box::new(Reader), request);
     if deserializer.read_header(context) != Some(true) {
         return Err(internal(tc));
@@ -251,6 +247,20 @@ fn invoke(
         .and_then(|name| name.to_string(tc))
         .ok_or_else(|| internal(tc))?
         .to_rust_string_lossy(tc);
+    Ok((request, path))
+}
+
+// mini_racer's order: everything from the path walk on fails as a runtime
+// error. Each dotted segment but the last becomes an object, and the function
+// is called on its parent.
+fn invoke(
+    tc: &mut Tc<'_, '_, '_, '_>,
+    filter: &Filter,
+    request: &[u8],
+) -> Result<Vec<u8>, EngineError> {
+    let context = tc.get_current_context();
+    let runtime = |tc: &Tc<'_, '_, '_, '_>| failure(tc, JsErrorKind::Runtime);
+    let (request, path) = read_request(tc, request)?;
     let mut receiver = context.global(tc);
     let mut keys = path.split('.').peekable();
     let mut function = None;
@@ -287,19 +297,7 @@ fn invoke(
 fn attach(tc: &Tc<'_, '_, '_, '_>, request: &[u8]) -> Result<Vec<u8>, EngineError> {
     let context = tc.get_current_context();
     let internal = |tc: &Tc<'_, '_, '_, '_>| failure(tc, JsErrorKind::Internal);
-    let deserializer = v8::ValueDeserializer::new(tc, Box::new(Reader), request);
-    if deserializer.read_header(context) != Some(true) {
-        return Err(internal(tc));
-    }
-    let request = deserializer
-        .read_value(context)
-        .and_then(|request| request.to_object(tc))
-        .ok_or_else(|| internal(tc))?;
-    let path = request
-        .get_index(tc, 0)
-        .and_then(|name| name.to_string(tc))
-        .ok_or_else(|| internal(tc))?
-        .to_rust_string_lossy(tc);
+    let (request, path) = read_request(tc, request)?;
     let id = request
         .get_index(tc, 1)
         .filter(|id| id.is_int32())
@@ -387,34 +385,8 @@ fn callback<'s>(
         return;
     }
     loop {
-        match receive(&runtime.block) {
-            Some(ToV8::Reply(CallbackReply::Value(bytes))) => {
-                let context = scope.get_current_context();
-                let deserializer = v8::ValueDeserializer::new(scope, Box::new(Reader), &bytes);
-                if deserializer.read_header(context) == Some(true)
-                    && let Some(value) = deserializer.read_value(context)
-                {
-                    rv.set(value);
-                }
-                return;
-            }
-            Some(ToV8::Reply(CallbackReply::Raised(message))) => {
-                let exception = error(scope, &message);
-                runtime
-                    .raised
-                    .replace(Some(v8::Global::new(scope, exception)));
-                scope.throw_exception(exception);
-                return;
-            }
-            // As mini_racer answers a cancelled callback: the throw stops the
-            // script at once, and the termination takes over at V8's next
-            // interrupt check.
-            Some(ToV8::Reply(CallbackReply::Abort)) => {
-                scope.terminate_execution();
-                let exception = error(scope, &JsText::from("terminated"));
-                scope.throw_exception(exception);
-                return;
-            }
+        let reply = match receive(&runtime.block) {
+            Some(ToV8::Reply(reply)) => reply,
             Some(ToV8::Request(request)) => {
                 let response = {
                     let context = v8::Local::new(scope, &runtime.context);
@@ -425,12 +397,50 @@ fn callback<'s>(
                     scope.terminate_execution();
                     return;
                 }
+                continue;
             }
             None => {
                 scope.terminate_execution();
                 return;
             }
+        };
+        let terminating = scope.is_execution_terminating();
+        // A nested dispatch that was halted leaves its termination to unwind
+        // this script too. Throwing would replace it with a catchable error,
+        // so the termination is renewed instead, as mini_racer restores it.
+        let halted = terminating || runtime.block.term.check(DispatchKind::Script).is_some();
+        match reply {
+            // As mini_racer answers a cancelled callback: the throw stops the
+            // script at once, and the termination takes over at V8's next
+            // interrupt check.
+            CallbackReply::Abort => {
+                if !terminating {
+                    let exception = error(scope, &JsText::from("terminated"));
+                    scope.throw_exception(exception);
+                }
+                scope.terminate_execution();
+            }
+            _ if halted => {
+                scope.terminate_execution();
+            }
+            CallbackReply::Value(bytes) => {
+                let context = scope.get_current_context();
+                let deserializer = v8::ValueDeserializer::new(scope, Box::new(Reader), &bytes);
+                if deserializer.read_header(context) == Some(true)
+                    && let Some(value) = deserializer.read_value(context)
+                {
+                    rv.set(value);
+                }
+            }
+            CallbackReply::Raised(message) => {
+                let exception = error(scope, &message);
+                runtime
+                    .raised
+                    .replace(Some(v8::Global::new(scope, exception)));
+                scope.throw_exception(exception);
+            }
         }
+        return;
     }
 }
 

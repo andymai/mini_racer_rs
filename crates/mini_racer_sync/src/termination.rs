@@ -310,6 +310,22 @@ impl<T: Terminator> TermCell<T> {
         }
     }
 
+    /// Terminates the armed dispatch's script for an abandoned nested dispatch
+    /// without recording a cause, so the dispatch it runs in carries on once
+    /// `release` lifts it.
+    pub fn interrupt(&self) {
+        lock(&self.state).terminate_armed();
+    }
+
+    /// Lifts an `interrupt` once its nested dispatch has responded, unless a
+    /// recorded cause or a dispose still needs the termination.
+    pub fn release(&self) {
+        let mut state = lock(&self.state);
+        if state.causes.is_empty() && !state.disposing {
+            state.cancel_armed();
+        }
+    }
+
     #[must_use]
     pub fn is_disposing(&self) -> bool {
         lock(&self.state).disposing
@@ -427,6 +443,29 @@ mod tests {
         assert_eq!(cell.check(DispatchKind::Script), STOPPED);
         assert_eq!(cell.check(DispatchKind::Pump), None);
         assert_eq!(cell.check(DispatchKind::Maintenance), None);
+        assert_eq!(cell.end(id), STOPPED);
+    }
+
+    #[test]
+    fn an_interrupt_for_a_nested_dispatch_is_lifted_and_reports_nothing() {
+        let (cell, calls) = cell();
+        let id = cell.begin(DispatchKind::Script).expect("nothing armed");
+        cell.interrupt();
+        assert_eq!(calls.terminate.get(), 1);
+        assert_eq!(cell.check(DispatchKind::Script), None);
+        cell.release();
+        assert_eq!(calls.cancel.get(), 1);
+        assert_eq!(cell.end(id), None);
+    }
+
+    #[test]
+    fn a_cause_recorded_meanwhile_keeps_the_interrupt() {
+        let (cell, calls) = cell();
+        let id = cell.begin(DispatchKind::Script).expect("nothing armed");
+        cell.interrupt();
+        cell.request(Interrupt::Stop);
+        cell.release();
+        assert_eq!(calls.cancel.get(), 0);
         assert_eq!(cell.end(id), STOPPED);
     }
 

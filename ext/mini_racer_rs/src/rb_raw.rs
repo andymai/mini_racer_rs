@@ -1,7 +1,10 @@
 use std::ffi::{c_int, c_void};
 
 use magnus::rb_sys::{AsRawId, AsRawValue, FromRawValue, protect};
+use magnus::value::{IntoId, LazyId};
 use magnus::{Error, RArray, RString, Ruby, Value};
+
+static CALL: LazyId = LazyId::new("call");
 
 use crate::guard::{Panicked, guard};
 
@@ -182,7 +185,7 @@ pub fn identity(value: Value) -> u64 {
 /// `receiver.call(*args)`, with Ruby reading the arguments from `args`
 /// itself, so they stay where the GC sees them for the whole call.
 pub fn call_with_array(ruby: &Ruby, receiver: Value, args: RArray) -> Result<Value, Error> {
-    let call = ruby.intern("call");
+    let call = (*CALL).into_id_with(ruby);
     let raw = protect(|| {
         // SAFETY: the `&Ruby` argument proves this thread holds the GVL, both
         // values are live on this stack, and `protect` catches any non-local
