@@ -72,7 +72,7 @@ status = "xfail:M4"
 status = "upstream-skip"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_call_sync_does_not_await"]
-status = "xfail:M4"
+status = "pass"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_call_sync_does_not_await".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
@@ -180,51 +180,27 @@ status = "xfail:M4"
 status = "upstream-skip"
 
 [tests."test/function_test.rb#MiniRacerFunctionTest#test_args_types"]
-status = "xfail:M2"
-
-[tests."test/function_test.rb#MiniRacerFunctionTest#test_args_types".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/function_test.rb#MiniRacerFunctionTest#test_arguments_passed_exactly"]
-status = "xfail:M2"
-
-[tests."test/function_test.rb#MiniRacerFunctionTest#test_arguments_passed_exactly".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/function_test.rb#MiniRacerFunctionTest#test_complex_return"]
-status = "xfail:M2"
-
-[tests."test/function_test.rb#MiniRacerFunctionTest#test_complex_return".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/function_test.rb#MiniRacerFunctionTest#test_do_not_hang_with_concurrent_calls"]
-status = "xfail:M2"
-
-[tests."test/function_test.rb#MiniRacerFunctionTest#test_do_not_hang_with_concurrent_calls".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/function_test.rb#MiniRacerFunctionTest#test_fun"]
-status = "xfail:S3"
-
-[tests."test/function_test.rb#MiniRacerFunctionTest#test_fun".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/function_test.rb#MiniRacerFunctionTest#test_non_existing_function"]
-status = "xfail:M2"
-
-[tests."test/function_test.rb#MiniRacerFunctionTest#test_non_existing_function".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/function_test.rb#MiniRacerFunctionTest#test_throwing_function"]
-status = "xfail:M2"
-
-[tests."test/function_test.rb#MiniRacerFunctionTest#test_throwing_function".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/function_test.rb#MiniRacerFunctionTest#test_trailing_hash_is_positional_argument"]
-status = "xfail:M2"
-
-[tests."test/function_test.rb#MiniRacerFunctionTest#test_trailing_hash_is_positional_argument".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_an_empty_snapshot_is_valid"]
@@ -288,9 +264,6 @@ status = "xfail:M1"
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_call_returns_unfrozen_string"]
-status = "xfail:M1"
-
-[tests."test/mini_racer_test.rb#MiniRacerTest#test_call_returns_unfrozen_string".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_callback_string_arguments_are_not_frozen"]
@@ -553,9 +526,6 @@ status = "upstream-skip"
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_object_ref"]
-status = "xfail:M1"
-
-[tests."test/mini_racer_test.rb#MiniRacerTest#test_object_ref".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_perform_microtask_checkpoint_drains_from_callback"]
@@ -802,7 +772,7 @@ status = "xfail:M1"
 status = "upstream-skip"
 
 [tests."test/single_threaded_test.rb#MiniRacerSingleThreadedTest#test_basic_eval_and_call"]
-status = "xfail:M6"
+status = "pass"
 
 [tests."test/single_threaded_test.rb#MiniRacerSingleThreadedTest#test_basic_eval_and_call".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"

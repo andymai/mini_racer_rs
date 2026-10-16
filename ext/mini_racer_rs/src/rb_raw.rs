@@ -132,6 +132,118 @@ pub fn integer_unpack(_ruby: &Ruby, digits: &[u8], negative: bool) -> Result<Val
     Ok(unsafe { Value::from_raw(raw) })
 }
 
+/// The builtin types `mini_racer`'s encoder tells apart; `Other` carries the
+/// number `TYPE()` gives, which it prints in hex.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RubyType {
+    Object,
+    Float,
+    String,
+    Array,
+    Hash,
+    Bignum,
+    Data,
+    Nil,
+    True,
+    False,
+    Symbol,
+    Fixnum,
+    Other(u32),
+}
+
+pub fn ruby_type(_ruby: &Ruby, value: Value) -> RubyType {
+    use rb_sys::ruby_value_type as T;
+    // SAFETY: the `&Ruby` argument proves this thread holds the GVL, and
+    // `value` is a live VALUE the caller holds.
+    let kind = unsafe { rb_sys::RB_TYPE(value.as_raw()) };
+    match kind {
+        T::RUBY_T_OBJECT => RubyType::Object,
+        T::RUBY_T_FLOAT => RubyType::Float,
+        T::RUBY_T_STRING => RubyType::String,
+        T::RUBY_T_ARRAY => RubyType::Array,
+        T::RUBY_T_HASH => RubyType::Hash,
+        T::RUBY_T_BIGNUM => RubyType::Bignum,
+        T::RUBY_T_DATA => RubyType::Data,
+        T::RUBY_T_NIL => RubyType::Nil,
+        T::RUBY_T_TRUE => RubyType::True,
+        T::RUBY_T_FALSE => RubyType::False,
+        T::RUBY_T_SYMBOL => RubyType::Symbol,
+        T::RUBY_T_FIXNUM => RubyType::Fixnum,
+        other => RubyType::Other(other as u32),
+    }
+}
+
+/// An object's address, the identity `mini_racer`'s encoder keys repeated
+/// containers by; stable only while the object is pinned.
+pub fn identity(value: Value) -> u64 {
+    value.as_raw()
+}
+
+/// A Symbol's name as a String, without calling `Symbol#to_s`.
+pub fn sym2str(ruby: &Ruby, symbol: Value) -> RString {
+    // SAFETY: the `&Ruby` argument proves this thread holds the GVL, and the
+    // caller passes a Symbol, for which rb_sym2str returns its interned name.
+    let raw = unsafe { rb_sys::rb_sym2str(symbol.as_raw()) };
+    // SAFETY: `raw` is the live String rb_sym2str returned.
+    let name = unsafe { Value::from_raw(raw) };
+    RString::from_value(name).unwrap_or_else(|| ruby.str_new(""))
+}
+
+/// Runs `read` over the string's bytes without copying them; `read` must not
+/// call Ruby, which could change or move the string.
+pub fn with_string_bytes<R>(_ruby: &Ruby, s: RString, read: impl FnOnce(&[u8]) -> R) -> R {
+    // SAFETY: the bytes are only read by `read`, which runs no Ruby code.
+    read(unsafe { s.as_slice() })
+}
+
+/// The magnitude of an Integer as little-endian 64-bit words, and whether it is
+/// negative; `None` past `max_words`.
+pub fn integer_words(
+    _ruby: &Ruby,
+    value: Value,
+    max_words: usize,
+) -> Result<Option<(bool, Vec<u8>)>, Error> {
+    let raw = value.as_raw();
+    let mut count = 0;
+    protect(|| {
+        // SAFETY: the `&Ruby` argument proves this thread holds the GVL, and
+        // `protect` catches what rb_absint_numwords raises for a non-Integer.
+        count = unsafe { rb_sys::rb_absint_numwords(raw, 64, std::ptr::null_mut()) };
+        rb_sys::Qnil as rb_sys::VALUE
+    })?;
+    let Some(words) = usize::try_from(count)
+        .ok()
+        .filter(|&words| words <= max_words)
+    else {
+        return Ok(None);
+    };
+    let mut digits = vec![0u64; words];
+    let flags = c_int::try_from(rb_sys::INTEGER_PACK_LITTLE_ENDIAN).unwrap_or(0);
+    let mut sign = 0;
+    protect(|| {
+        // SAFETY: `digits` holds `words` words, which rb_integer_pack fills.
+        sign =
+            unsafe { rb_sys::rb_integer_pack(raw, digits.as_mut_ptr().cast(), count, 8, 0, flags) };
+        rb_sys::Qnil as rb_sys::VALUE
+    })?;
+    if !(-1..=1).contains(&sign) {
+        return Ok(None);
+    }
+    Ok(Some((
+        sign < 0,
+        digits.iter().flat_map(|word| word.to_le_bytes()).collect(),
+    )))
+}
+
+/// The name `rb_class2name` gives the class of `value`, as `mini_racer` prints it.
+pub fn class_name(_ruby: &Ruby, value: Value) -> String {
+    use magnus::Class as _;
+    use magnus::value::ReprValue as _;
+    let class = value.class();
+    // SAFETY: the name is copied before any Ruby code can run and free it.
+    unsafe { class.name() }.into_owned()
+}
+
 pub fn string_bytes(_ruby: &Ruby, s: RString) -> Vec<u8> {
     // SAFETY: the slice is copied before any Ruby code can run and move or free it.
     unsafe { s.as_slice() }.to_vec()

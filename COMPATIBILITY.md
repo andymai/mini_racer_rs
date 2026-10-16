@@ -4,7 +4,7 @@
 
 | Engine | Done | Planned | Deviation |
 |---|---|---|---|
-| CRuby | 34 | 20 | 10 |
+| CRuby | 35 | 19 | 10 |
 | TruffleRuby | 58 | 0 | 0 |
 
 ## Surface
@@ -39,7 +39,7 @@
 | `feature:pathname` | done | done |
 | `imethod:MiniRacer::Binary#data` | done | done |
 | `imethod:MiniRacer::Context#attach` | planned (S3b) | done |
-| `imethod:MiniRacer::Context#call` | planned (S3) | done |
+| `imethod:MiniRacer::Context#call` | done | done |
 | `imethod:MiniRacer::Context#call_await` | planned (M4) | done |
 | `imethod:MiniRacer::Context#dispose` | done | done |
 | `imethod:MiniRacer::Context#eval` | done | done |
@@ -92,7 +92,7 @@ Pending review.
 
 ### `behavior:object-ids@ruby`
 
-mini_racer_rs preserves repeated object references by numbering every serialized object as V8 does. For `(() => { const d = new Date(0); const o = {}; return [d, d, o, o] })()`, it returns `[Time, Time, {}, {}]`, with identical Ruby objects for each pair. mini_racer 0.22.1 returns `[Time, nil, {}, nil]` because its reference list omits dates, regular expressions, typed arrays, and other objects that V8 numbers. An error reached a second time, including an error that is its own cause, is the same ScriptError in mini_racer_rs but an empty Array in mini_racer 0.22.1.
+mini_racer_rs preserves repeated object identity in both directions by numbering every object as V8 does. The serialized form refers back to repeated objects by number, including dates, regular expressions, typed arrays, ArrayBuffers, wrapper objects, and errors. From JavaScript to Ruby, `(() => { const d = new Date(0); const o = {}; return [d, d, o, o] })()` returns `[Time, Time, {}, {}]`, with each pair the same Ruby object. mini_racer 0.22.1 counts only decoded arrays, objects, maps, sets, and errors, so it returns `[Time, nil, {}, nil]`; a repeated error, including its own cause, becomes an empty `Array` instead of the same `MiniRacer::ScriptError`. For `Context#call` arguments, mini_racer 0.22.1 counts only `Array` and `Hash` values, so `context.call("f", time, hash, hash)` gives `f` a Date, an object, and the same Date. mini_racer_rs gives `f` the same object twice.
 
 Pending review.
 
@@ -128,7 +128,7 @@ Pending review.
 
 ### `behavior:v8-version@ruby`
 
-On CRuby, `mini_racer_rs` embeds V8 15.2.124.1 through the `v8` crate 152.2.0, while `mini_racer` 0.22.1 uses V8 13.6.233.17 through `libv8-node` 24.12.0.1. V8-generated text, including parse and runtime error messages and locale formatting, can therefore differ. Affected upstream tests are marked `deviation:behavior:v8-version@ruby` in `test/upstream/mini_racer.status.toml`. This difference does not apply on TruffleRuby, where both gems use upstream's GraalJS backend.
+On CRuby, `mini_racer_rs` embeds V8 15.2.124.1 through the `v8` crate 152.2.0, while `mini_racer` 0.22.1 uses V8 13.6.233.17 through `libv8-node` 24.12.0.1. V8-generated text, including parse and runtime error messages and locale formatting, can therefore differ. So can the nesting depth at which V8 stops reading a value: with the default stack limit, `Context#call` accepts arguments about 6,250 levels deep in `mini_racer_rs` and about 3,100 in `mini_racer` 0.22.1, and both limits halve with half the stack. Affected upstream tests are marked `deviation:behavior:v8-version@ruby` in `test/upstream/mini_racer.status.toml`. This difference does not apply on TruffleRuby, where both gems use upstream's GraalJS backend.
 
 Pending review.
 

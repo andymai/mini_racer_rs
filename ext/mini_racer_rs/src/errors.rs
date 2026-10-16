@@ -56,6 +56,7 @@ pub fn engine(ruby: &Ruby, error: EngineError) -> Error {
             let root = match js.kind {
                 JsErrorKind::Parse => &PARSE,
                 JsErrorKind::Runtime => &RUNTIME,
+                JsErrorKind::Internal => &INTERNAL,
                 JsErrorKind::Terminated(
                     TerminationCause::Stop
                     | TerminationCause::Timeout
@@ -69,9 +70,9 @@ pub fn engine(ruby: &Ruby, error: EngineError) -> Error {
         }
         EngineError::Disposed => raised(ruby, DISPOSED.get(ruby), "disposed context"),
         EngineError::Orphaned | EngineError::DisposeBusy => {
-            raised(ruby, RUNTIME.get(ruby), &error.to_string())
+            raised(ruby, RUNTIME.get(ruby), error.to_string())
         }
-        EngineError::Busy => raised(ruby, INTERNAL.get(ruby), &error.to_string()),
+        EngineError::Busy => raised(ruby, INTERNAL.get(ruby), error.to_string()),
         EngineError::Internal(message) => raised(ruby, INTERNAL.get(ruby), &message),
     }
 }
@@ -79,10 +80,10 @@ pub fn engine(ruby: &Ruby, error: EngineError) -> Error {
 pub fn flag(ruby: &Ruby, error: FlagError) -> Error {
     match error {
         FlagError::Nul | FlagError::TooLong => {
-            raised(ruby, ruby.exception_arg_error(), &error.to_string())
+            raised(ruby, ruby.exception_arg_error(), error.to_string())
         }
         FlagError::AlreadyInitialized => {
-            raised(ruby, PLATFORM_INITIALIZED.get(ruby), &error.to_string())
+            raised(ruby, PLATFORM_INITIALIZED.get(ruby), error.to_string())
         }
     }
 }
@@ -99,9 +100,9 @@ pub fn script_error(ruby: &Ruby) -> ExceptionClass {
 
 // mini_racer raises these with rb_raise from C strings, so their messages are
 // binary strings; only messages that come from JavaScript are UTF-8.
-pub fn raised(ruby: &Ruby, class: ExceptionClass, message: &str) -> Error {
+pub fn raised(ruby: &Ruby, class: ExceptionClass, message: impl AsRef<[u8]>) -> Error {
     class
-        .new_instance((ruby.str_from_slice(message.as_bytes()),))
+        .new_instance((ruby.str_from_slice(message.as_ref()),))
         .map_or_else(|error| error, Error::from)
 }
 
@@ -114,7 +115,7 @@ pub fn undeserializable(ruby: &Ruby) -> Error {
     )
 }
 
-pub fn runtime(ruby: &Ruby, message: &str) -> Error {
+pub fn runtime(ruby: &Ruby, message: impl AsRef<[u8]>) -> Error {
     raised(ruby, RUNTIME.get(ruby), message)
 }
 

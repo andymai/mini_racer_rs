@@ -14,6 +14,8 @@ pub enum FlagError {
 pub enum JsErrorKind {
     Parse,
     Runtime,
+    /// V8 could not read the request itself.
+    Internal,
     Terminated(TerminationCause),
 }
 

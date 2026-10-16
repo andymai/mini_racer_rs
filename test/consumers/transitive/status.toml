@@ -1,3 +1,2 @@
-# rtlcss's own workload through mini_racer_rs: "pass", or "xfail:<milestone>"
-# until Context.new(timeout:) (S2) and Context#call (S3) land.
-rtlcss = "xfail:S3"
+# rtlcss's own workload through mini_racer_rs: "pass", or "xfail:<milestone>".
+rtlcss = "pass"

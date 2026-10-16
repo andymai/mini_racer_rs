@@ -267,7 +267,7 @@ pub fn value(ruby: &Ruby, bytes: &[u8]) -> Result<Value, Error> {
     };
     decode_value(bytes, RESULT_LIMITS, &mut visitor).map_err(|e| match e {
         DecodeError::Visitor(error) => error,
-        other => errors::runtime(ruby, &other.to_string()),
+        other => errors::runtime(ruby, other.to_string()),
     })
 }
 
