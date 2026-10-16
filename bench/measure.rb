@@ -124,10 +124,12 @@ result["idle_cpu_percent"] = metric do
   sleep 0.2
   window = quick ? 0.5 : 2.0
   started = Process.clock_gettime(Process::CLOCK_PROCESS_CPUTIME_ID)
+  woke = now
   sleep window
+  elapsed = (now - woke) / 1e9
   used = Process.clock_gettime(Process::CLOCK_PROCESS_CPUTIME_ID) - started
   contexts.each(&:dispose)
-  100 * used / window
+  100 * used / elapsed
 end
 
 props = BenchPayload.build
