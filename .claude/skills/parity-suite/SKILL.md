@@ -80,6 +80,9 @@ Locally, write runs into a fresh directory with `--out <dir>/<name>.jsonl` (one 
 | Also prove the harness is deterministic | add `--twin`: a second copy of the real gem must agree with the first on every case |
 | Record outcomes after a change | `bundle exec ruby test/diff/run.rb --write-ledger` (a new divergence becomes `xfail:S3`; existing milestones stay) |
 | Minimize new divergences | `bundle exec ruby test/diff/run.rb --shrink` (writes `test/diff/corpus/min-<id>.json`) |
+| Real libraries instead of generated values | `npm ci && npm run build` in `test/consumers/js`, then `bundle exec ruby test/diff/run.rb --set consumers --twin --strict` (ledger `test/consumers/candidate.status.toml`) |
+| A gem that depends on mini_racer resolves to this one | `BUNDLE_GEMFILE=$PWD/test/consumers/transitive/Gemfile bundle exec ruby test/consumers/transitive/check.rb` (rtlcss's own status is in `test/consumers/transitive/status.toml`) |
+| Numbers against the real gem | `bundle exec ruby bench/run.rb` (informational; `--quick` for a smoke run) |
 
 Each worker first reports the gem it loaded, so a broken reference bundle aborts the run instead of matching itself. `test/diff/candidate.status.toml` holds `same`, `accepted:<divergence>`, `xfail:<milestone>` (diverges) or `crash:<milestone>` (the candidate crashes or hangs) per case. An accepted divergence lives in `test/diff/divergences.toml`, matches one step, and must name a `compat.toml` deviation. Results and worker logs land in `tmp/diff/`.
 

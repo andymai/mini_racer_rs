@@ -16,7 +16,7 @@ status = "xfail:S3"
 status = "xfail:S3"
 
 [cases."curated-global-state-across-steps"]
-status = "xfail:S3"
+status = "same"
 
 [cases."curated-invalid-date"]
 status = "xfail:S3"

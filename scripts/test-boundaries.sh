@@ -138,6 +138,9 @@ CASES = [
     ("platform lists disagree", "check-platforms.sh", "platform", [
         replace("deny.toml", '  "x86_64-apple-darwin",\n', ""),
     ]),
+    ("transitive lockfile lacks a platform", "check-platforms.sh", "platform", [
+        replace("test/consumers/transitive/Gemfile.lock", "  arm64-darwin\n", ""),
+    ]),
 ]
 
 env = dict(os.environ, CARGO_NET_OFFLINE="true")

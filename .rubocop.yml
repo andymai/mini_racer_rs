@@ -23,18 +23,21 @@ Style/Documentation:
 # calls the JavaScript eval method, not Kernel#eval.
 Metrics/MethodLength:
   Exclude:
+    - "bench/**/*"
     - "lib/mini_racer_rs/vocabulary.rb"
     - "test/**/*"
     - "tools/**/*"
 
 Metrics/AbcSize:
   Exclude:
+    - "bench/**/*"
     - "rakelib/**/*"
     - "test/**/*"
     - "tools/**/*"
 
 Metrics/ModuleLength:
   Exclude:
+    - "bench/**/*"
     - "tools/**/*"
 
 Metrics/BlockLength:
@@ -45,12 +48,14 @@ Metrics/BlockLength:
 
 Metrics/CyclomaticComplexity:
   Exclude:
+    - "bench/**/*"
     - "rakelib/**/*"
     - "test/**/*"
     - "tools/**/*"
 
 Metrics/PerceivedComplexity:
   Exclude:
+    - "bench/**/*"
     - "rakelib/**/*"
     - "test/**/*"
     - "tools/**/*"
@@ -69,6 +74,12 @@ Style/FileOpen:
 Style/SuperArguments:
   Exclude:
     - "lib/mini_racer_rs/vocabulary.rb"
+
+# MiniRacer::Context#eval runs JavaScript, not a Ruby definition.
+Style/DocumentDynamicEvalDefinition:
+  Exclude:
+    - "bench/**/*"
+    - "test/**/*"
 
 Style/StringLiterals:
   EnforcedStyle: double_quotes

@@ -394,6 +394,22 @@ jobs:
       - name: Differential run against the real mini_racer
         if: matrix.os == 'ubuntu-24.04' && matrix.ruby == '3.4'
         run: bundle exec ruby test/diff/run.rb --twin --strict
+      - name: Consumer workloads against the real mini_racer
+        if: matrix.os == 'ubuntu-24.04' && matrix.ruby == '3.4'
+        run: |
+          (cd test/consumers/js && npm ci && npm run build)
+          bundle exec ruby test/diff/run.rb --set consumers --twin --strict
+      - name: A transitive dependent resolves to mini_racer_rs
+        if: matrix.os == 'ubuntu-24.04' && matrix.ruby == '3.4'
+        env:
+          BUNDLE_GEMFILE: ${{ github.workspace }}/test/consumers/transitive/Gemfile
+          BUNDLE_FROZEN: "true"
+        run: |
+          bundle install
+          bundle exec ruby test/consumers/transitive/check.rb
+      - name: Benchmark smoke (informational)
+        if: matrix.os == 'ubuntu-24.04' && matrix.ruby == '3.4'
+        run: bundle exec ruby bench/run.rb --quick
       # mini_racer's own suite, unmodified; every result must match the ledger.
       - name: Upstream suite (strict)
         run: bundle exec ruby test/upstream/run.rb --strict --seed "${{ github.run_number }}"

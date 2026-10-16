@@ -6,8 +6,6 @@
 
 require "json"
 
-HARNESS_ERROR = 3
-
 $stdin.set_encoding(Encoding::UTF_8)
 $stdout.set_encoding(Encoding::UTF_8)
 $stdout.sync = true
@@ -31,18 +29,48 @@ def arguments(step)
   step.fetch("args").map { |arg| DiffCanonical.decode(arg) }
 rescue StandardError => e
   warn "diff worker: cannot decode #{JSON.generate(step["args"])}: #{e.message}"
-  exit HARNESS_ERROR
+  exit 1
+end
+
+# Bundles run to megabytes, so a step names the file rather than piping its
+# source through every worker.
+def source(step)
+  return step.fetch("source") unless step.key?("file")
+
+  [File.read(step.fetch("file")), step["append"]].compact.join("\n")
+rescue SystemCallError => e
+  warn "diff worker: cannot read #{step["file"]}: #{e.message}"
+  exit 1
+end
+
+def execjs(step)
+  begin
+    require "execjs"
+  rescue LoadError => e
+    warn "diff worker: #{e.message}"
+    exit 1
+  end
+  ExecJS.compile(source(step)).call(step.fetch("function"), *arguments(step))
+end
+
+# A setup step's completion value is never compared, and ending it in undefined
+# keeps the step from also testing how a function or object converts.
+def evaluate(context, step)
+  context.eval(step["setup"] ? "#{source(step)}\n;undefined" : source(step))
 end
 
 def run(context, step)
   value = case step.fetch("op")
-          when "eval" then context.eval(step.fetch("source"))
+          when "eval" then evaluate(context, step)
           when "call" then context.call(step.fetch("path"), *arguments(step))
+          when "execjs" then execjs(step)
           else raise ArgumentError, "unknown step #{step["op"]}"
           end
   step["setup"] ? ["setup"] : DiffCanonical.encode(value)
-# mini_racer_rs raises NotImplementedError, which is not a StandardError, for options it does not support yet.
-rescue StandardError, NotImplementedError => e
+# What either gem raises is an outcome: NotImplementedError for an option
+# mini_racer_rs does not support yet, SystemStackError or NoMemoryError when a
+# conversion overflows. Only the harness itself exits the worker.
+rescue StandardError, NotImplementedError, SystemStackError, NoMemoryError => e
   DiffCanonical.failure(e)
 end
 

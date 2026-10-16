@@ -1,0 +1,20 @@
+{
+  "name": "mini-racer-rs-consumers",
+  "private": true,
+  "description": "JavaScript libraries the consumer workloads run, pinned exactly",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "@babel/standalone": "8.0.7",
+    "handlebars": "4.7.10",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "terser": "5.51.2"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}
