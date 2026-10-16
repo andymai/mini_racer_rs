@@ -40,6 +40,25 @@ class ContextTest < Minitest::Test
     assert_equal "too much recursion", error.message
   end
 
+  def test_results_nest_as_deep_inside_a_fiber
+    value = Fiber.new { @context.eval(nested(95)) }.resume
+    95.times { value = value.fetch(0) }
+
+    assert_equal [], value
+  end
+
+  # The Map is decoded inside the array's dropped named properties, so it
+  # hashes the array as decoded so far, which is all of its elements.
+  def test_a_map_keyed_by_an_array_being_decoded_finds_it
+    %w[[1,2,3] [,,1,,2]].each do |literal|
+      source = "(() => { const a = #{literal}; const m = new Map([[a, 'v']]); a.m = m; return [a, m] })()"
+      array, map = @context.eval(source)
+
+      assert_equal "v", map[array], literal
+      assert_equal "v", map[array.dup], literal
+    end
+  end
+
   def test_only_messages_from_javascript_are_utf8
     keyword = assert_raises(MiniRacer::RuntimeError) { MiniRacer::Context.new(bogus: 1) }
     thrown = assert_raises(MiniRacer::RuntimeError) { @context.eval("throw new Error('boom')") }
