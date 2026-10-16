@@ -73,6 +73,10 @@ pub fn init(ruby: &Ruby, racer: RModule) -> Result<(), Error> {
     class.define_method("eval", export!(method Context::eval, -1))?;
     class.define_method("call", export!(method Context::call, -1))?;
     class.define_method("attach", export!(method Context::attach, 2))?;
+    class.define_method(
+        "low_memory_notification",
+        export!(method Context::low_memory_notification, 0),
+    )?;
     class.define_method("stop", export!(method Context::stop, 0))?;
     class.define_method("dispose", export!(method Context::dispose, 0))?;
     Ok(())
@@ -304,6 +308,17 @@ impl Context {
         ruby: &Ruby,
         run: impl FnOnce(&mut RubyHost<'_>) -> Result<T, EngineError>,
     ) -> Result<T, Error> {
+        self.warn_if_deep(ruby)?;
+        let callbacks = Callbacks {
+            callables: self.callables(ruby)?,
+            raised: &self.raised,
+        };
+        let mut host = RubyHost::with_callbacks(ruby, callbacks);
+        let result = run(&mut host);
+        host.finish(result)
+    }
+
+    fn warn_if_deep(&self, ruby: &Ruby) -> Result<(), Error> {
         let depth = self.handle(ruby)?.depth();
         if depth > 0 && depth % DEEP_NESTING == 0 {
             let _ = writeln!(
@@ -311,12 +326,17 @@ impl Context {
                 "mini_racer: deep js->ruby->js recursion, depth={depth}"
             );
         }
-        let callbacks = Callbacks {
-            callables: self.callables(ruby)?,
-            raised: &self.raised,
-        };
-        let mut host = RubyHost::with_callbacks(ruby, callbacks);
-        let result = run(&mut host);
+        Ok(())
+    }
+
+    // mini_racer sends this one without its result decoding, which also
+    // leaves the exception a callback raised for the enclosing dispatch.
+    fn low_memory_notification(ruby: &Ruby, rb_self: &Self) -> Result<(), Error> {
+        let handle = rb_self.handle(ruby)?;
+        let _locked = rb_self.acquire(ruby)?;
+        rb_self.warn_if_deep(ruby)?;
+        let mut host = RubyHost::new(ruby);
+        let result = handle.low_memory_notification(&mut host);
         host.finish(result)
     }
 

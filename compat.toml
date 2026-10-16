@@ -169,7 +169,7 @@ status = "done"
 status = "done"
 
 [ids."imethod:MiniRacer::Context#low_memory_notification"]
-status = "todo:M3"
+status = "done"
 
 [ids."imethod:MiniRacer::Context#perform_microtask_checkpoint@ruby"]
 status = "todo:M4"

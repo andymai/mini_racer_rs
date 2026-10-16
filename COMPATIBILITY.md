@@ -4,7 +4,7 @@
 
 | Engine | Done | Planned | Deviation |
 |---|---|---|---|
-| CRuby | 42 | 12 | 15 |
+| CRuby | 43 | 11 | 15 |
 | TruffleRuby | 58 | 0 | 0 |
 
 ## Surface
@@ -49,7 +49,7 @@
 | `imethod:MiniRacer::Context#heap_stats` | planned (M3) | done |
 | `imethod:MiniRacer::Context#isolate` | n/a | done |
 | `imethod:MiniRacer::Context#load` | done | done |
-| `imethod:MiniRacer::Context#low_memory_notification` | planned (M3) | done |
+| `imethod:MiniRacer::Context#low_memory_notification` | done | done |
 | `imethod:MiniRacer::Context#perform_microtask_checkpoint` | planned (M4) | n/a |
 | `imethod:MiniRacer::Context#pump_message_loop` | planned (M4) | n/a |
 | `imethod:MiniRacer::Context#stop` | done | done |

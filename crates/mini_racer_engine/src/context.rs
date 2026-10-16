@@ -199,6 +199,16 @@ impl ContextHandle {
         .map(drop)
     }
 
+    /// Asks V8 to collect as much garbage as it can; returns once it has.
+    pub fn low_memory_notification(&self, host: &mut impl Host) -> Result<(), EngineError> {
+        self.dispatch(
+            DispatchKind::Maintenance,
+            |depth| Request::LowMemoryNotification { depth },
+            host,
+        )
+        .map(drop)
+    }
+
     /// Builds a startup snapshot from `code`, or warms `base` up with it, on
     /// a context made for the purpose and disposed after, as `mini_racer`
     /// does.
