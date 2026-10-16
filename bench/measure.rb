@@ -17,6 +17,10 @@ abort "bench: started as #{role} but the #{loaded} gem loaded" unless role == lo
 def now = Process.clock_gettime(Process::CLOCK_MONOTONIC, :nanosecond)
 def percentile(sorted, fraction) = sorted[((sorted.size - 1) * fraction).round]
 
+def spread(times)
+  { "p50" => percentile(times, 0.5), "p99" => percentile(times, 0.99), "p999" => percentile(times, 0.999) }
+end
+
 def samples(count, warmup, &)
   warmup.times(&)
   Array.new(count) do
@@ -39,29 +43,83 @@ result = {
 
 result["eval_rtt_ns"] = metric do
   context = MiniRacer::Context.new
-  times = samples(rounds, rounds / 10) { context.eval("1") }
-  { "p50" => percentile(times, 0.5), "p99" => percentile(times, 0.99) }
+  spread(samples(rounds, rounds / 10) { context.eval("1") })
 end
 
 result["call_rtt_ns"] = metric do
   context = MiniRacer::Context.new
   context.eval("function id(x) { return x }")
-  times = samples(rounds, rounds / 10) { context.call("id", 1) }
-  { "p50" => percentile(times, 0.5), "p99" => percentile(times, 0.99) }
+  spread(samples(rounds, rounds / 10) { context.call("id", 1) })
 end
 
-# Neither side disposes inside the loop, since mini_racer_rs has no dispose yet,
-# and GC is off while timing so no finalizer of an earlier context lands in a
-# later sample. The count stays small because every context keeps its isolate.
-result["startup_ns"] = metric do
+# A timeout arms a watchdog around every call, which a plain call skips.
+result["call_timeout_rtt_ns"] = metric do
+  context = MiniRacer::Context.new(timeout: 60_000)
+  context.eval("function id(x) { return x }")
+  spread(samples(rounds, rounds / 10) { context.call("id", 1) })
+end
+
+# One sample is a JavaScript loop of callbacks, so the cost per callback is
+# the round trip from V8 to Ruby and back, without a Ruby-side dispatch.
+result["callback_rtt_ns"] = metric do
+  context = MiniRacer::Context.new
+  context.attach("echo", proc { |x| x })
+  context.eval("globalThis.calls = (n) => { let s = 0; for (let i = 0; i < n; i++) s += echo(i); return s }")
+  batch = quick ? 200 : 2_000
+  times = samples(quick ? 5 : 50, 5) { context.call("calls", batch) }
+  spread(times.map { |time| time / batch })
+end
+
+def startup(count, &)
   GC.start
   GC.disable
-  5.times { MiniRacer::Context.new.eval("1+1") }
-  times = samples(quick ? 10 : 50, 0) { MiniRacer::Context.new.eval("1+1") }
-  { "p50" => percentile(times, 0.5), "p99" => percentile(times, 0.99) }
+  times = samples(count, 3, &)
+  spread(times)
 ensure
   GC.enable
   GC.start
+end
+
+result["startup_ns"] = metric do
+  startup(quick ? 10 : 50) do
+    context = MiniRacer::Context.new
+    context.eval("1+1")
+    context.dispose
+  end
+end
+
+babel = File.read(File.join(__dir__, "../vendor/mini_racer/benchmark/babel/helper_files/babel.js"))
+
+result["babel_eval_startup_ns"] = metric do
+  startup(quick ? 3 : 20) do
+    context = MiniRacer::Context.new
+    context.eval(babel)
+    context.eval("typeof babel.transform")
+    context.dispose
+  end
+end
+
+result["babel_snapshot_startup_ns"] = metric do
+  snapshot = MiniRacer::Snapshot.new(babel)
+  result["babel_snapshot_bytes"] = snapshot.size
+  startup(quick ? 3 : 20) do
+    context = MiniRacer::Context.new(snapshot: snapshot)
+    context.eval("typeof babel.transform")
+    context.dispose
+  end
+end
+
+# CPU time of the whole process, every runner thread included, while 50
+# contexts that each ran one eval sit idle.
+result["idle_cpu_percent"] = metric do
+  contexts = Array.new(50) { MiniRacer::Context.new.tap { |context| context.eval("1") } }
+  sleep 0.2
+  window = quick ? 0.5 : 2.0
+  started = Process.clock_gettime(Process::CLOCK_PROCESS_CPUTIME_ID)
+  sleep window
+  used = Process.clock_gettime(Process::CLOCK_PROCESS_CPUTIME_ID) - started
+  contexts.each(&:dispose)
+  100 * used / window
 end
 
 props = BenchPayload.build
