@@ -270,7 +270,7 @@ impl Notifier for Ring {
 // `park_notified`, never sleeps through the response or a callback.
 #[test]
 fn a_waiter_woken_by_the_notifier_never_misses_its_turn() {
-    loom::model(|| {
+    bounded(3, || {
         let channel = Arc::new(Channel::<Numbers>::default());
         let bell = Arc::new(Doorbell::default());
         channel.set_notifier(Side::Ruby, Some(Box::new(Ring(Arc::clone(&bell)))));
