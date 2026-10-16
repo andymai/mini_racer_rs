@@ -1,0 +1,152 @@
+name: Extended
+
+# Weekly runs too long or too far ahead for CI: Ruby head, the source gem on
+# machines with and without a system libclang, upstream's standalone scripts
+# including the hours-long crash script, and a build against the newest v8
+# crate. Ruby head and the v8 canary report without failing the run.
+
+on:
+  schedule:
+    - cron: "0 9 * * 0"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: extended
+  cancel-in-progress: false
+
+jobs:
+  ruby-head:
+    name: Ruby head
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    continue-on-error: true
+    permissions:
+      contents: read
+    env:
+      CI: "true"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: true
+      - uses: ./.github/actions/setup
+        with:
+          ruby: head
+      - run: bundle exec rake compile
+      - run: bundle exec rake test
+
+  source-gem:
+    name: Source gem (${{ matrix.libclang }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - libclang: system
+            os: ubuntu-24.04
+          # No clang on the image, so extconf.rb must find the libclang gem.
+          - libclang: libclang gem
+            os: ubuntu-24.04
+            container: ruby:3.4-bookworm@sha256:80259ba83f866aaa43c689e11569dc950b2e508effca0799d50608f7c4ca6172
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ruby/setup-ruby@651ff0d62c5c79bed6d53ec518387aae20e72c1a # v1.329.0
+        if: matrix.container == ''
+        with:
+          ruby-version: "3.4"
+      - name: Install Rust
+        if: matrix.container != ''
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          echo "$HOME/.cargo/bin" >>"$GITHUB_PATH"
+      - name: Check that the image has no libclang
+        if: matrix.container != ''
+        run: |
+          if command -v llvm-config || ls /usr/lib/llvm-*/lib/libclang*.so* /usr/lib/*-linux-gnu/libclang*.so* 2>/dev/null; then
+            echo "::error::the image has a system libclang"
+            exit 1
+          fi
+      - name: Build, install into an empty GEM_HOME and smoke-test
+        env:
+          EXPECTED_PLATFORM: ruby
+          LIBCLANG_GEM: ${{ matrix.libclang == 'libclang gem' }}
+        run: |
+          gem build mini_racer_rs.gemspec --output "$RUNNER_TEMP/mini_racer_rs.gem"
+          export GEM_HOME="$RUNNER_TEMP/gems" GEM_PATH="$RUNNER_TEMP/gems"
+          rb_sys=$(sed -nE 's/^ *spec\.add_dependency "rb_sys", "= ([^"]+)"$/\1/p' mini_racer_rs.gemspec)
+          gem install rb_sys -v "$rb_sys" --no-document
+          if [ "$LIBCLANG_GEM" = true ]; then
+            gem install libclang --no-document
+          fi
+          # Outside the checkout, whose rust-toolchain.toml would pick another.
+          cd "$RUNNER_TEMP"
+          rustc --version
+          gem install --local --no-document mini_racer_rs.gem
+          ruby -e 'require "mini_racer"; exit(MiniRacer::Context.new.eval("1+1") == 2)'
+
+  upstream-scripts:
+    name: Upstream scripts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    permissions:
+      contents: read
+    env:
+      CI: "true"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: true
+      - uses: ./.github/actions/setup
+        with:
+          ruby: "3.4"
+      - run: bundle exec rake compile
+      - run: bundle exec ruby test/upstream/run.rb --scripts --weekly
+      - name: Keep script logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: upstream-scripts
+          path: tmp/upstream
+          retention-days: 30
+
+  # Not the pinned V8 archive: the newest v8 crate downloads its own.
+  v8-canary:
+    name: Newest v8 crate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    continue-on-error: true
+    permissions:
+      contents: read
+    env:
+      CI: "true"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: true
+      - uses: ./.github/actions/setup
+        with:
+          ruby: "3.4"
+          v8: "false"
+          tools: cargo-nextest taplo-cli
+      - name: Move the v8 pin to the newest release
+        run: |
+          pinned=$(taplo get -f Cargo.toml workspace.dependencies.v8)
+          newest=$(curl -fsS -A "mini_racer_rs CI (github.com/andymai/mini_racer_rs)" https://crates.io/api/v1/crates/v8 |
+            jq -r .crate.max_stable_version)
+          [[ "$newest" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::unexpected version '$newest'"; exit 1; }
+          echo "pinned $pinned, newest $newest" | tee -a "$GITHUB_STEP_SUMMARY"
+          NEWEST=$newest ruby -i -pe 'sub(/\Av8 = "=[^"]+"/) { %(v8 = "=#{ENV.fetch("NEWEST")}") }' Cargo.toml
+          cargo update -p v8
+      - run: cargo nextest run -p mini_racer_engine
+      - run: bundle exec rake compile
+      - run: bundle exec rake test

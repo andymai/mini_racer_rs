@@ -83,6 +83,9 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | Dependency updates and advisory scans | `.github/dependabot.yml`, `.github/workflows/dependabot-auto-merge.yml`, `.github/workflows/osv-scan.yml`, `osv-scanner.toml` |
 | CI | `.github/workflows/ci.yml`, `.github/actions/setup/action.yml` |
 | Sanitizer runs (nightly, and on PRs labeled `sanitizers`) | `.github/workflows/nightly.yml`, `scripts/sanitizers.sh`, `.github/sanitizers/lsan.supp` |
+| Nightly fuzzing (15 minutes per target) and fresh-seed differential runs (30 minutes) | `.github/workflows/nightly.yml`, `scripts/fuzz-smoke.sh`, `test/diff/run.rb` (`--explore`) |
+| Weekly: Ruby head, the source gem with and without a system libclang, upstream's scripts including the crash script, the newest v8 crate | `.github/workflows/extended.yml` |
+| Weekly benchmark on a hosted runner (informational) | `.github/workflows/bench.yml` |
 | Engine teardown checked for leaks, in both V8 platform modes | `crates/mini_racer_engine/tests/teardown.rs`, `crates/mini_racer_engine/tests/teardown_single_threaded.rs` |
 | Upstream suite runner, suites, guard, reporter | `test/upstream/run.rb`, `test/upstream/suites.rb`, `test/upstream/preload.rb`, `test/upstream/reporter.rb` |
 | Per-test parity ledgers | `test/upstream/mini_racer.status.toml`, `test/upstream/execjs.status.toml`, `test/upstream/milestones.toml` |
@@ -99,7 +102,7 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | Compat reflection, extraction, check and rendering | `tools/compat/`, `rakelib/compat.rake` |
 | Generated from compat.toml (never edit) | `COMPATIBILITY.md`, the README compat table |
 
-Skills: `.claude/skills/pr-workflow` (branch to merge), `.claude/skills/layer-boundaries` (dependencies, fences, check failures), `.claude/skills/parity-suite` (upstream suite and ledger).
+Skills: `.claude/skills/pr-workflow` (branch to merge), `.claude/skills/layer-boundaries` (dependencies, fences, check failures), `.claude/skills/parity-suite` (upstream suite and ledger), `.claude/skills/v8-bump` (moving the pinned V8).
 
 ## Commands
 
@@ -128,6 +131,7 @@ bundle exec rake compat:render     # regenerate everything compat.toml generates
 bundle exec rake compat:verify     # compat:check plus a fresh reflection of the real gem (needs tools/reference)
 bundle exec ruby test/diff/run.rb --twin --strict   # the real gem and this one on the same values (needs tools/reference)
 bundle exec ruby test/diff/run.rb --set consumers --twin --strict   # real libraries (npm run build in test/consumers/js first)
+bundle exec ruby test/diff/run.rb --explore --shrink --seed 42 --js 1500 --ruby 1500   # a fresh seed, no ledger, no shared objects
 BUNDLE_GEMFILE=$PWD/test/consumers/transitive/Gemfile bundle exec ruby test/consumers/transitive/check.rb
 bundle exec ruby bench/run.rb     # medians against the real gem; --quick for a smoke run
 bundle exec ruby -Ilib test/stress/round_trips.rb   # 1M evals after a 500k warm-up; fails on RSS growth over 5%
