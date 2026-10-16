@@ -56,8 +56,8 @@ class Worker
   def env
     common = { "TZ" => "UTC" }
     if @role == "candidate"
-      # with_unbundled_env drops every BUNDLE_* variable, and CI installs some
-      # groups only; the child must ask Bundler for the same groups.
+      # Read before with_unbundled_env drops every BUNDLE_* variable: CI installs
+      # some groups only, and the child must ask Bundler for the same groups.
       return common.merge("BUNDLE_GEMFILE" => File.join(ROOT, "Gemfile"),
                           "BUNDLE_WITHOUT" => ENV.fetch("BUNDLE_WITHOUT", nil),)
     end
@@ -69,8 +69,9 @@ class Worker
   def start
     args = ["bundle", "exec", "ruby", *(@role == "candidate" ? ["-I#{File.join(ROOT, "lib")}"] : []),
             File.join(__dir__, "worker.rb"), @role,]
+    worker_env = env
     spawn = lambda do
-      IO.popen(env, args, "r+", chdir: ROOT, pgroup: true, err: [@log, "a"], external_encoding: Encoding::UTF_8)
+      IO.popen(worker_env, args, "r+", chdir: ROOT, pgroup: true, err: [@log, "a"], external_encoding: Encoding::UTF_8)
     end
     @io = defined?(Bundler) ? Bundler.with_unbundled_env(&spawn) : spawn.call
     line = @io.gets if @io.wait_readable(START_LIMIT)

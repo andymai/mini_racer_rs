@@ -18,6 +18,7 @@ class DiffLedgerTest < Minitest::Test
     assert_equal "diverged", DiffLedger.classify(REF, OURS, [])
     assert_equal "accepted:syntax-wording", DiffLedger.classify(REF, OURS, [WORDING])
     assert_equal "crashed", DiffLedger.classify(REF, [["crash", "signal 11"]], [])
+    assert_equal "crashed", DiffLedger.classify([["crash", "signal 6"]], [["crash", "signal 11"]], [])
   end
 
   def test_an_accepted_step_never_covers_another

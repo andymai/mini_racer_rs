@@ -38,7 +38,7 @@ module DiffLedger
   # in one step never covers a new one in another.
   def classify(expected, actual, divergences)
     return "same" if expected == actual
-    return "crashed" if crashed?(actual) && !crashed?(expected)
+    return "crashed" if crashed?(actual)
     return "diverged" unless expected.size == actual.size
 
     accepted = expected.zip(actual).reject { |pair| pair[0] == pair[1] }.map do |step_expected, step_actual|
