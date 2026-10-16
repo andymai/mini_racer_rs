@@ -117,6 +117,21 @@ fn serve(block: &Arc<ControlBlock>, snapshot: Option<Vec<u8>>) -> bool {
                 }
                 continue;
             }
+            // mini_racer answers before collecting, so the caller goes on while
+            // V8 works.
+            Some(ToV8::Request(Request::LowMemoryNotification {
+                depth: Depth::Outermost(dispatch),
+            })) => {
+                let response = match block.term.end(dispatch) {
+                    Some(_) => Err(EngineError::Disposed),
+                    None => Ok(Vec::new()),
+                };
+                if block.channel.respond(response).is_err() {
+                    break false;
+                }
+                isolate.low_memory_notification();
+                continue;
+            }
             Some(ToV8::Request(request)) => request,
             // No callback is outstanding here, so there is nothing to reply to.
             Some(ToV8::Reply(_)) => continue,
@@ -177,6 +192,18 @@ fn handle(
             script(scope, runtime, depth, DispatchKind::Maintenance, |tc| {
                 attach(tc, &request)
             })
+        }
+        Request::LowMemoryNotification { depth } => {
+            let halted = match depth {
+                Depth::Outermost(dispatch) => runtime.block.term.end(dispatch).is_some(),
+                Depth::Nested => false,
+            };
+            scope.low_memory_notification();
+            if halted {
+                Err(EngineError::Disposed)
+            } else {
+                Ok(Vec::new())
+            }
         }
         // The extension refuses a dispose from inside a callback before it
         // gets here.

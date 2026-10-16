@@ -73,6 +73,10 @@ pub fn init(ruby: &Ruby, racer: RModule) -> Result<(), Error> {
     class.define_method("eval", export!(method Context::eval, -1))?;
     class.define_method("call", export!(method Context::call, -1))?;
     class.define_method("attach", export!(method Context::attach, 2))?;
+    class.define_method(
+        "low_memory_notification",
+        export!(method Context::low_memory_notification, 0),
+    )?;
     class.define_method("stop", export!(method Context::stop, 0))?;
     class.define_method("dispose", export!(method Context::dispose, 0))?;
     Ok(())
@@ -318,6 +322,12 @@ impl Context {
         let mut host = RubyHost::with_callbacks(ruby, callbacks);
         let result = run(&mut host);
         host.finish(result)
+    }
+
+    fn low_memory_notification(ruby: &Ruby, rb_self: &Self) -> Result<Value, Error> {
+        let handle = rb_self.handle(ruby)?;
+        rb_self.dispatch(ruby, |host| handle.low_memory_notification(host))?;
+        Ok(ruby.qnil().as_value())
     }
 
     fn stop(ruby: &Ruby, rb_self: &Self) -> Result<(), Error> {

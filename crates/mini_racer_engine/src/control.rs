@@ -70,6 +70,9 @@ pub enum Request {
         request: Vec<u8>,
         depth: Depth,
     },
+    LowMemoryNotification {
+        depth: Depth,
+    },
     // Built on the runner of a context made for it, as mini_racer builds one
     // on a throwaway context: from `code` alone, or by warming `base` up.
     Snapshot {
