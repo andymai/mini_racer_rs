@@ -83,7 +83,8 @@ impl DataTypeFunctions for Pins {
 }
 
 impl Pins {
-    /// The holder lives on the native stack, where the GC finds it.
+    /// Keep using the returned `Obj` while the values are needed; a reference
+    /// into its data alone does not keep the holder alive.
     pub fn new(ruby: &Ruby) -> Obj<Self> {
         ruby.obj_wrap(Self::default())
     }

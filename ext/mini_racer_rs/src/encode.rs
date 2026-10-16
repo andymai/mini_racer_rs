@@ -12,6 +12,7 @@ use mini_racer_wire::Writer;
 
 use crate::gc_root::{OnceRoot, Pins, StaticRoot};
 use crate::rb_raw;
+use magnus::typed_data::Obj;
 
 // Ruby's builtin type numbers, as mini_racer's serialize1 switches on them.
 const T_OBJECT: u32 = 0x01;
@@ -62,7 +63,10 @@ enum Item {
 // V8's own reader then decides how deep is too deep, as with mini_racer.
 struct Encoder<'r, 'o> {
     ruby: &'r Ruby,
-    pins: &'r Pins,
+    // The object, not a reference into its data: each use of the object keeps
+    // it where the GC finds it, while a bare data pointer lets an optimized
+    // build drop it and the GC free it mid-encode.
+    pins: Obj<Pins>,
     writer: Writer<'o>,
     work: Vec<Item>,
     seen: HashMap<u64, u32>,
@@ -71,11 +75,10 @@ struct Encoder<'r, 'o> {
 /// Writes `value` as `mini_racer`'s `serialize` does, with the object ids V8
 /// assigns on reading.
 pub fn encode(ruby: &Ruby, value: Value) -> Result<Vec<u8>, EncodeError> {
-    let pins = Pins::new(ruby);
     let mut out = Vec::new();
     let mut encoder = Encoder {
         ruby,
-        pins: &pins,
+        pins: Pins::new(ruby),
         writer: Writer::new(&mut out),
         work: Vec::new(),
         seen: HashMap::new(),
