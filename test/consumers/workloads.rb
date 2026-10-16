@@ -66,7 +66,7 @@ module DiffConsumers
     bundles = WORKLOADS.values.flatten.filter_map { |step| step["bundle"] }.uniq
     missing = bundles.reject { |name| File.exist?(bundle(name)) }
     raise "missing consumer bundles #{missing.join(", ")}; run `npm ci && npm run build` in #{JS}" unless missing.empty?
-    raise "consumer bundles are older than #{JS}/package-lock.json; run `npm ci && npm run build` there" unless current?
+    raise "consumer bundles are older than their sources in #{JS}; run `npm ci && npm run build` there" unless current?
 
     WORKLOADS.map do |name, steps|
       { "id" => "consumer-#{name}", "kind" => "program", "steps" => steps.map { |step| resolve(step) } }
@@ -77,10 +77,20 @@ module DiffConsumers
     File.join(BUNDLES, "#{name}.js")
   end
 
-  # build.mjs records the lockfile digest the bundles were built from.
+  # Bundles are build output in tmp/, so nothing else notices when their
+  # inputs change; build.mjs stamps the digest of the same files, in the same order.
   def current?
-    stamp = File.join(BUNDLES, "package-lock.sha256")
-    File.exist?(stamp) && File.read(stamp).strip == Digest::SHA256.file(File.join(JS, "package-lock.json")).hexdigest
+    stamp = File.join(BUNDLES, "inputs.sha256")
+    File.exist?(stamp) && File.read(stamp).strip == inputs_digest
+  end
+
+  def inputs_digest
+    files = ["build.mjs", "package-lock.json", *Dir.children(File.join(JS, "entries")).sort.map do |name|
+      "entries/#{name}"
+    end,]
+    digest = Digest::SHA256.new
+    files.each { |file| digest << file << "\0" << File.binread(File.join(JS, file)) << "\0" }
+    digest.hexdigest
   end
 
   def resolve(step)

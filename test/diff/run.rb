@@ -23,6 +23,7 @@ LEDGERS = { "values" => File.join(__dir__, "candidate.status.toml"),
             "consumers" => File.expand_path("../consumers/candidate.status.toml", __dir__), }.freeze
 DIVERGENCES = File.join(__dir__, "divergences.toml")
 CORPUS = File.join(__dir__, "corpus")
+FAILED = %w[raise crash timeout].freeze
 WORK = DiffWorkers::WORK
 
 options = { set: "values", seed: 1, js: 200, ruby: 100, twin: false, strict: false, write_ledger: false, shrink: false }
@@ -100,6 +101,17 @@ begin
   end
 rescue DiffWorkers::HarnessError => e
   abort "diff: #{e.message}"
+end
+
+# A consumer workload is a real library doing real work: if the real gem
+# raises or crashes on a step, the workload or its bundle is broken, and a
+# matching failure on both sides would only hide that.
+if options[:set] == "consumers"
+  failed = results.filter_map do |result|
+    step = result["expected"].index { |outcome| FAILED.include?(outcome.first) }
+    "#{result["id"]} step #{step}: #{JSON.generate(result["expected"][step])[0, 200]}" if step
+  end
+  abort "diff: the real mini_racer failed consumer workloads:\n#{failed.join("\n")}" unless failed.empty?
 end
 
 out = options[:out] || File.join(WORK,

@@ -1,6 +1,6 @@
 import { build } from "esbuild";
 import { createHash } from "node:crypto";
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -21,5 +21,7 @@ await build({
   define: { "process.env.NODE_ENV": '"production"' },
 });
 
-const lock = readFileSync(join(here, "package-lock.json"));
-writeFileSync(join(out, "package-lock.sha256"), `${createHash("sha256").update(lock).digest("hex")}\n`);
+const inputs = ["build.mjs", "package-lock.json", ...readdirSync(join(here, "entries")).sort().map((name) => `entries/${name}`)];
+const digest = createHash("sha256");
+for (const file of inputs) digest.update(`${file}\0`).update(readFileSync(join(here, file))).update("\0");
+writeFileSync(join(out, "inputs.sha256"), `${digest.digest("hex")}\n`);

@@ -21,7 +21,11 @@ abort "transitive: #{problems.join("; ")}" unless problems.empty?
 puts "rtlcss #{specs["rtlcss"].version} -> mini_racer #{specs["mini_racer"].version} (shim) -> mini_racer_rs #{MiniRacerRs::VERSION}"
 
 status = File.read(File.join(__dir__, "status.toml"))[/^rtlcss = "([^"]+)"$/, 1]
-abort "transitive: status.toml has no rtlcss status" unless status
+milestones = File.read(File.expand_path("../../upstream/milestones.toml",
+                                        __dir__,)).scan(/^\[milestones\.(\w+)\]$/).flatten
+unless status == "pass" || (status&.start_with?("xfail:") && milestones.include?(status.delete_prefix("xfail:")))
+  abort "transitive: status.toml's rtlcss status #{status.inspect} is neither pass nor xfail:<declared milestone>"
+end
 
 begin
   flipped = Rtlcss.flip_css(CSS)

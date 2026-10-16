@@ -32,7 +32,8 @@ rescue StandardError => e
   exit 1
 end
 
-# A consumer step names a bundle file instead of carrying megabytes of source.
+# Bundles run to megabytes, so a step names the file rather than piping its
+# source through every worker.
 def source(step)
   return step.fetch("source") unless step.key?("file")
 
