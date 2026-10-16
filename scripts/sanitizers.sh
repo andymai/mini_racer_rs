@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# AddressSanitizer and ThreadSanitizer runs on the pinned nightly, Linux x86_64:
-# engine teardown with leak detection in both V8 platform modes, every engine
-# and sync test for memory errors, and the sync crate's tests for data races.
+# -Zsanitizer needs a nightly, so this uses the one pinned for fuzzing, and
+# -Zbuild-std needs an explicit target.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

@@ -25,33 +25,38 @@ fn terminated(result: Result<Vec<u8>, EngineError>) -> bool {
     matches!(result, Err(EngineError::Js(js)) if matches!(js.kind, JsErrorKind::Terminated(_)))
 }
 
-/// Creates contexts on several threads, runs, stops, times out and disposes
-/// them, disposing every one explicitly.
 pub fn churn() {
     std::thread::scope(|scope| {
         for _ in 0..4 {
             scope.spawn(|| {
                 for round in 0..25 {
-                    let config = ContextConfig {
-                        timeout: (round % 5 == 0).then(|| Duration::from_millis(20)),
-                    };
-                    let context = ContextHandle::spawn(config, &mut Parking).expect("spawn");
+                    let context = ContextHandle::spawn(ContextConfig::default(), &mut Parking)
+                        .expect("spawn");
                     assert!(
                         context
                             .eval("[1, 'two', 3.5]".to_owned(), &mut Parking)
                             .is_ok()
                     );
-                    if round % 5 == 0 {
-                        assert!(terminated(
-                            context.eval("while (true) {}".to_owned(), &mut Parking)
-                        ));
-                    }
                     if round % 3 == 0 {
                         context.stop().expect("live context");
                         assert!(terminated(context.eval("1".to_owned(), &mut Parking)));
                     }
                     context.begin_dispose();
                     context.dispose(&mut Parking).expect("dispose");
+                    if round % 5 == 0 {
+                        let timed = ContextHandle::spawn(
+                            ContextConfig {
+                                timeout: Some(Duration::from_millis(20)),
+                            },
+                            &mut Parking,
+                        )
+                        .expect("spawn");
+                        assert!(terminated(
+                            timed.eval("while (true) {}".to_owned(), &mut Parking)
+                        ));
+                        timed.begin_dispose();
+                        timed.dispose(&mut Parking).expect("dispose");
+                    }
                 }
             });
         }
