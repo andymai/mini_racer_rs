@@ -1,8 +1,9 @@
 name: Ledger generate
 
 # Produces the raw results that `rake ledger:merge` turns into
-# test/upstream/mini_racer.status.toml: one reference run of the real
-# mini_racer 0.22.1 and three candidate seeds, on every leg CI checks.
+# test/upstream/mini_racer.status.toml and, with SUITE=execjs,
+# test/upstream/execjs.status.toml: one reference run of the real mini_racer
+# 0.22.1 and three candidate seeds of each suite, on every leg CI checks.
 # Runs on demand, or on a PR while it carries the ledger-generate label; adding
 # any other label does not restart it.
 on:
@@ -54,11 +55,17 @@ jobs:
       - name: Reference and candidate runs
         run: |
           mkdir -p results
-          bundle exec ruby test/upstream/run.rb --reference --seed 1 --out "results/reference-1.jsonl"
-          for seed in 1 2 3; do
-            bundle exec ruby test/upstream/run.rb --seed "$seed" --out "results/candidate-$seed.jsonl"
+          failed=0
+          for suite in mini_racer execjs; do
+            bundle exec ruby test/upstream/run.rb --suite "$suite" --reference --seed 1 --out "results/$suite-reference-1.jsonl" || failed=1
+            for seed in 1 2 3; do
+              bundle exec ruby test/upstream/run.rb --suite "$suite" --seed "$seed" --out "results/$suite-candidate-$seed.jsonl" || failed=1
+            done
           done
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+          exit "$failed"
+      # A failed run still uploads every result the other runs wrote.
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ledger-${{ matrix.os }}-${{ matrix.ruby }}
           path: results
@@ -92,11 +99,17 @@ jobs:
       - name: Reference and candidate runs
         run: |
           mkdir -p results
-          bundle exec ruby test/upstream/run.rb --reference --seed 1 --out "results/reference-1.jsonl"
-          for seed in 1 2 3; do
-            bundle exec ruby test/upstream/run.rb --seed "$seed" --out "results/candidate-$seed.jsonl"
+          failed=0
+          for suite in mini_racer execjs; do
+            bundle exec ruby test/upstream/run.rb --suite "$suite" --reference --seed 1 --out "results/$suite-reference-1.jsonl" || failed=1
+            for seed in 1 2 3; do
+              bundle exec ruby test/upstream/run.rb --suite "$suite" --seed "$seed" --out "results/$suite-candidate-$seed.jsonl" || failed=1
+            done
           done
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+          exit "$failed"
+      # A failed run still uploads every result the other runs wrote.
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ledger-truffleruby
           path: results

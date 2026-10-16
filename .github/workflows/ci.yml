@@ -397,6 +397,8 @@ jobs:
       # mini_racer's own suite, unmodified; every result must match the ledger.
       - name: Upstream suite (strict)
         run: bundle exec ruby test/upstream/run.rb --strict --seed "${{ github.run_number }}"
+      - name: ExecJS contract suite (strict)
+        run: bundle exec ruby test/upstream/run.rb --suite execjs --strict --seed "${{ github.run_number }}"
       - name: Upstream scripts (recorded until their milestone)
         if: matrix.os == 'ubuntu-24.04' && matrix.ruby == '3.4'
         run: bundle exec ruby test/upstream/run.rb --scripts
@@ -459,6 +461,8 @@ jobs:
           bundle exec ruby tools/compat/check.rb tmp/compat/candidate-truffleruby.json tmp/compat/reference-truffleruby.json
       - name: Upstream suite (strict)
         run: bundle exec ruby test/upstream/run.rb --strict --seed "${{ github.run_number }}"
+      - name: ExecJS contract suite (strict)
+        run: bundle exec ruby test/upstream/run.rb --suite execjs --strict --seed "${{ github.run_number }}"
 
   # !cancelled() rather than always(): a run superseded by a newer push must
   # not report a failing gate for its commit.

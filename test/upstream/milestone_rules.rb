@@ -17,6 +17,7 @@ module MilestoneRules
   }.freeze
 
   RULES = [
+    ["M8", ->(file, _name) { file.end_with?("test_execjs.rb") }],
     ["S6", ->(file, name) { file.end_with?("single_threaded_test.rb") && name.start_with?("test_fork_") }],
     ["M6", ->(file, name) { file.end_with?("single_threaded_test.rb") || name.include?("test_forking") }],
     ["M4", ->(file, name) { file.end_with?("async_test.rb") || name.match?(/wasm|promise|microtask/) }],

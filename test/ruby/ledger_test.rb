@@ -37,4 +37,12 @@ class LedgerTest < Minitest::Test
 
     assert_match "undeclared milestone", UpstreamLedger.malformed(ID, entry, %w[M1]).first
   end
+
+  def test_the_legs_list_takes_the_layout_taplo_picks
+    short = UpstreamLedger.dump({}, %w[ruby-3.4-linux-x86_64])
+    long = UpstreamLedger.dump({}, (1..8).map { |n| "ruby-3.#{n}-linux-x86_64" })
+
+    assert_includes short, %(legs = ["ruby-3.4-linux-x86_64"])
+    assert_includes long, %(legs = [\n  "ruby-3.1-linux-x86_64",\n)
+  end
 end

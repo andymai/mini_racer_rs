@@ -1,30 +1,36 @@
 # frozen_string_literal: true
 
-# Runs mini_racer's own test suite, unmodified, against mini_racer_rs (or, with
+# Runs an upstream test suite, unmodified, against mini_racer_rs (or, with
 # --reference, against the real mini_racer 0.22.1) and checks the results
-# against the ledger for this Ruby and platform.
+# against that suite's ledger for this Ruby and platform: mini_racer's own
+# suite by default, or ExecJS's with its MiniRacer runtime.
 
 require "fileutils"
 require "json"
 require "optparse"
 require "rbconfig"
 require_relative "ledger"
+require_relative "suites"
 
 options = {
   mode: "candidate",
+  suite: "mini_racer",
   seed: Random.new_seed % 65_536,
   strict: false,
   scripts: false,
   weekly: false,
-  ledger: File.join(__dir__, "mini_racer.status.toml"),
   scripts_ledger: File.join(__dir__, "scripts.status.toml"),
 }
 OptionParser.new do |opts|
   opts.banner = "usage: run.rb [options]"
   opts.on("--reference", "Run the real mini_racer 0.22.1 from tools/reference") { options[:mode] = "reference" }
+  opts.on("--suite NAME", UpstreamSuites::ALL.keys,
+          "Upstream suite: #{UpstreamSuites::ALL.keys.join(" or ")}",) do |name|
+    options[:suite] = name
+  end
   opts.on("--seed N", Integer) { |seed| options[:seed] = seed }
   opts.on("-n PATTERN", "Only tests matching PATTERN (minitest -n)") { |pattern| options[:filter] = pattern }
-  opts.on("--files LIST", "Comma-separated test files relative to vendor/mini_racer") do |list|
+  opts.on("--files LIST", "Comma-separated test files relative to the suite's directory") do |list|
     options[:files] = list.split(",")
   end
   opts.on("--out PATH", "Write one JSON result per test") { |path| options[:out] = path }
@@ -35,7 +41,9 @@ OptionParser.new do |opts|
 end.parse!
 
 ROOT = UpstreamLedger::ROOT
-UPSTREAM = UpstreamLedger::UPSTREAM
+SUITE = UpstreamSuites.fetch(options[:suite])
+UPSTREAM = UpstreamSuites.root(options[:suite])
+options[:ledger] ||= UpstreamSuites.ledger(options[:suite])
 LEG = UpstreamLedger.leg
 WORK = File.join(ROOT, "tmp", "upstream")
 CLEAN_EXITS = [0, 1].freeze
@@ -44,9 +52,7 @@ CLEAN_EXITS = [0, 1].freeze
 SUITE_IDLE_LIMIT = 300
 FileUtils.mkdir_p(WORK)
 
-unless File.exist?(File.join(UPSTREAM, "test", "test_helper.rb"))
-  abort "vendor/mini_racer is empty; run `git submodule update --init`"
-end
+abort "#{SUITE[:root]} is empty; run `git submodule update --init`" unless Dir.exist?(File.join(UPSTREAM, "test"))
 
 def child_env(mode, report)
   reference = mode == "reference"
@@ -54,9 +60,10 @@ def child_env(mode, report)
     "BUNDLE_GEMFILE" => File.join(ROOT, reference ? "tools/reference/Gemfile" : "Gemfile"),
     "RUBYOPT" => "-rbundler/setup -r#{File.join(__dir__, reference ? "preload_reference.rb" : "preload.rb")}",
     "MINI_RACER_RS_UPSTREAM_REPORT" => report,
+    "MINI_RACER_RS_UPSTREAM_ROOT" => UPSTREAM,
     "MINI_RACER_RS_UPSTREAM_PARENT" => Process.pid.to_s,
     "MINI_RACER_RS_UPSTREAM_LIB" => nil,
-  }
+  }.merge(SUITE[:env])
   if reference
     env["BUNDLE_PATH"] = File.join(ROOT, "tools/reference/vendor/bundle")
   elsif ENV["BUNDLE_WITHOUT"]
@@ -103,7 +110,7 @@ end
 
 def suite_command(files, options, excluded)
   code = files.map { |file| "require #{File.join(UPSTREAM, file).inspect}" }.join("; ")
-  args = [RbConfig.ruby, "-Itest", "-e", code, "--", "--seed", options[:seed].to_s]
+  args = [RbConfig.ruby, *SUITE[:load_path].map { |dir| "-I#{dir}" }, "-e", code, "--", "--seed", options[:seed].to_s]
   args += ["-n", options[:filter]] if options[:filter]
   unless excluded.empty?
     names = excluded.map { |id| Regexp.escape(id.split("#", 2).last) }
@@ -135,7 +142,7 @@ end
 # crashes or exits is recorded and the run resumes without the tests already
 # finished. A death or hang outside any test is a suite failure.
 def run_suite(options, ledger)
-  files = options[:files] || (Dir.chdir(UPSTREAM) { Dir["test/*_test.rb"] } + ["test/test_object_identity_fix.rb"]).sort
+  files = options[:files] || Dir.chdir(UPSTREAM) { SUITE[:files].call }
   results = {}
   suite = []
   attempt = 0
@@ -143,7 +150,7 @@ def run_suite(options, ledger)
   loop do
     attempt += 1
     before = results.size
-    stem = File.join(WORK, "#{options[:mode]}-#{LEG}-#{options[:seed]}-#{attempt}")
+    stem = File.join(WORK, "#{options[:suite]}-#{options[:mode]}-#{LEG}-#{options[:seed]}-#{attempt}")
     report = "#{stem}.events.jsonl"
     log = "#{stem}.log"
     FileUtils.rm_f([report, "#{report}.threads", "#{report}.guard"])
@@ -179,7 +186,7 @@ def run_suite(options, ledger)
           overdue = id
         end
       elsif now - quiet_since > SUITE_IDLE_LIMIT
-        status, = kill_overdue(pid, "suite-attempt-#{attempt}", report, "")
+        status, = kill_overdue(pid, "#{options[:suite]}-suite-attempt-#{attempt}", report, "")
         suite << "attempt #{attempt}: no test ran for #{SUITE_IDLE_LIMIT}s and the process did not exit"
       end
       sleep 0.2
@@ -275,6 +282,8 @@ def ledger_problems(ledger, results, options)
 end
 
 if options[:scripts]
+  abort "--scripts runs mini_racer's standalone scripts only" unless options[:suite] == "mini_racer"
+
   problems = run_scripts(options)
   abort problems.join("\n") unless problems.empty?
   exit
@@ -283,14 +292,14 @@ end
 ledger = UpstreamLedger.load(options[:ledger])
 results, suite = run_suite(options, ledger)
 
-out = options[:out] || File.join(WORK, "#{options[:mode]}-#{LEG}-#{options[:seed]}.jsonl")
-meta = { "mode" => options[:mode], "leg" => LEG, "seed" => options[:seed] }
+out = options[:out] || File.join(WORK, "#{options[:suite]}-#{options[:mode]}-#{LEG}-#{options[:seed]}.jsonl")
+meta = { "suite" => options[:suite], "mode" => options[:mode], "leg" => LEG, "seed" => options[:seed] }
 lines = results.sort.map { |id, result| JSON.generate(result.merge("id" => id).merge(meta)) }
 lines += suite.map { |message| JSON.generate({ "id" => UpstreamLedger::SUITE_ID, "status" => "crash", "message" => message }.merge(meta)) }
 File.write(out, "#{lines.join("\n")}\n")
 
 counts = results.values.map { |result| result["status"] }.tally.sort.map { |status, n| "#{n} #{status}" }
-puts "#{options[:mode]} #{LEG} seed #{options[:seed]}: #{results.size} tests, #{counts.join(", ")}"
+puts "#{options[:suite]} #{options[:mode]} #{LEG} seed #{options[:seed]}: #{results.size} tests, #{counts.join(", ")}"
 suite.each { |message| puts "suite failure: #{message}" }
 puts "results: #{out}"
 exit unless options[:strict]
