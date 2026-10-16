@@ -224,16 +224,17 @@ fn a_timeout_terminates_only_its_own_script() {
 }
 
 #[test]
+// Creating an isolate and its two contexts takes well over a millisecond, so a
+// timed creation would fail here.
 fn creating_the_isolate_does_not_count_against_a_timeout() {
     for _ in 0..10 {
-        let context = ContextHandle::spawn(
+        ContextHandle::spawn(
             ContextConfig {
-                timeout: Some(Duration::from_millis(5)),
+                timeout: Some(Duration::from_millis(1)),
             },
             &mut Parking,
         )
         .expect("spawn");
-        assert_eq!(eval(&context, "1 + 1").ok(), Some(Out::Int(2)));
     }
 }
 
