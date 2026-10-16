@@ -11,7 +11,12 @@ jobs:
     name: Auto-merge
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    if: github.actor == 'dependabot[bot]'
+    # The actor alone is spoofable (Dependabot can be the actor on an event for a
+    # PR it did not write), so the PR's author and branch must be Dependabot's too.
+    if: >-
+      github.actor == 'dependabot[bot]' &&
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     permissions:
       contents: write
       pull-requests: write
