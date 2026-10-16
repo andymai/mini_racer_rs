@@ -34,3 +34,71 @@ jobs:
           command -v llvm-symbolizer || find /usr/bin -name 'llvm-symbolizer-*' | grep -q . ||
             { sudo apt-get update && sudo apt-get install -y llvm; }
       - run: scripts/sanitizers.sh
+
+  # Every wire fuzz target for 15 minutes on the pinned nightly.
+  fuzz:
+    name: Fuzz
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          v8: "false"
+          tools: cargo-fuzz
+          cache-workspaces: crates/mini_racer_wire/fuzz -> target
+      - run: scripts/fuzz-smoke.sh 900
+      - name: Keep crashes
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-artifacts
+          path: crates/mini_racer_wire/fuzz/artifacts
+          retention-days: 14
+
+  # Fresh seeds against the real gem for 30 minutes, cases sharing no object;
+  # each divergence the accepted ones miss is minimized into a corpus case.
+  diff:
+    name: Differential, fresh seeds
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    env:
+      CI: "true"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          ruby: "3.4"
+      - name: Install the real mini_racer 0.22.1
+        working-directory: tools/reference
+        run: BUNDLE_PATH=vendor/bundle bundle install
+      - run: bundle exec rake compile
+      - name: Explore for 30 minutes
+        env:
+          FIRST_SEED: ${{ github.run_id }}
+        run: |
+          seed=$((FIRST_SEED % 1000000000))
+          end=$((SECONDS + 1800))
+          while [ "$SECONDS" -lt "$end" ]; do
+            bundle exec ruby test/diff/run.rb --explore --shrink --seed "$seed" --js 1500 --ruby 1500
+            seed=$((seed + 1))
+          done
+      - name: Keep results and minimized cases
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: diff-explore
+          path: |
+            tmp/diff
+            test/diff/corpus/min-*.json
+          retention-days: 14

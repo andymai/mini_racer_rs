@@ -31,27 +31,28 @@ module DiffGenerate
 
   module_function
 
-  def cases(seed:, javascript:, ruby:)
+  def cases(seed:, javascript:, ruby:, shared: true)
     random = Random.new(seed)
-    js_cases = Array.new(javascript) { |n| { "id" => "js-#{seed}-#{n}", "kind" => "js", "tree" => js_tree(random, 3) } }
+    js = ->(n) { { "id" => "js-#{seed}-#{n}", "kind" => "js", "tree" => js_tree(random, 3, shared:) } }
+    js_cases = Array.new(javascript, &js)
     ruby_cases = Array.new(ruby) do |n|
       { "id" => "rb-#{seed}-#{n}", "kind" => "ruby",
-        "args" => Array.new(random.rand(1..3)) { ruby_tree(random, 3) }, }
+        "args" => Array.new(random.rand(1..3)) { ruby_tree(random, 3, shared:) }, }
     end
     direct = js_cases + ruby_cases
     direct + direct.map { |kase| kase.merge("id" => kase.fetch("id").sub("-", "-cb-"), "via" => "callback") }
   end
 
-  def js_tree(random, depth)
+  def js_tree(random, depth, shared: true)
     return ["lit", JS_LEAVES.sample(random: random)] if depth.zero? || random.rand < 0.45
 
-    children = -> { Array.new(random.rand(0..3)) { js_tree(random, depth - 1) } }
+    children = -> { Array.new(random.rand(0..3)) { js_tree(random, depth - 1, shared:) } }
     case random.rand(5)
     when 0 then ["array", children.call]
     when 1 then ["object", children.call.map { |child| [KEYS.sample(random: random), child] }]
-    when 2 then ["map", children.call.map { |child| [js_tree(random, 0), child] }]
+    when 2 then ["map", children.call.map { |child| [js_tree(random, 0, shared:), child] }]
     when 3 then ["set", children.call]
-    else ["shared", shareable(js_tree(random, depth - 1))]
+    else shared ? ["shared", shareable(js_tree(random, depth - 1, shared:))] : ["array", children.call]
     end
   end
 
@@ -64,14 +65,14 @@ module DiffGenerate
   HASH_KEYS = [%w[string UTF-8 text k], ["symbol", %w[string US-ASCII text s]], %w[int 7],
                %w[string UTF-8 text é],].freeze
 
-  def ruby_tree(random, depth)
+  def ruby_tree(random, depth, shared: true)
     return RUBY_LEAVES.sample(random: random) if depth.zero? || random.rand < 0.5
 
-    children = Array.new(random.rand(0..3)) { ruby_tree(random, depth - 1) }
+    children = Array.new(random.rand(0..3)) { ruby_tree(random, depth - 1, shared:) }
     case random.rand(3)
     when 0 then ["array", children]
     when 1 then ["hash", HASH_KEYS.sample(children.size, random: random).zip(children)]
-    else ["shared", ["array", children]]
+    else shared ? ["shared", ["array", children]] : ["array", children]
     end
   end
 

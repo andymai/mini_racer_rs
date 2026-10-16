@@ -38,6 +38,7 @@ Metrics/AbcSize:
 Metrics/ModuleLength:
   Exclude:
     - "bench/**/*"
+    - "test/**/*"
     - "tools/**/*"
 
 Metrics/BlockLength:
