@@ -11,12 +11,11 @@ fn ascii(bytes: &[u8]) -> &str {
 /// Borrows when every byte is ASCII.
 #[must_use]
 pub fn latin1_to_utf8(bytes: &[u8]) -> Cow<'_, str> {
+    if bytes.is_ascii() {
+        return Cow::Borrowed(ascii(bytes));
+    }
     if bytes.len() < BLOCK {
-        return if bytes.is_ascii() {
-            Cow::Borrowed(ascii(bytes))
-        } else {
-            Cow::Owned(bytes.iter().copied().map(char::from).collect())
-        };
+        return Cow::Owned(bytes.iter().copied().map(char::from).collect());
     }
     let wide: usize = bytes
         .chunks(BLOCK)
@@ -29,9 +28,6 @@ pub fn latin1_to_utf8(bytes: &[u8]) -> Cow<'_, str> {
             )
         })
         .sum();
-    if wide == 0 {
-        return Cow::Borrowed(ascii(bytes));
-    }
     let mut out = String::with_capacity(bytes.len().saturating_add(wide));
     let mut span = 0;
     let mut at: usize = 0;

@@ -79,6 +79,9 @@ impl RubyVisitor<'_> {
         let ruby = self.ruby;
         Ok(match text {
             Text::Utf8(bytes) => ruby.enc_str_new(bytes, ruby.utf8_encoding()).as_value(),
+            Text::Latin1(bytes) if bytes.is_ascii() => {
+                ruby.enc_str_new(bytes, ruby.utf8_encoding()).as_value()
+            }
             Text::Latin1(bytes) => ruby.str_new(&text::latin1_to_utf8(bytes)).as_value(),
             Text::Utf16Le(bytes) if marker::is_javascript_function(bytes) => {
                 JAVASCRIPT_FUNCTION.get(ruby).new_instance(())?
