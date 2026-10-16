@@ -308,13 +308,7 @@ impl Context {
         ruby: &Ruby,
         run: impl FnOnce(&mut RubyHost<'_>) -> Result<T, EngineError>,
     ) -> Result<T, Error> {
-        let depth = self.handle(ruby)?.depth();
-        if depth > 0 && depth % DEEP_NESTING == 0 {
-            let _ = writeln!(
-                std::io::stderr(),
-                "mini_racer: deep js->ruby->js recursion, depth={depth}"
-            );
-        }
+        self.warn_if_deep(ruby)?;
         let callbacks = Callbacks {
             callables: self.callables(ruby)?,
             raised: &self.raised,
@@ -324,10 +318,26 @@ impl Context {
         host.finish(result)
     }
 
-    fn low_memory_notification(ruby: &Ruby, rb_self: &Self) -> Result<Value, Error> {
+    fn warn_if_deep(&self, ruby: &Ruby) -> Result<(), Error> {
+        let depth = self.handle(ruby)?.depth();
+        if depth > 0 && depth % DEEP_NESTING == 0 {
+            let _ = writeln!(
+                std::io::stderr(),
+                "mini_racer: deep js->ruby->js recursion, depth={depth}"
+            );
+        }
+        Ok(())
+    }
+
+    // mini_racer sends this one without its result decoding, which also
+    // leaves the exception a callback raised for the enclosing dispatch.
+    fn low_memory_notification(ruby: &Ruby, rb_self: &Self) -> Result<(), Error> {
         let handle = rb_self.handle(ruby)?;
-        rb_self.dispatch(ruby, |host| handle.low_memory_notification(host))?;
-        Ok(ruby.qnil().as_value())
+        let _locked = rb_self.acquire(ruby)?;
+        rb_self.warn_if_deep(ruby)?;
+        let mut host = RubyHost::new(ruby);
+        let result = handle.low_memory_notification(&mut host);
+        host.finish(result)
     }
 
     fn stop(ruby: &Ruby, rb_self: &Self) -> Result<(), Error> {

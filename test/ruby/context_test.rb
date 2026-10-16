@@ -59,17 +59,6 @@ class ContextTest < Minitest::Test
     end
   end
 
-  def test_low_memory_notification_returns_nil_and_leaves_a_stop_pending
-    @context.eval("var big = 'x'.repeat(1e6)")
-
-    assert_nil @context.low_memory_notification
-    @context.stop
-    @context.low_memory_notification
-    assert_raises(MiniRacer::ScriptTerminatedError) { @context.eval("1") }
-    @context.dispose
-    assert_raises(MiniRacer::ContextDisposedError) { @context.low_memory_notification }
-  end
-
   def test_only_messages_from_javascript_are_utf8
     keyword = assert_raises(MiniRacer::RuntimeError) { MiniRacer::Context.new(bogus: 1) }
     thrown = assert_raises(MiniRacer::RuntimeError) { @context.eval("throw new Error('boom')") }

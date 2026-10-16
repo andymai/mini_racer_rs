@@ -199,8 +199,7 @@ impl ContextHandle {
         .map(drop)
     }
 
-    /// Asks V8 to collect as much garbage as it can. Returns once the runner has
-    /// the request, as `mini_racer` does, before the collection ends.
+    /// Asks V8 to collect as much garbage as it can; returns once it has.
     pub fn low_memory_notification(&self, host: &mut impl Host) -> Result<(), EngineError> {
         self.dispatch(
             DispatchKind::Maintenance,
