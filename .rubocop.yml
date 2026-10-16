@@ -25,11 +25,13 @@ Metrics/MethodLength:
   Exclude:
     - "lib/mini_racer_rs/vocabulary.rb"
     - "test/**/*"
+    - "tools/**/*"
 
 Metrics/AbcSize:
   Exclude:
     - "rakelib/**/*"
     - "test/**/*"
+    - "tools/**/*"
 
 Metrics/BlockLength:
   Exclude:
@@ -41,11 +43,13 @@ Metrics/CyclomaticComplexity:
   Exclude:
     - "rakelib/**/*"
     - "test/**/*"
+    - "tools/**/*"
 
 Metrics/PerceivedComplexity:
   Exclude:
     - "rakelib/**/*"
     - "test/**/*"
+    - "tools/**/*"
 
 Minitest/MultipleAssertions:
   Max: 10

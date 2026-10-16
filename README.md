@@ -31,6 +31,17 @@ Supported platforms are Linux with glibc on x86_64 and aarch64, and macOS on arm
 
 musl-based Linux, including Alpine, and Windows are out of scope.
 
+<!-- compat-table:start -->
+## Compatibility
+
+| Engine | Done | Planned | Deviation |
+|---|---|---|---|
+| CRuby | 27 | 27 | 2 |
+| TruffleRuby | 57 | 0 | 0 |
+
+See [COMPATIBILITY.md](COMPATIBILITY.md).
+<!-- compat-table:end -->
+
 ## How it works
 
 mini_racer_rs uses Rust, V8 15.2 through the `v8` crate (rusty_v8), and Ruby bindings through magnus and rb-sys. Each `MiniRacer::Context` runs V8 on its own native thread.

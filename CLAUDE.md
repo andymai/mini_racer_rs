@@ -4,7 +4,7 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 
 ## Hard rules
 
-- Rust owns behavior. Ruby under `lib/` is vocabulary only: constants, the error hierarchy, `MiniRacer::Binary`, the loader, and the pure compositions `Context#load` and `#write_heap_snapshot`. The one exception is upstream's TruffleRuby backend, `lib/mini_racer/truffleruby.rb` and `lib/mini_racer/shared.rb`, vendored byte for byte and never edited.
+- Rust owns behavior. Ruby under `lib/` is vocabulary only: constants, the error hierarchy, `MiniRacer::Binary`, the loader, the pure compositions `Context#load` and `#write_heap_snapshot`, and the planned-method stubs that `rake compat:render` generates into `lib/mini_racer_rs/stubs.rb`. The one exception is upstream's TruffleRuby backend, `lib/mini_racer/truffleruby.rb` and `lib/mini_racer/shared.rb`, vendored byte for byte and never edited.
 - Intra-gem loads use `require_relative`.
 - `unsafe` lives only in the modules `layers.toml` fences (`engine::sys`, `ext::rb_raw`, `ext::guard`, `ext::gc_root`), one operation per block, each with a `// SAFETY:` comment.
 - rb-sys is called only from `ext/mini_racer_rs/src/rb_raw.rs`. Release the GVL only through `rb_raw::nogvl` and run interrupts only through `rb_raw::check_ints`, so no Ruby exception unwinds through a Rust frame.
@@ -70,6 +70,9 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | Ledger generation | `.github/workflows/ledger-generate.yml`, `rakelib/ledger.rake`, `test/upstream/milestone_rules.rb` |
 | Upstream source (never edited) | `vendor/mini_racer` (v0.22.1), `vendor/execjs` (v2.10.2) |
 | Vendored TruffleRuby backend | `lib/mini_racer/truffleruby.rb`, `lib/mini_racer/shared.rb` |
+| Public surface status per id, deviation reasons | `compat.toml`, `compat/surface.json` |
+| Compat reflection, extraction, check and rendering | `tools/compat/`, `rakelib/compat.rake` |
+| Generated from compat.toml (never edit) | `COMPATIBILITY.md`, the README compat table, `lib/mini_racer_rs/stubs.rb` |
 
 Skills: `.claude/skills/pr-workflow` (branch to merge), `.claude/skills/layer-boundaries` (dependencies, fences, check failures), `.claude/skills/parity-suite` (upstream suite and ledger).
 
@@ -88,6 +91,8 @@ scripts/check-exports.sh --write   # after changing #[no_mangle] items or bumpin
 RUSTFLAGS="--cfg loom -Dwarnings" cargo test -p mini_racer_sync --test loom --release --locked --target-dir target/loom
 scripts/fuzz-smoke.sh 60           # every wire fuzz target, 60 s each, on the pinned nightly
 bundle exec ruby test/upstream/run.rb --strict   # mini_racer's own suite against the ledger
+bundle exec rake compat:check      # compat.toml against the reference surface and this gem
+bundle exec rake compat:render     # regenerate everything compat.toml generates
 ```
 
 ## Which tests to run
@@ -95,7 +100,8 @@ bundle exec ruby test/upstream/run.rb --strict   # mini_racer's own suite agains
 - `crates/mini_racer_wire`: `cargo nextest run -p mini_racer_wire`, then `scripts/fuzz-smoke.sh 20`.
 - `crates/mini_racer_sync`: `cargo nextest run -p mini_racer_sync`, then the loom command above.
 - `crates/mini_racer_engine`: `cargo nextest run -p mini_racer_engine`. Flag-dependent assertions live in `crates/mini_racer_engine/tests/flags.rs`, one test per process.
-- `ext/` or `lib/`: `bundle exec rake test`, then `scripts/check-exports.sh`, then `bundle exec ruby test/upstream/run.rb --strict`.
+- `ext/` or `lib/`: `bundle exec rake test`, then `scripts/check-exports.sh`, then `bundle exec ruby test/upstream/run.rb --strict`, then `bundle exec rake compat:check`.
+- `compat.toml`: `bundle exec rake compat:render`, then `bundle exec rake compat:check`.
 - `scripts/`, `layers.toml`, any `Cargo.toml`: `scripts/check-boundaries.sh`, `scripts/test-boundaries.sh` and `scripts/check-deny.sh`.
 - `.github/`: `scripts/check-action-pins.sh`.
 
@@ -113,3 +119,5 @@ bundle exec ruby test/upstream/run.rb --strict   # mini_racer's own suite agains
 - Each git worktree needs its own `npm ci` before the commit hooks can run, and `git submodule update --init` before the upstream suite can run.
 - The upstream suite runs from `vendor/mini_racer` with `BUNDLE_GEMFILE`, `RUBYOPT` and `MINI_RACER_RS_UPSTREAM_REPORT` set by `test/upstream/run.rb`; run it through that script, not with `rake test` inside the submodule.
 - In a forked child, contexts inherited from the parent raise `MiniRacer::RuntimeError` (`single-threaded runner: ...`).
+- A `compat.toml` status describes CRuby. Implementing a planned method without marking it `done` fails `compat:check` with `TODO_BUT_IMPLEMENTED`.
+- `rake` needs the lint group installed; without it (the TruffleRuby CI job), run `tools/compat/reflect.rb` and `tools/compat/check.rb` directly.

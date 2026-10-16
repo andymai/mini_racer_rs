@@ -1,6 +1,6 @@
 ---
 name: parity-suite
-description: Use when running mini_racer's own test suite against mini_racer_rs, reading or updating test/upstream/mini_racer.status.toml, regenerating the ledger after a change, debugging an upstream test that fails, hangs or crashes, or when the harness guard exits 97.
+description: Use when running mini_racer's own test suite against mini_racer_rs, reading or updating test/upstream/mini_racer.status.toml, regenerating the ledger after a change, debugging an upstream test that fails, hangs or crashes, when the harness guard exits 97, or when changing the public surface, compat.toml, COMPATIBILITY.md or the generated stubs.
 ---
 
 # Parity Suite
@@ -54,5 +54,18 @@ Locally, write runs into a fresh directory with `--out <dir>/<name>.jsonl` (one 
 | `suite failure` | The process crashed or hung outside any test (loading, between tests, at exit) | Strict mode always fails on it; read the log and `tmp/upstream/suite-attempt-*.timeout.txt` |
 | "not in the ledger" | A new upstream test or a renamed one | Regenerate |
 | "in the ledger but did not run" | A ledger entry for a test that no longer exists | Regenerate |
+
+## Compatibility ledger
+
+`compat/surface.json` lists every public id of mini_racer 0.22.1 (constants, classes with their superclass, instance and singleton methods, keyword arguments, required standard libraries), reflected from the real gem on CRuby and TruffleRuby; an id found on one engine only ends in `@ruby` or `@truffleruby`. `compat.toml` gives each id a status for CRuby: `done`, `todo:<milestone>`, or `deviation` with a `reason` (an `approved` date is the owner's to add). On TruffleRuby mini_racer_rs runs upstream's backend, so its surface must match exactly.
+
+| Task | Command |
+|---|---|
+| Check the ledger against this gem | `bundle exec rake compat:check` |
+| Regenerate COMPATIBILITY.md, the README table and `lib/mini_racer_rs/stubs.rb` | `bundle exec rake compat:render` |
+| Implemented a planned method | set its id to `done`, then `rake compat:render` (its stub disappears) |
+| Re-reflect the reference | `REFERENCE=1 bundle exec rake compat:reflect` on CRuby and on TruffleRuby, then `bundle exec rake compat:surface` |
+
+`compat:check` failures: `MISSING` (an id has no entry), `STALE` (an entry for an id that left the surface), `MALFORMED`, `UNKNOWN_MILESTONE`, `CLAIMED_DONE_BUT_ABSENT` (done, but the method is absent or still a stub), `TODO_BUT_IMPLEMENTED` (mark it done), `EXTRA_SURFACE` (this gem exposes something mini_racer does not). Keyword arguments of native methods cannot be reflected on CRuby; the upstream suite covers them.
 
 Details: [reference.md](reference.md).

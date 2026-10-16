@@ -377,6 +377,10 @@ jobs:
             exit 1
           fi
       - run: bundle exec rake test
+      - name: Compatibility ledger
+        run: |
+          bundle exec rake compat:check
+          bundle exec rake compat:render CHECK=1
       # mini_racer's own suite, unmodified; every result must match the ledger.
       - name: Upstream suite (strict)
         run: bundle exec ruby test/upstream/run.rb --strict --seed "${{ github.run_number }}"
@@ -428,6 +432,11 @@ jobs:
           bundler-cache: true
       - run: truffleruby-polyglot-get js
       - run: bundle exec ruby -Itest/ruby -Ilib test/ruby/harness_guard_test.rb
+      # rake needs the lint group, which this job skips.
+      - name: Compatibility ledger
+        run: |
+          bundle exec ruby -Ilib tools/compat/reflect.rb --out tmp/compat/candidate-truffleruby.json
+          bundle exec ruby tools/compat/check.rb tmp/compat/candidate-truffleruby.json
       - name: Upstream suite (strict)
         run: bundle exec ruby test/upstream/run.rb --strict --seed "${{ github.run_number }}"
 

@@ -1,0 +1,223 @@
+# Status of each public id of mini_racer 0.22.1 (compat/surface.json) in mini_racer_rs.
+# A status describes CRuby; on TruffleRuby mini_racer_rs runs upstream's backend.
+# status = "done" | "todo:<milestone>" | "deviation" (with reason, then approved = "YYYY-MM-DD" once reviewed).
+
+[ids."behavior:platforms"]
+reason = "mini_racer_rs supports glibc Linux on x86_64 and aarch64, plus macOS on arm64 and x86_64. Installation stops on musl-based Linux, including Alpine, and on Windows, with a message naming the supported platforms."
+status = "deviation"
+
+[ids."behavior:v8-version"]
+reason = "mini_racer_rs embeds V8 15.2 (15.2.124.1, reported by `MiniRacerRs::V8_VERSION`) through the `v8` crate 152.2.0, while mini_racer 0.22.1 uses libv8-node 24.12.0.1 with V8 13.6.233.17. V8-produced text, including parse and runtime error messages and locale formatting, can therefore differ. An upstream test that fails only for this reason is listed with status `deviation:behavior:v8-version`."
+status = "deviation"
+
+[ids."class:MiniRacer::Binary < Object"]
+status = "done"
+
+[ids."class:MiniRacer::Context < Object"]
+status = "done"
+
+[ids."class:MiniRacer::Context::ExternalFunction < Object@truffleruby"]
+status = "done"
+
+[ids."class:MiniRacer::ContextDisposedError < MiniRacer::Error"]
+status = "done"
+
+[ids."class:MiniRacer::Error < StandardError"]
+status = "done"
+
+[ids."class:MiniRacer::EvalError < MiniRacer::Error"]
+status = "done"
+
+[ids."class:MiniRacer::FailedV8Conversion < Object@truffleruby"]
+status = "done"
+
+[ids."class:MiniRacer::InternalError < MiniRacer::EvalError@ruby"]
+status = "todo:S2"
+
+[ids."class:MiniRacer::Isolate < Object@truffleruby"]
+status = "done"
+
+[ids."class:MiniRacer::JavaScriptFunction < Object"]
+status = "todo:S3"
+
+[ids."class:MiniRacer::ParseError < MiniRacer::EvalError"]
+status = "done"
+
+[ids."class:MiniRacer::Platform < Object"]
+status = "done"
+
+[ids."class:MiniRacer::PlatformAlreadyInitialized < MiniRacer::Error"]
+status = "done"
+
+[ids."class:MiniRacer::RuntimeError < MiniRacer::EvalError"]
+status = "done"
+
+[ids."class:MiniRacer::ScriptError < MiniRacer::EvalError"]
+status = "done"
+
+[ids."class:MiniRacer::ScriptTerminatedError < MiniRacer::EvalError"]
+status = "done"
+
+[ids."class:MiniRacer::Snapshot < Object"]
+status = "todo:S3b"
+
+[ids."class:MiniRacer::SnapshotError < MiniRacer::Error"]
+status = "done"
+
+[ids."class:MiniRacer::V8OutOfMemoryError < MiniRacer::EvalError"]
+status = "done"
+
+[ids."const:MiniRacer::LIBV8_NODE_VERSION"]
+status = "done"
+
+[ids."const:MiniRacer::MARSHAL_STACKDEPTH_DEFAULT@truffleruby"]
+status = "done"
+
+[ids."const:MiniRacer::MARSHAL_STACKDEPTH_MAX_VALUE@truffleruby"]
+status = "done"
+
+[ids."const:MiniRacer::VERSION"]
+status = "done"
+
+[ids."feature:io/wait"]
+status = "done"
+
+[ids."feature:json"]
+status = "done"
+
+[ids."feature:pathname"]
+status = "done"
+
+[ids."imethod:MiniRacer::Binary#data"]
+status = "done"
+
+[ids."imethod:MiniRacer::Context#attach"]
+status = "todo:S3b"
+
+[ids."imethod:MiniRacer::Context#call"]
+status = "todo:S3"
+
+[ids."imethod:MiniRacer::Context#call_await"]
+status = "todo:M4"
+
+[ids."imethod:MiniRacer::Context#dispose"]
+status = "todo:S2"
+
+[ids."imethod:MiniRacer::Context#eval"]
+status = "done"
+
+[ids."imethod:MiniRacer::Context#eval_await"]
+status = "todo:M4"
+
+[ids."imethod:MiniRacer::Context#eval_in_context@truffleruby"]
+status = "done"
+
+[ids."imethod:MiniRacer::Context#heap_snapshot@ruby"]
+status = "todo:M3"
+
+[ids."imethod:MiniRacer::Context#heap_stats"]
+status = "todo:M3"
+
+[ids."imethod:MiniRacer::Context#isolate@truffleruby"]
+status = "done"
+
+[ids."imethod:MiniRacer::Context#load"]
+status = "done"
+
+[ids."imethod:MiniRacer::Context#low_memory_notification"]
+status = "todo:M3"
+
+[ids."imethod:MiniRacer::Context#perform_microtask_checkpoint@ruby"]
+status = "todo:M4"
+
+[ids."imethod:MiniRacer::Context#pump_message_loop@ruby"]
+status = "todo:M4"
+
+[ids."imethod:MiniRacer::Context#stop"]
+status = "todo:S2"
+
+[ids."imethod:MiniRacer::Context#write_heap_snapshot"]
+status = "done"
+
+[ids."imethod:MiniRacer::FailedV8Conversion#info@truffleruby"]
+status = "done"
+
+[ids."imethod:MiniRacer::Isolate#init_with_snapshot@truffleruby"]
+status = "done"
+
+[ids."imethod:MiniRacer::JavaScriptFunction#to_s@truffleruby"]
+status = "done"
+
+[ids."imethod:MiniRacer::RuntimeError#backtrace"]
+status = "done"
+
+[ids."imethod:MiniRacer::ScriptError#backtrace"]
+status = "done"
+
+[ids."imethod:MiniRacer::ScriptError#cause@ruby"]
+status = "todo:S3"
+
+[ids."imethod:MiniRacer::Snapshot#dump@ruby"]
+status = "todo:M5"
+
+[ids."imethod:MiniRacer::Snapshot#load@truffleruby"]
+status = "done"
+
+[ids."imethod:MiniRacer::Snapshot#size@ruby"]
+status = "todo:M5"
+
+[ids."imethod:MiniRacer::Snapshot#warmup!"]
+status = "todo:M5"
+
+[ids."imethod:MiniRacer::Snapshot#warmup_unsafe!@truffleruby"]
+status = "done"
+
+[ids."imethod:MiniRacer::SnapshotError#backtrace"]
+status = "done"
+
+[ids."kwarg:MiniRacer::Context#eval:filename@ruby"]
+status = "todo:M1"
+
+[ids."kwarg:MiniRacer::Context#eval_await:filename@ruby"]
+status = "todo:M4"
+
+[ids."kwarg:MiniRacer::Context#initialize:ensure_gc_after_idle"]
+status = "todo:M3"
+
+[ids."kwarg:MiniRacer::Context#initialize:isolate@truffleruby"]
+status = "done"
+
+[ids."kwarg:MiniRacer::Context#initialize:marshal_stack_depth"]
+status = "todo:S2"
+
+[ids."kwarg:MiniRacer::Context#initialize:max_memory"]
+status = "todo:M3"
+
+[ids."kwarg:MiniRacer::Context#initialize:snapshot"]
+status = "todo:S3b"
+
+[ids."kwarg:MiniRacer::Context#initialize:timeout"]
+status = "todo:S2"
+
+[ids."kwarg:MiniRacer::Context#initialize:verbose_exceptions@ruby"]
+status = "todo:M3"
+
+[ids."module:MiniRacer"]
+status = "done"
+
+[ids."module:MiniRacer::Loader@ruby"]
+reason = "`MiniRacer::Loader` and `MiniRacer::Loader.load` do not exist in mini_racer_rs, whose single native extension uses a plain `require`. Its dynamic exports are limited to per-platform allowlists, CI fails if any C++ or Rust symbol is exported, and on Linux it links with `-Bsymbolic` so its references bind to its own definitions. mini_racer 0.22.1 uses `mini_racer_loader` with `RTLD_LOCAL` and `RTLD_DEEPBIND`, except when `LD_PRELOAD` contains `malloc`; `LD_PRELOAD` does not change mini_racer_rs loading."
+status = "deviation"
+
+[ids."smethod:MiniRacer::Loader.load@ruby"]
+reason = "`MiniRacer::Loader` and `MiniRacer::Loader.load` do not exist in mini_racer_rs, whose single native extension uses a plain `require`. Its dynamic exports are limited to per-platform allowlists, CI fails if any C++ or Rust symbol is exported, and on Linux it links with `-Bsymbolic` so its references bind to its own definitions. mini_racer 0.22.1 uses `mini_racer_loader` with `RTLD_LOCAL` and `RTLD_DEEPBIND`, except when `LD_PRELOAD` contains `malloc`; `LD_PRELOAD` does not change mini_racer_rs loading."
+status = "deviation"
+
+[ids."smethod:MiniRacer::Platform.set_flag_as_str!@truffleruby"]
+status = "done"
+
+[ids."smethod:MiniRacer::Platform.set_flags!"]
+status = "done"
+
+[ids."smethod:MiniRacer::Snapshot.load@ruby"]
+status = "todo:M5"

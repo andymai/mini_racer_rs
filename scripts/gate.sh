@@ -48,6 +48,8 @@ RUSTFLAGS="${RUSTFLAGS:-} --cfg loom -Dwarnings" step cargo test -p mini_racer_s
 step bundle exec rake compile
 step scripts/check-exports.sh
 step bundle exec rake test
+step bundle exec rake compat:check
+CHECK=1 step bundle exec rake compat:render
 step bundle exec ruby test/upstream/run.rb --strict
 [ "$mode" = default ] && passed
 
