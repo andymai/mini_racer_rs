@@ -16,7 +16,7 @@ The runner reads the events while the suite runs. A test that exceeds its limit 
 
 ## Initial milestones
 
-`test/upstream/milestone_rules.rb` assigns a failing test to the first rule that matches: tests named in a spike step's exit criterion go to that step (S2, S3, S3b, S6); then ExecJS's `test/test_execjs.rb` to M8; then `test/single_threaded_test.rb` and forking tests to M6; `test/async_test.rb` and wasm, promise or microtask tests to M4; `test/function_test.rb` and `test/test_object_identity_fix.rb` to M2; snapshot, warmup and flag tests to M5; memory, heap, dispose, stop, timeout, termination, GC and idle tests to M3; everything else to M1.
+`test/upstream/milestone_rules.rb` assigns a failing test to the first rule that matches: ExecJS's `test/test_execjs.rb` to M8; then `test/single_threaded_test.rb` and forking tests to M6; `test/async_test.rb` and wasm, promise or microtask tests to M4; `test/function_test.rb` and `test/test_object_identity_fix.rb` to M2; snapshot, warmup and flag tests to M5; memory, heap, dispose, stop, timeout, termination, GC and idle tests to M3; everything else to M1.
 
 ## Scripts
 

@@ -10,21 +10,27 @@ done = true
 title = "Link and load"
 
 [milestones.S2]
+done = true
 title = "Core dispatch"
 
 [milestones.S3]
+done = true
 title = "Conversion both directions"
 
 [milestones.S3b]
+done = true
 title = "attach, callbacks, Snapshot.new"
 
 [milestones.S4]
+done = true
 title = "Numbers"
 
 [milestones.S5]
+done = true
 title = "Fiber scheduler"
 
 [milestones.S6]
+done = true
 title = "Fork protocol"
 
 [milestones.M1]

@@ -7,7 +7,7 @@ require_relative "shapes"
 # What a differential outcome means against the accepted divergences and the
 # candidate ledger. Kept apart from the runner so it is testable without workers.
 module DiffLedger
-  DEFAULT_MILESTONE = "S3"
+  DEFAULT_MILESTONE = "M1"
   FAILED_RUNS = %w[crash timeout].freeze
   MATCHED = %w[same accepted].freeze
   DIVERGENCE_KEYS = %w[id expected actual].freeze
