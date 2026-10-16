@@ -78,6 +78,20 @@ class AttachTest < Minitest::Test
     assert_raises(KeyError) { @context.eval("throw saved") }
   end
 
+  def test_threads_attaching_while_the_context_is_busy_get_their_own_ids
+    release = Queue.new
+    @context.attach("hold", proc { release.pop })
+    holder = Thread.new { @context.eval("hold()") }
+    sleep 0.05
+    names = %w[a b c d]
+    attachers = names.map { |name| Thread.new { @context.attach(name, proc { name }) } }
+    sleep 0.05
+    release << 0
+    [holder, *attachers].each(&:join)
+
+    assert_equal(names, names.map { |name| @context.eval("#{name}()") })
+  end
+
   def test_attach_on_a_disposed_context_raises_and_keeps_nothing
     context = MiniRacer::Context.new
     context.dispose

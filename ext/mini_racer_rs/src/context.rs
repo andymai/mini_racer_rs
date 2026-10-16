@@ -241,10 +241,16 @@ impl Context {
         decode::value(ruby, &bytes)
     }
 
+    // The lock is held from choosing the id to sending it, so two threads
+    // attaching at once cannot be given the same one.
     fn attach(ruby: &Ruby, rb_self: &Self, name: Value, callable: Value) -> Result<Value, Error> {
         let handle = rb_self.handle(ruby)?;
         let callables = rb_self.callables(ruby)?;
         let name = rb_raw::expect_string(ruby, name)?;
+        if handle.is_disposed() {
+            return Err(errors::engine(ruby, EngineError::Disposed));
+        }
+        let _locked = rb_self.acquire(ruby)?;
         let id = i32::try_from(callables.len())
             .map_err(|_| errors::runtime(ruby, "too many callbacks"))?;
         let request = ruby.ary_new_capa(2);
@@ -253,18 +259,8 @@ impl Context {
         let request = encode::encode(ruby, request.as_value(), |message| {
             errors::runtime(ruby, message)
         })?;
-        if handle.is_disposed() {
-            return Err(errors::engine(ruby, EngineError::Disposed));
-        }
-        // Kept only once the lock is held, so an attach refused there leaves
-        // nothing behind; once V8 has the id it may have installed the
-        // function, so the callable stays whatever the outcome.
-        rb_self.dispatch(ruby, |host| {
-            callables
-                .push(callable)
-                .map_err(|_| EngineError::Internal("cannot keep the callable".to_owned()))?;
-            handle.attach(request, host)
-        })?;
+        callables.push(callable)?;
+        rb_self.run_locked(ruby, |host| handle.attach(request, host))?;
         Ok(ruby.qnil().as_value())
     }
 
@@ -276,6 +272,14 @@ impl Context {
         run: impl FnOnce(&mut RubyHost<'_>) -> Result<T, EngineError>,
     ) -> Result<T, Error> {
         let _locked = self.acquire(ruby)?;
+        self.run_locked(ruby, run)
+    }
+
+    fn run_locked<T>(
+        &self,
+        ruby: &Ruby,
+        run: impl FnOnce(&mut RubyHost<'_>) -> Result<T, EngineError>,
+    ) -> Result<T, Error> {
         let depth = self.handle(ruby)?.depth();
         if depth > 0 && depth % DEEP_NESTING == 0 {
             let _ = writeln!(
