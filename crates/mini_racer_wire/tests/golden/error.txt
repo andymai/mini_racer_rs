@@ -1,1 +1,1 @@
-error{"message": "boom", "stack": "Error: boom\n    at <anonymous>:1:1"}
+error{"message": "boom", "stack": "Error: boom\n    at <eval>:1:1"}
