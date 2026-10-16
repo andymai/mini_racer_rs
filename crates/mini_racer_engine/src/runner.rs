@@ -77,11 +77,15 @@ fn serve(block: &ControlBlock) -> bool {
                 dispatch,
             } => {
                 v8::scope_with_context!(let scope, &mut isolate, &context);
-                eval(scope, &block.term, &filter, &filename, &source, dispatch)
+                script(scope, &block.term, dispatch, |tc| {
+                    evaluate(tc, &filter, &filename, &source)
+                })
             }
             Request::Call { request, dispatch } => {
                 v8::scope_with_context!(let scope, &mut isolate, &context);
-                call(scope, &block.term, &filter, &request, dispatch)
+                script(scope, &block.term, dispatch, |tc| {
+                    invoke(tc, &filter, &request)
+                })
             }
             Request::Dispose => break true,
         };
@@ -116,22 +120,21 @@ fn halted(halt: Halt) -> EngineError {
     }
 }
 
-fn eval(
+// Runs a script dispatch: nothing starts once it is halted, and serializing
+// runs getters, so the dispatch stays armed through `run`; the verdict then
+// replaces whatever the script produced.
+fn script(
     scope: &mut v8::PinScope<'_, '_>,
     term: &TermCell<IsolateTerminator>,
-    filter: &Filter,
-    filename: &JsText,
-    source: &JsText,
     dispatch: DispatchId,
+    run: impl FnOnce(&mut Tc<'_, '_, '_, '_>) -> Result<Vec<u8>, EngineError>,
 ) -> Result<Vec<u8>, EngineError> {
     v8::tc_scope!(let tc, scope);
     let result = if term.check(DispatchKind::Script).is_some() {
         Err(EngineError::Internal("halted without a cause".to_owned()))
     } else {
-        evaluate(tc, filter, filename, source)
+        run(tc)
     };
-    // Serializing runs getters, so the dispatch stays armed through it; the
-    // verdict then replaces whatever the script produced.
     term.end(dispatch).map_or(result, |halt| Err(halted(halt)))
 }
 
@@ -152,22 +155,6 @@ fn evaluate(
         .ok_or_else(|| failure(tc, JsErrorKind::Runtime))?;
     let value = serialize::sanitize(tc, value);
     serialize::reply(tc, filter, value).ok_or_else(|| failure(tc, JsErrorKind::Runtime))
-}
-
-fn call(
-    scope: &mut v8::PinScope<'_, '_>,
-    term: &TermCell<IsolateTerminator>,
-    filter: &Filter,
-    request: &[u8],
-    dispatch: DispatchId,
-) -> Result<Vec<u8>, EngineError> {
-    v8::tc_scope!(let tc, scope);
-    let result = if term.check(DispatchKind::Script).is_some() {
-        Err(EngineError::Internal("halted without a cause".to_owned()))
-    } else {
-        invoke(tc, filter, request)
-    };
-    term.end(dispatch).map_or(result, |halt| Err(halted(halt)))
 }
 
 struct Reader;

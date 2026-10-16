@@ -1,0 +1,74 @@
+# frozen_string_literal: true
+
+require "test_helper"
+require "mini_racer"
+
+module CallTestNamespaceLongEnoughToCut
+  module SecondLevel
+    Unsendable = Class.new
+  end
+end
+
+class CallTest < Minitest::Test
+  include RubyProcess
+
+  def setup
+    @context = MiniRacer::Context.new
+    @context.eval("globalThis.id = (...a) => a; globalThis.one = () => 1; globalThis.a = {b: {c: (x) => x * 2}}")
+  end
+
+  def teardown
+    @context&.dispose
+  end
+
+  def test_calls_through_a_dotted_path_on_its_parent
+    assert_equal 42, @context.call("a.b.c", 21)
+    error = assert_raises(MiniRacer::RuntimeError) { @context.call("a.b.missing") }
+    assert_equal "TypeError: not a function", error.message
+    assert_raises(ArgumentError) { @context.call }
+  end
+
+  def test_unsupported_values_raise_mini_racers_cut_message
+    error = assert_raises(MiniRacer::RuntimeError) do
+      @context.call("id", CallTestNamespaceLongEnoughToCut::SecondLevel::Unsendable.new)
+    end
+
+    assert_equal "Context.call: unsupported type CallTestNamespaceLongEnoughToCut::SecondLevel:", error.message
+    assert_equal Encoding::BINARY, error.message.encoding
+  end
+
+  def test_array_elements_are_read_as_the_encoder_reaches_them
+    array = nil
+    stamp = Object.new
+    stamp.define_singleton_method(:to_time) do
+      array[1] = "changed"
+      array.pop
+      Time.at(0)
+    end
+    array = [stamp, "orig", "third"]
+
+    assert_equal [[Time.at(0), "changed", nil]], @context.call("id", array)
+  end
+
+  def test_an_argument_nested_past_v8s_limit_raises_an_internal_error
+    deep = []
+    20_000.times { deep = [deep] }
+    error = assert_raises(MiniRacer::InternalError) { @context.call("one", deep) }
+
+    assert_match(/Maximum call stack size exceeded/, error.message)
+  end
+
+  def test_symbols_are_sent_by_name_and_datetime_need_not_be_a_class
+    out, err, status = run_ruby(<<~RUBY)
+      module DateTime; end
+      require "mini_racer"
+      class Symbol; def to_s = "patched"; end
+      context = MiniRacer::Context.new
+      context.eval("globalThis.id = (...a) => a")
+      p context.call("id", :hello)
+    RUBY
+
+    assert_predicate status, :success?, err
+    assert_equal "[\"hello\"]\n", out
+  end
+end

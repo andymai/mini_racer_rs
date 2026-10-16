@@ -2,37 +2,24 @@ use std::collections::HashMap;
 
 use magnus::encoding::{EncodingCapable, RbEncoding};
 use magnus::r_hash::ForEach;
-use magnus::rb_sys::AsRawValue;
+use magnus::typed_data::Obj;
 use magnus::value::ReprValue;
 use magnus::{
     Error, Fixnum, Float, Module, Object, RArray, RClass, RHash, RModule, RObject, RString, Ruby,
-    Symbol, Time, Value,
+    Time, Value,
 };
 use mini_racer_wire::Writer;
 
 use crate::gc_root::{OnceRoot, Pins, StaticRoot};
-use crate::rb_raw;
-use magnus::typed_data::Obj;
-
-// Ruby's builtin type numbers, as mini_racer's serialize1 switches on them.
-const T_OBJECT: u32 = 0x01;
-const T_FLOAT: u32 = 0x04;
-const T_STRING: u32 = 0x05;
-const T_ARRAY: u32 = 0x07;
-const T_HASH: u32 = 0x08;
-const T_BIGNUM: u32 = 0x0a;
-const T_DATA: u32 = 0x0c;
-const T_NIL: u32 = 0x11;
-const T_TRUE: u32 = 0x12;
-const T_FALSE: u32 = 0x13;
-const T_SYMBOL: u32 = 0x14;
-const T_FIXNUM: u32 = 0x15;
+use crate::rb_raw::{self, RubyType};
 
 const BIGINT_MAX_WORDS: usize = (16 << 20) / 8;
+// mini_racer formats these messages into a 64-byte buffer.
+const MESSAGE_MAX_BYTES: usize = 63;
 
-/// Resolved by `Context#initialize` while unresolved, as `mini_racer` resolves it
-/// at each `Context.new`, since `date` may be required after this gem.
-pub static DATE_TIME: OnceRoot<RClass> = OnceRoot::new();
+/// Resolved by `Context#initialize` while unresolved, as `mini_racer` resolves
+/// it at each `Context.new`, since `date` may be required after this gem.
+pub static DATE_TIME: OnceRoot<Value> = OnceRoot::new();
 
 static BINARY: StaticRoot<RClass> = StaticRoot::new(|ruby| {
     ruby.class_object()
@@ -42,9 +29,16 @@ static BINARY: StaticRoot<RClass> = StaticRoot::new(|ruby| {
 });
 
 pub enum EncodeError {
-    /// `mini_racer`'s text for a value it cannot send.
-    Unsupported(String),
+    /// `mini_racer`'s text for a value it cannot send, cut as it cuts it.
+    Unsupported(Vec<u8>),
     Raised(Error),
+}
+
+impl EncodeError {
+    fn unsupported(message: &str) -> Self {
+        let bytes = message.as_bytes();
+        Self::Unsupported(bytes.get(..MESSAGE_MAX_BYTES).unwrap_or(bytes).to_vec())
+    }
 }
 
 impl From<Error> for EncodeError {
@@ -54,13 +48,17 @@ impl From<Error> for EncodeError {
 }
 
 enum Item {
+    // A pinned value, by its index in the holder.
     Value(usize),
+    // An element read when its turn comes, as serialize1 reads them, so a
+    // to_time that changes the array is seen.
+    Element { array: usize, index: isize },
     EndArray(u32),
     EndObject(u32),
 }
 
-// Iterative so a deeply nested argument cannot overflow the Ruby thread's stack;
-// V8's own reader then decides how deep is too deep, as with mini_racer.
+// Iterative so a deeply nested argument cannot overflow the Ruby thread's
+// stack; how deep V8 then reads is V8's own limit.
 struct Encoder<'r, 'o> {
     ruby: &'r Ruby,
     // The object, not a reference into its data: each use of the object keeps
@@ -83,7 +81,8 @@ pub fn encode(ruby: &Ruby, value: Value) -> Result<Vec<u8>, EncodeError> {
         work: Vec::new(),
         seen: HashMap::new(),
     };
-    encoder.queue(value);
+    let root = encoder.pins.push(value);
+    encoder.work.push(Item::Value(root));
     encoder.run()?;
     Ok(out)
 }
@@ -93,9 +92,10 @@ fn length(len: usize) -> u32 {
 }
 
 impl Encoder<'_, '_> {
-    fn queue(&mut self, value: Value) {
-        let index = self.pins.push(value);
-        self.work.push(Item::Value(index));
+    fn pinned(&self, index: usize) -> Value {
+        self.pins
+            .get(self.ruby, index)
+            .unwrap_or_else(|| self.ruby.qnil().as_value())
     }
 
     fn run(&mut self) -> Result<(), EncodeError> {
@@ -103,12 +103,13 @@ impl Encoder<'_, '_> {
             match item {
                 Item::EndArray(length) => self.writer.end_array(length),
                 Item::EndObject(count) => self.writer.end_object(count),
-                Item::Value(index) => {
-                    let value = self
-                        .pins
-                        .get(self.ruby, index)
-                        .ok_or_else(|| EncodeError::Unsupported("lost value".to_owned()))?;
-                    self.value(value)?;
+                Item::Value(index) => self.value(self.pinned(index))?,
+                Item::Element { array, index } => {
+                    let element = RArray::from_value(self.pinned(array))
+                        .map(|array| array.entry::<Value>(index))
+                        .transpose()?
+                        .unwrap_or_else(|| self.ruby.qnil().as_value());
+                    self.value(element)?;
                 }
             }
         }
@@ -117,94 +118,88 @@ impl Encoder<'_, '_> {
 
     fn value(&mut self, value: Value) -> Result<(), EncodeError> {
         let ruby = self.ruby;
-        match rb_raw::value_type(ruby, value) {
-            T_ARRAY => {
+        match rb_raw::ruby_type(ruby, value) {
+            RubyType::Array => {
                 self.array(value);
                 Ok(())
             }
-            T_HASH => self.hash(value),
-            T_DATA => self.data(value),
-            T_NIL => {
+            RubyType::Hash => self.hash(value),
+            RubyType::Data => self.data(value),
+            RubyType::Nil => {
                 self.writer.null();
                 Ok(())
             }
-            T_TRUE => {
+            RubyType::True => {
                 self.writer.bool(true);
                 Ok(())
             }
-            T_FALSE => {
+            RubyType::False => {
                 self.writer.bool(false);
                 Ok(())
             }
-            T_BIGNUM => self.bigint(value),
-            T_FIXNUM => {
-                let n = Fixnum::from_value(value).map_or(0, Fixnum::to_i64);
-                self.writer.integer(n);
+            RubyType::Bignum => self.bigint(value),
+            RubyType::Fixnum => {
+                self.writer
+                    .integer(Fixnum::from_value(value).map_or(0, Fixnum::to_i64));
                 Ok(())
             }
-            T_FLOAT => {
-                let n = Float::from_value(value).map_or(f64::NAN, Float::to_f64);
-                self.writer.number(n);
+            RubyType::Float => {
+                self.writer
+                    .number(Float::from_value(value).map_or(f64::NAN, Float::to_f64));
                 Ok(())
             }
-            T_SYMBOL => {
-                let text = Symbol::from_value(value)
-                    .map(ReprValue::to_r_string)
-                    .transpose()?;
-                self.string(text.unwrap_or_else(|| ruby.str_new("")));
+            RubyType::Symbol => {
+                self.string(rb_raw::sym2str(ruby, value));
                 Ok(())
             }
-            T_STRING => {
+            RubyType::String => {
                 self.string(RString::from_value(value).unwrap_or_else(|| ruby.str_new("")));
                 Ok(())
             }
-            T_OBJECT => self.object(value),
-            other => Err(EncodeError::Unsupported(format!(
-                "unsupported type {other:x}"
+            RubyType::Object => self.object(value),
+            RubyType::Other(kind) => Err(EncodeError::unsupported(&format!(
+                "unsupported type {kind:x}"
             ))),
         }
     }
 
     fn array(&mut self, value: Value) {
-        if let Some(&id) = self.seen.get(&value.as_raw()) {
+        if let Some(&id) = self.seen.get(&rb_raw::identity(value)) {
             self.writer.object_ref(id);
             return;
         }
-        let array = RArray::from_value(value).unwrap_or_else(|| self.ruby.ary_new());
-        let items: Vec<Value> = array.into_iter().collect();
-        let length = length(items.len());
-        let id = self.writer.begin_array(length);
-        self.seen.insert(value.as_raw(), id);
-        self.work.push(Item::EndArray(length));
-        for item in items.into_iter().rev() {
-            self.queue(item);
+        let len = RArray::from_value(value).map_or(0, RArray::len);
+        let count = length(len);
+        let id = self.writer.begin_array(count);
+        let array = self.pins.push(value);
+        self.seen.insert(rb_raw::identity(value), id);
+        self.work.push(Item::EndArray(count));
+        for index in (0..isize::try_from(len).unwrap_or(isize::MAX)).rev() {
+            self.work.push(Item::Element { array, index });
         }
     }
 
     fn hash(&mut self, value: Value) -> Result<(), EncodeError> {
-        if let Some(&id) = self.seen.get(&value.as_raw()) {
+        if let Some(&id) = self.seen.get(&rb_raw::identity(value)) {
             self.writer.object_ref(id);
             return Ok(());
         }
+        self.pins.push(value);
         let hash = RHash::from_value(value).unwrap_or_else(|| self.ruby.hash_new());
         let mut pairs = Vec::new();
+        let mut keys_fit = true;
         hash.foreach(|key: Value, item: Value| {
+            keys_fit &= matches!(
+                rb_raw::ruby_type(self.ruby, key),
+                RubyType::Fixnum | RubyType::String | RubyType::Symbol
+            );
             pairs.push((self.pins.push(key), self.pins.push(item)));
             Ok(ForEach::Continue)
         })?;
         let id = self.writer.begin_object();
-        self.seen.insert(value.as_raw(), id);
-        for &(key, _) in &pairs {
-            let key = self
-                .pins
-                .get(self.ruby, key)
-                .unwrap_or_else(|| self.ruby.qnil().as_value());
-            if !matches!(
-                rb_raw::value_type(self.ruby, key),
-                T_FIXNUM | T_STRING | T_SYMBOL
-            ) {
-                return Err(EncodeError::Unsupported("TODO serialize as Map".to_owned()));
-            }
+        self.seen.insert(rb_raw::identity(value), id);
+        if !keys_fit {
+            return Err(EncodeError::unsupported("TODO serialize as Map"));
         }
         self.work.push(Item::EndObject(length(pairs.len())));
         for (key, item) in pairs.into_iter().rev() {
@@ -217,14 +212,15 @@ impl Encoder<'_, '_> {
     fn data(&mut self, value: Value) -> Result<(), EncodeError> {
         let ruby = self.ruby;
         let mut value = value;
-        if DATE_TIME
-            .get(ruby)
-            .is_some_and(|date_time| value.class().as_raw() == date_time.as_raw())
-        {
+        if DATE_TIME.get(ruby).is_some_and(|date_time| {
+            rb_raw::identity(value.class().as_value()) == rb_raw::identity(date_time)
+        }) {
             value = value.funcall("to_time", ())?;
             self.pins.push(value);
         }
-        if value.class().as_raw() == ruby.class_time().as_raw() {
+        if rb_raw::identity(value.class().as_value())
+            == rb_raw::identity(ruby.class_time().as_value())
+        {
             self.date(value)
         } else {
             self.writer.utf8(b"Undefined Conversion");
@@ -240,7 +236,7 @@ impl Encoder<'_, '_> {
             if time.is_kind_of(ruby.class_time()) {
                 return self.date(time);
             }
-            return Err(EncodeError::Unsupported(format!(
+            return Err(EncodeError::unsupported(&format!(
                 "unsupported type {}",
                 rb_raw::class_name(ruby, time)
             )));
@@ -256,7 +252,7 @@ impl Encoder<'_, '_> {
             });
             return Ok(());
         }
-        Err(EncodeError::Unsupported(format!(
+        Err(EncodeError::unsupported(&format!(
             "unsupported type {}",
             rb_raw::class_name(ruby, value)
         )))
@@ -273,7 +269,7 @@ impl Encoder<'_, '_> {
     )]
     fn date(&mut self, value: Value) -> Result<(), EncodeError> {
         let time = Time::from_value(value)
-            .ok_or_else(|| EncodeError::Unsupported("unsupported type Time".to_owned()))?
+            .ok_or_else(|| EncodeError::unsupported("unsupported type Time"))?
             .timespec()?;
         let micros = time.tv_nsec / 1000;
         self.writer
@@ -284,17 +280,16 @@ impl Encoder<'_, '_> {
     fn bigint(&mut self, value: Value) -> Result<(), EncodeError> {
         let Some((negative, digits)) = rb_raw::integer_words(self.ruby, value, BIGINT_MAX_WORDS)?
         else {
-            return Err(EncodeError::Unsupported("bigint too big".to_owned()));
+            return Err(EncodeError::unsupported("bigint too big"));
         };
         self.writer
             .bigint(negative, &digits)
-            .map_err(|error| EncodeError::Unsupported(error.to_string()))
+            .map_err(|error| EncodeError::unsupported(&error.to_string()))
     }
 
     fn string(&mut self, text: RString) {
-        let ruby = self.ruby;
         let encoding = RbEncoding::from(text.enc_get());
-        rb_raw::with_string_bytes(ruby, text, |bytes| match encoding.name() {
+        rb_raw::with_string_bytes(self.ruby, text, |bytes| match encoding.name() {
             "ISO-8859-1" => self.writer.latin1(bytes),
             "UTF-16LE" => self.writer.utf16le(bytes),
             _ => self.writer.utf8(bytes),

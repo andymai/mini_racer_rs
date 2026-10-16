@@ -73,11 +73,14 @@ impl<T: ReprValue> OnceRoot<T> {
 pub struct Pins(RefCell<Vec<Opaque<Value>>>);
 
 impl DataTypeFunctions for Pins {
+    // A borrow at mark time would leave every value unpinned and free to move,
+    // so it ends the process rather than corrupt the encode.
     fn mark(&self, marker: &Marker) {
-        if let Ok(values) = self.0.try_borrow() {
-            for value in values.iter() {
-                marker.mark(*value);
-            }
+        let Ok(values) = self.0.try_borrow() else {
+            std::process::abort();
+        };
+        for value in values.iter() {
+            marker.mark(*value);
         }
     }
 }
@@ -89,7 +92,6 @@ impl Pins {
         ruby.obj_wrap(Self::default())
     }
 
-    /// Pins `value` and returns its index.
     pub fn push(&self, value: Value) -> usize {
         let mut values = self.0.borrow_mut();
         values.push(Opaque::from(value));

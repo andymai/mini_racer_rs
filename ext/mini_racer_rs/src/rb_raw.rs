@@ -132,11 +132,61 @@ pub fn integer_unpack(_ruby: &Ruby, digits: &[u8], negative: bool) -> Result<Val
     Ok(unsafe { Value::from_raw(raw) })
 }
 
-/// Ruby's builtin type number for `value`, as `TYPE()` gives it.
-pub fn value_type(_ruby: &Ruby, value: Value) -> u32 {
+/// The builtin types `mini_racer`'s encoder tells apart; `Other` carries the
+/// number `TYPE()` gives, which it prints in hex.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RubyType {
+    Object,
+    Float,
+    String,
+    Array,
+    Hash,
+    Bignum,
+    Data,
+    Nil,
+    True,
+    False,
+    Symbol,
+    Fixnum,
+    Other(u32),
+}
+
+pub fn ruby_type(_ruby: &Ruby, value: Value) -> RubyType {
+    use rb_sys::ruby_value_type as T;
     // SAFETY: the `&Ruby` argument proves this thread holds the GVL, and
     // `value` is a live VALUE the caller holds.
-    unsafe { rb_sys::RB_TYPE(value.as_raw()) as u32 }
+    let kind = unsafe { rb_sys::RB_TYPE(value.as_raw()) };
+    match kind {
+        T::RUBY_T_OBJECT => RubyType::Object,
+        T::RUBY_T_FLOAT => RubyType::Float,
+        T::RUBY_T_STRING => RubyType::String,
+        T::RUBY_T_ARRAY => RubyType::Array,
+        T::RUBY_T_HASH => RubyType::Hash,
+        T::RUBY_T_BIGNUM => RubyType::Bignum,
+        T::RUBY_T_DATA => RubyType::Data,
+        T::RUBY_T_NIL => RubyType::Nil,
+        T::RUBY_T_TRUE => RubyType::True,
+        T::RUBY_T_FALSE => RubyType::False,
+        T::RUBY_T_SYMBOL => RubyType::Symbol,
+        T::RUBY_T_FIXNUM => RubyType::Fixnum,
+        other => RubyType::Other(other as u32),
+    }
+}
+
+/// An object's address, the identity `mini_racer`'s encoder keys repeated
+/// containers by; stable only while the object is pinned.
+pub fn identity(value: Value) -> u64 {
+    value.as_raw()
+}
+
+/// A Symbol's name as a String, without calling `Symbol#to_s`.
+pub fn sym2str(ruby: &Ruby, symbol: Value) -> RString {
+    // SAFETY: the `&Ruby` argument proves this thread holds the GVL, and the
+    // caller passes a Symbol, for which rb_sym2str returns its interned name.
+    let raw = unsafe { rb_sys::rb_sym2str(symbol.as_raw()) };
+    // SAFETY: `raw` is the live String rb_sym2str returned.
+    let name = unsafe { Value::from_raw(raw) };
+    RString::from_value(name).unwrap_or_else(|| ruby.str_new(""))
 }
 
 /// Runs `read` over the string's bytes without copying them; `read` must not

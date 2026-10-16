@@ -103,7 +103,7 @@ fn resolve_date_time(ruby: &Ruby) -> Result<(), Error> {
             .class_object()
             .funcall::<_, _, bool>("const_defined?", ("DateTime",))?
     {
-        encode::DATE_TIME.set(ruby, ruby.class_object().const_get("DateTime")?);
+        encode::DATE_TIME.set(ruby, ruby.class_object().const_get::<_, Value>("DateTime")?);
     }
     Ok(())
 }
@@ -132,14 +132,14 @@ fn config(ruby: &Ruby, keywords: RHash) -> Result<ContextConfig, Error> {
     })?;
     options::configure(pairs.into_iter()).map_err(|error| match error {
         OptionError::Type(_) => {
-            errors::raised(ruby, ruby.exception_type_error(), &error.to_string())
+            errors::raised(ruby, ruby.exception_type_error(), error.to_string())
         }
         OptionError::Range(_) => {
-            errors::raised(ruby, ruby.exception_arg_error(), &error.to_string())
+            errors::raised(ruby, ruby.exception_arg_error(), error.to_string())
         }
-        OptionError::Keyword(_) => errors::runtime(ruby, &error.to_string()),
+        OptionError::Keyword(_) => errors::runtime(ruby, error.to_string()),
         OptionError::Unsupported(_) => {
-            errors::raised(ruby, ruby.exception_not_imp_error(), &error.to_string())
+            errors::raised(ruby, ruby.exception_not_imp_error(), error.to_string())
         }
     })
 }
@@ -201,16 +201,7 @@ impl Context {
             _ => JsText::from("<eval>"),
         };
         let source = js_text(ruby, source)?;
-        // Decoding runs Ruby code, so the lock is released first, as in mini_racer.
-        let bytes = {
-            let _locked = rb_self.acquire(ruby)?;
-            let mut host = RubyHost::new(ruby);
-            let result = handle
-                .eval(filename, source, &mut host)
-                .map_err(|e| errors::engine(ruby, e));
-            host.finish(result)?
-        };
-        decode::value(ruby, &bytes)
+        rb_self.dispatch(ruby, |host| handle.eval(filename, source, host))
     }
 
     fn call(ruby: &Ruby, rb_self: &Self, args: &[Value]) -> Result<Value, Error> {
@@ -221,16 +212,23 @@ impl Context {
         request.unshift(name)?;
         let request = encode::encode(ruby, request.as_value()).map_err(|error| match error {
             EncodeError::Unsupported(message) => {
-                errors::runtime(ruby, &format!("Context.call: {message}"))
+                errors::runtime(ruby, [b"Context.call: ".as_slice(), &message].concat())
             }
             EncodeError::Raised(error) => error,
         })?;
+        rb_self.dispatch(ruby, |host| handle.call(request, host))
+    }
+
+    // Decoding runs Ruby code, so the lock is released first, as in mini_racer.
+    fn dispatch(
+        &self,
+        ruby: &Ruby,
+        run: impl FnOnce(&mut RubyHost<'_>) -> Result<Vec<u8>, EngineError>,
+    ) -> Result<Value, Error> {
         let bytes = {
-            let _locked = rb_self.acquire(ruby)?;
+            let _locked = self.acquire(ruby)?;
             let mut host = RubyHost::new(ruby);
-            let result = handle
-                .call(request, &mut host)
-                .map_err(|e| errors::engine(ruby, e));
+            let result = run(&mut host).map_err(|e| errors::engine(ruby, e));
             host.finish(result)?
         };
         decode::value(ruby, &bytes)
