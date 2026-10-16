@@ -62,7 +62,7 @@ class InterruptTest < Minitest::Test
     RUBY
 
     assert_predicate status, :success?, err
-    assert_equal "context dispose: Device or resource busy\n42\n", out
+    assert_equal "context dispose: #{Errno::EBUSY.new.message}\n42\n", out
   end
 
   def test_forked_child_reports_an_inherited_context
