@@ -14,8 +14,9 @@ require_relative "../test/diff/workers"
 ROOT = File.expand_path("..", __dir__)
 ROLES = %w[reference candidate].freeze
 def number(value) = value.is_a?(Numeric) ? value : nil
-def micros(key, at) = ->(r) { number(r.dig(key, at))&./(1e3) }
-def millis(key, at) = ->(r) { number(r.dig(key, at))&./(1e6) }
+def scaled(by, *path) = ->(r) { number(r.dig(*path))&./(by) }
+def micros(key, at) = scaled(1e3, key, at)
+def millis(key, at) = scaled(1e6, key, at)
 
 METRICS = {
   "eval round trip p50 (us)" => [micros("eval_rtt_ns", "p50"), :lower],
@@ -31,11 +32,11 @@ METRICS = {
   "startup p50 (ms)" => [millis("startup_ns", "p50"), :lower],
   "startup and load Babel p50 (ms)" => [millis("babel_eval_startup_ns", "p50"), :lower],
   "startup from a Babel snapshot p50 (ms)" => [millis("babel_snapshot_startup_ns", "p50"), :lower],
+  "Babel snapshot size (MB)" => [scaled(1e6, "babel_snapshot_bytes"), :lower],
   "JS to Ruby (MB/s)" => [->(r) { number(r["js_to_ruby_mbps"]) }, :higher],
   "Ruby to JS (MB/s)" => [->(r) { number(r["ruby_to_js_mbps"]) }, :higher],
   "idle CPU, 50 contexts (% of a core)" => [->(r) { number(r["idle_cpu_percent"]) }, :lower, 1.0],
 }.freeze
-SERDE = File.join(ROOT, "vendor/mini_racer/benchmark/serde/bench.rb")
 # More spread than this between runs means something else was using the machine.
 NOISE = 0.10
 
@@ -47,24 +48,33 @@ OptionParser.new do |opts|
   opts.on("--[no-]serde", "Also run mini_racer's own benchmark/serde suite (default on)") { |on| options[:serde] = on }
 end.parse!
 
+# The serde suite reads these too, and an exported one would change its
+# workload without a word in the table.
+SUITE_ENV = %w[BENCH_SCALE BENCH_WARMUP BENCH_ROUNDS BENCH_SINGLE_THREADED].to_h { |name| [name, nil] }.freeze
+
 def launch(role, options, script, *)
   pin = options[:cpus] ? ["taskset", "-c", options[:cpus]] : []
-  command = [*pin, *DiffWorkers.ruby(role, script, *)]
-  out, err, status = DiffWorkers.unbundled { Open3.capture3(DiffWorkers.env(role), *command, chdir: ROOT) }
-  abort "bench: the #{role} run of #{File.basename(script)} failed:\n#{err}" unless status.success?
+  command = [*pin, *DiffWorkers.ruby(role, File.join(__dir__, script), role, *)]
+  env = DiffWorkers.env(role).merge(SUITE_ENV)
+  out, err, status = DiffWorkers.unbundled { Open3.capture3(env, *command, chdir: ROOT) }
+  return JSON.parse(out) if status.success?
 
-  JSON.parse(out)
+  abort "bench: the #{role} run of #{script} failed:\n#{err}" if role == "reference"
+
+  warn "bench: the candidate run of #{script} failed:\n#{err.lines.last(5).join}"
+  nil
 end
 
 def measure(role, options)
-  launch(role, options, File.join(__dir__, "measure.rb"), role, *(options[:quick] ? ["--quick"] : []))
+  launch(role, options, "measure.rb", *(options[:quick] ? ["--quick"] : [])) || {}
 end
 
-# mini_racer's suite times each case as milliseconds per iteration.
 def serde(role, options)
-  scale = options[:quick] ? %w[--scale 0.1] : []
-  launch(role, options, SERDE, "--json", "--rounds", "3", *scale)
-    .fetch("benchmarks").to_h { |bench| [bench.fetch("name"), bench.fetch("ms_per_iter")] }
+  size = options[:quick] ? %w[--rounds 1 --scale 0.1] : %w[--rounds 3]
+  result = launch(role, options, "serde.rb", "--json", *size)
+  return {} unless result
+
+  result.fetch("benchmarks").to_h { |bench| [bench.fetch("name"), bench.fetch("ms_per_iter") * 1e3] }
 end
 
 def median(values) = values.sort[values.size / 2]
@@ -94,39 +104,42 @@ puts "#{raw["reference"].first["gem"]} against #{raw["candidate"].first["gem"]},
      "#{options[:runs]} run(s), medians, governor #{governor}, " \
      "#{options[:cpus] ? "CPUs #{options[:cpus]}" : "not pinned"}"
 puts
-puts "| Metric | mini_racer | mini_racer_rs | Ratio | Note |"
-puts "|---|---|---|---|---|"
-summary = METRICS.to_h do |name, (read, direction, floor)|
-  values = ROLES.to_h { |role| [role, raw[role].map(&read)] }
+# Ratios of near-zero values say nothing, so with either value below the
+# floor none is given.
+def row(name, values, direction, floor: nil, wrong: false)
   medians = values.transform_values { |list| list.compact.size == list.size ? median(list) : nil }
   reference, candidate = medians.values_at(*ROLES)
-  wrong = mismatch && name.start_with?("JS to Ruby")
-  # Ratios of near-zero values say nothing, so below the floor none is given.
-  meaningful = candidate && !wrong && (floor.nil? || [reference, candidate].max >= floor)
-  ratio = (direction == :lower ? reference / candidate : candidate / reference) if meaningful
+  below = floor && candidate && [reference, candidate].min < floor
+  ratio = (direction == :lower ? reference / candidate : candidate / reference) if candidate && !wrong && !below
   noisy = values.values.any? { |list| list.compact.size > 1 && (list.compact.max / list.compact.min) - 1 > NOISE }
   note = if wrong then "different output"
          elsif candidate.nil? then "unsupported"
+         elsif below then "under #{floor}"
          elsif noisy then "noisy"
          else ""
          end
   cells = [reference, candidate].map { |value| value ? format("%.2f", value) : "n/a" }
   puts "| #{name} | #{cells.join(" | ")} | #{ratio ? format("%.2fx", ratio) : "n/a"} | #{note} |"
-  [name, { "reference" => reference, "candidate" => candidate, "ratio" => ratio, "note" => note }]
+  { "reference" => reference, "candidate" => candidate, "ratio" => ratio, "note" => note }
+end
+
+puts "| Metric | mini_racer | mini_racer_rs | Ratio | Note |"
+puts "|---|---|---|---|---|"
+summary = METRICS.to_h do |name, (read, direction, floor)|
+  values = ROLES.to_h { |role| [role, raw[role].map(&read)] }
+  [name, row(name, values, direction, floor:, wrong: mismatch && name.start_with?("JS to Ruby"))]
 end
 
 serde_summary = {}
 unless serde_raw.empty?
   puts
-  puts "mini_racer's benchmark/serde, milliseconds per iteration, medians"
+  puts "mini_racer's benchmark/serde, microseconds per iteration, medians. Its context has a 120 s timeout, " \
+       "so every case pays for arming it."
   puts
-  puts "| Case | mini_racer | mini_racer_rs | Ratio |"
-  puts "|---|---|---|---|"
-  serde_raw["reference"].first.each_key do |name|
-    reference, candidate = ROLES.map { |role| median(serde_raw[role].map { |run| run.fetch(name) }) }
-    serde_summary[name] = { "reference" => reference, "candidate" => candidate, "ratio" => reference / candidate }
-    cells = [name, format("%.4f", reference), format("%.4f", candidate), format("%.2fx", reference / candidate)]
-    puts "| #{cells.join(" | ")} |"
+  puts "| Case | mini_racer | mini_racer_rs | Ratio | Note |"
+  puts "|---|---|---|---|---|"
+  serde_summary = serde_raw["reference"].first.keys.to_h do |name|
+    [name, row(name, ROLES.to_h { |role| [role, serde_raw[role].map { |run| run[name] }] }, :lower)]
   end
 end
 

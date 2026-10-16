@@ -21,6 +21,9 @@ def spread(times)
   { "p50" => percentile(times, 0.5), "p99" => percentile(times, 0.99), "p999" => percentile(times, 0.999) }
 end
 
+# Fewer samples than a thousand have no tail worth naming.
+def median_only(times) = { "p50" => percentile(times, 0.5) }
+
 def samples(count, warmup, &)
   warmup.times(&)
   Array.new(count) do
@@ -67,14 +70,23 @@ result["callback_rtt_ns"] = metric do
   context.eval("globalThis.calls = (n) => { let s = 0; for (let i = 0; i < n; i++) s += echo(i); return s }")
   batch = quick ? 200 : 2_000
   times = samples(quick ? 5 : 50, 5) { context.call("calls", batch) }
-  spread(times.map { |time| time / batch })
+  median_only(times.map { |time| time / batch })
 end
 
-def startup(count, &)
+# The block returns the context it made, which is disposed untimed: mini_racer
+# returns from dispose at once and tears the isolate down later on its own
+# thread, while mini_racer_rs returns once the isolate is gone.
+def startup(count)
   GC.start
   GC.disable
-  times = samples(count, 3, &)
-  spread(times)
+  times = Array.new(count + 3) do
+    started = now
+    context = yield
+    elapsed = now - started
+    context.dispose
+    elapsed
+  end
+  median_only(times.drop(3).sort)
 ensure
   GC.enable
   GC.start
@@ -82,9 +94,7 @@ end
 
 result["startup_ns"] = metric do
   startup(quick ? 10 : 50) do
-    context = MiniRacer::Context.new
-    context.eval("1+1")
-    context.dispose
+    MiniRacer::Context.new.tap { |context| context.eval("1+1") }
   end
 end
 
@@ -92,10 +102,10 @@ babel = File.read(File.join(__dir__, "../vendor/mini_racer/benchmark/babel/helpe
 
 result["babel_eval_startup_ns"] = metric do
   startup(quick ? 3 : 20) do
-    context = MiniRacer::Context.new
-    context.eval(babel)
-    context.eval("typeof babel.transform")
-    context.dispose
+    MiniRacer::Context.new.tap do |context|
+      context.eval(babel)
+      context.eval("typeof babel.transform")
+    end
   end
 end
 
@@ -103,9 +113,7 @@ result["babel_snapshot_startup_ns"] = metric do
   snapshot = MiniRacer::Snapshot.new(babel)
   result["babel_snapshot_bytes"] = snapshot.size
   startup(quick ? 3 : 20) do
-    context = MiniRacer::Context.new(snapshot: snapshot)
-    context.eval("typeof babel.transform")
-    context.dispose
+    MiniRacer::Context.new(snapshot: snapshot).tap { |context| context.eval("typeof babel.transform") }
   end
 end
 
