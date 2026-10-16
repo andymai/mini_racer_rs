@@ -30,6 +30,9 @@ status = "same"
 [cases."curated-global-state-across-steps"]
 status = "same"
 
+[cases."curated-holey-array"]
+status = "same"
+
 [cases."curated-invalid-date"]
 status = "same"
 
@@ -70,6 +73,12 @@ status = "accepted:reference-to-a-numbered-object"
 status = "accepted:reference-to-a-numbered-object"
 
 [cases."curated-shared-across-keys"]
+status = "same"
+
+[cases."curated-sparse-large-indexes"]
+status = "same"
+
+[cases."curated-sparse-named-keys"]
 status = "same"
 
 [cases."curated-thrown-error"]

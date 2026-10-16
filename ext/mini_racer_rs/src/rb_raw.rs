@@ -2,7 +2,7 @@ use std::ffi::{c_int, c_void};
 
 use magnus::rb_sys::{AsRawId, AsRawValue, FromRawValue, protect};
 use magnus::value::{IntoId, LazyId, ReprValue};
-use magnus::{Error, RArray, RString, Ruby, Value};
+use magnus::{Error, RArray, RHash, RString, Ruby, Value};
 
 static CALL: LazyId = LazyId::new("call");
 
@@ -194,6 +194,24 @@ pub fn call_with_array(ruby: &Ruby, receiver: Value, args: RArray) -> Result<Val
     })?;
     // SAFETY: `raw` is the live value the call returned.
     Ok(unsafe { Value::from_raw(raw) })
+}
+
+/// Stores each key and value of `pairs` (key, value, key, value, ...) as
+/// `Hash#[]=` would, under one `rb_protect` for the whole slice.
+// rb_hash_bulk_insert would take the slice in one call, but it rehashes the
+// whole table whenever the hash already has entries.
+pub fn hash_aset_pairs(_ruby: &Ruby, hash: RHash, pairs: &[Value]) -> Result<(), Error> {
+    let raw = hash.as_raw();
+    protect(|| {
+        for [key, value] in pairs.as_chunks::<2>().0 {
+            // SAFETY: the `&Ruby` argument proves this thread holds the GVL,
+            // `pairs` lives on the caller's stack where the GC sees it, and
+            // `protect` catches anything rb_hash_aset raises.
+            unsafe { rb_sys::rb_hash_aset(raw, key.as_raw(), value.as_raw()) };
+        }
+        raw
+    })?;
+    Ok(())
 }
 
 /// How Ruby's own type errors name `value`: nil, true and false by value,

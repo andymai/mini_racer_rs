@@ -53,6 +53,29 @@ class ConversionGcTest < Minitest::Test
     assert_equal "café 東", value["text"]
   end
 
+  # Arrays and objects much longer than the decoder's batch, of values made
+  # fresh while decoding, so every batch waits on the native stack through
+  # collections and moves.
+  def test_long_arrays_and_objects_survive_collections_and_moves
+    value = stressed do
+      @context.eval(<<~JS)
+        (() => {
+          const strings = Array.from({length: 200}, (_, i) => "item " + i)
+          const object = Object.fromEntries(strings.map((s, i) => [s, [i, s]]))
+          const holey = new Array(200)
+          for (let i = 0; i < 200; i++) holey[i] = "hole " + i
+          return {strings, object, holey, numbers: Array.from({length: 200}, (_, i) => i + 0.5)}
+        })()
+      JS
+    end
+
+    assert_equal Array.new(200) { |i| "item #{i}" }, value["strings"]
+    assert_equal(Array.new(200) { |i| ["item #{i}", [i, "item #{i}"]] }.to_h, value["object"])
+    assert_equal Array.new(200) { |i| "hole #{i}" }, value["holey"]
+    assert_equal Array.new(200) { |i| i + 0.5 }, value["numbers"]
+    assert value["object"].keys.all?(&:frozen?)
+  end
+
   # Catches an unpinned value only in an optimized build, since a debug build's
   # stale stack copies pin values too; CI builds release. Skipped on macOS,
   # where Ruby 3.4's verification raises a malloc overflow after a few heap

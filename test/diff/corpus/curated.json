@@ -309,5 +309,35 @@
         "source": "(() => { const e = new Error('x'); return [e, e] })()"
       }
     ]
+  },
+  {
+    "id": "curated-holey-array",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "(() => { const a = new Array(40); for (let i = 0; i < 40; i++) if (i % 3) a[i] = 'v' + i; return a })()"
+      }
+    ]
+  },
+  {
+    "id": "curated-sparse-named-keys",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "(() => { const a = []; a[5] = 1; a.x = 2; a[7] = 3; a.y = [4]; return a })()"
+      }
+    ]
+  },
+  {
+    "id": "curated-sparse-large-indexes",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "(() => { const a = []; a[2 ** 31] = 1; a[2 ** 30 + 5] = 2; a[3] = 3; return a })()"
+      }
+    ]
   }
 ]
