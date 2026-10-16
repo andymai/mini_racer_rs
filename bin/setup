@@ -6,7 +6,6 @@ cd "$(dirname "$0")/.."
 
 rustup show active-toolchain >/dev/null
 rustup toolchain install "$(taplo get -f tools/versions.toml toolchains.msrv 2>/dev/null || echo 1.91.0)" --profile minimal
-rustup toolchain install "$(taplo get -f tools/versions.toml toolchains.fuzz)" --profile minimal
 while IFS='=' read -r tool version; do
   tool=$(xargs <<<"$tool")
   version=$(tr -d ' "' <<<"$version")

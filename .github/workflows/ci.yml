@@ -117,7 +117,7 @@ jobs:
         with:
           v8: "false"
           tools: cargo-deny
-      - run: cargo deny check
+      - run: scripts/check-deny.sh
 
   # A prebuilt cargo-audit: building it from source pulls the newest releases of
   # its dependencies, and one bad upstream publish then fails every run.
@@ -136,6 +136,7 @@ jobs:
           v8: "false"
           tools: cargo-audit
       - run: cargo audit
+      - run: cargo audit -f crates/mini_racer_wire/fuzz/Cargo.lock
 
   boundaries:
     name: Boundaries
@@ -259,8 +260,6 @@ jobs:
       # nextest does not run doctests, so they get their own step.
       - run: cargo test --doc --workspace --exclude mini_racer_rs --locked
 
-  # --cfg loom swaps in loom's primitives; its own target dir keeps those builds
-  # from invalidating the cached normal ones.
   loom:
     name: Loom
     needs: changes
@@ -296,8 +295,7 @@ jobs:
         with:
           v8: "false"
           tools: cargo-fuzz
-      - name: Install the pinned nightly
-        run: rustup toolchain install "$(sed -nE 's/^fuzz = "([^"]+)"$/\1/p' tools/versions.toml)" --profile minimal
+          cache-workspaces: crates/mini_racer_wire/fuzz -> target
       - run: scripts/fuzz-smoke.sh 60
       - name: Keep crash inputs
         if: failure()

@@ -1,7 +1,8 @@
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Sender};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
+
+use mini_racer_sync::{Handoff, Outcome};
 
 use crate::process::{self, platform};
 use crate::{EngineError, runner};
@@ -9,79 +10,40 @@ use crate::{EngineError, runner};
 const MIN_RUNNER_STACK_BYTES: usize = 2 << 20;
 const STACK_HEADROOM_BYTES: usize = 1 << 20;
 
+type EvalResult = Result<Vec<u8>, EngineError>;
+
 pub enum Request {
-    Eval { source: String, slot: Arc<Slot> },
+    Eval {
+        source: String,
+        slot: Arc<Handoff<EvalResult>>,
+    },
 }
 
 pub enum WaitOutcome {
-    Done(Result<Vec<u8>, EngineError>),
+    Done(EvalResult),
     Interrupted,
 }
 
-#[derive(Default)]
-struct SlotState {
-    result: Option<Result<Vec<u8>, EngineError>>,
-    interrupted: bool,
-}
-
-#[derive(Default)]
-pub struct Slot {
-    state: Mutex<SlotState>,
-    changed: Condvar,
-    cancelled: AtomicBool,
-}
-
-impl Slot {
-    fn lock(&self) -> MutexGuard<'_, SlotState> {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    pub fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::SeqCst)
-    }
-
-    pub fn complete(&self, result: Result<Vec<u8>, EngineError>) {
-        self.lock().result = Some(result);
-        self.changed.notify_all();
-    }
-}
-
 pub struct Pending {
-    slot: Arc<Slot>,
+    slot: Arc<Handoff<EvalResult>>,
 }
 
 impl Pending {
+    #[must_use]
     pub fn wait(&self) -> WaitOutcome {
-        let mut state = self.slot.lock();
-        loop {
-            if let Some(result) = state.result.take() {
-                return WaitOutcome::Done(result);
-            }
-            if std::mem::take(&mut state.interrupted) {
-                return WaitOutcome::Interrupted;
-            }
-            state = self
-                .slot
-                .changed
-                .wait(state)
-                .unwrap_or_else(PoisonError::into_inner);
+        match self.slot.wait() {
+            Outcome::Done(result) => WaitOutcome::Done(result),
+            Outcome::Interrupted => WaitOutcome::Interrupted,
         }
     }
 
-    pub fn wait_for(&self, timeout: Duration) -> Option<Result<Vec<u8>, EngineError>> {
-        let (mut state, _) = self
-            .slot
-            .changed
-            .wait_timeout_while(self.slot.lock(), timeout, |s| s.result.is_none())
-            .unwrap_or_else(PoisonError::into_inner);
-        let result = state.result.take();
-        drop(state);
-        result
+    #[must_use]
+    pub fn wait_for(&self, timeout: Duration) -> Option<EvalResult> {
+        self.slot.wait_for(timeout)
     }
 
     pub fn interrupt(&self) {
-        self.slot.lock().interrupted = true;
-        self.slot.changed.notify_all();
+        self.slot.interrupt();
     }
 }
 
@@ -118,7 +80,7 @@ impl ContextHandle {
         if std::process::id() != self.pid {
             return Err(EngineError::Orphaned);
         }
-        let slot = Arc::new(Slot::default());
+        let slot = Arc::new(Handoff::default());
         self.requests
             .send(Request::Eval {
                 source,
@@ -129,7 +91,7 @@ impl ContextHandle {
     }
 
     pub fn terminate(&self, pending: &Pending) {
-        pending.slot.cancelled.store(true, Ordering::SeqCst);
+        pending.slot.cancel();
         if let Some(isolate) = self.isolate.get() {
             isolate.terminate_execution();
         }

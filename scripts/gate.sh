@@ -44,7 +44,7 @@ step cargo clippy --workspace --all-targets --locked -- -D warnings
 
 step cargo nextest run --workspace --exclude mini_racer_rs --locked
 step cargo test --doc --workspace --exclude mini_racer_rs --locked
-RUSTFLAGS="--cfg loom -Dwarnings" step cargo test -p mini_racer_sync --test loom --release --locked --target-dir target/loom
+RUSTFLAGS="${RUSTFLAGS:-} --cfg loom -Dwarnings" step cargo test -p mini_racer_sync --test loom --release --locked --target-dir target/loom
 step bundle exec rake compile
 step scripts/check-exports.sh
 step bundle exec rake test
@@ -55,8 +55,9 @@ msrv=$(taplo get -f tools/versions.toml toolchains.msrv)
 step scripts/test-boundaries.sh
 step bundle exec ruby test/upstream/run.rb --scripts
 step cargo "+$msrv" check --workspace --all-targets --locked
-step cargo deny check
+step scripts/check-deny.sh
 step cargo audit
+step cargo audit -f crates/mini_racer_wire/fuzz/Cargo.lock
 step cargo machete
 step scripts/fuzz-smoke.sh 20
 RUSTDOCFLAGS="-D warnings" step cargo doc --workspace --no-deps --locked

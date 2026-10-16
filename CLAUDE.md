@@ -51,7 +51,7 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | `madvise` wrapper (fork safety) | `crates/mini_racer_engine/src/sys.rs`, `crates/mini_racer_engine/build.rs` |
 | Wire decoding and text transcoding | `crates/mini_racer_wire/src/decode.rs`, `crates/mini_racer_wire/src/text.rs` |
 | Wire fuzz targets | `crates/mini_racer_wire/fuzz/fuzz_targets/`, `scripts/fuzz-smoke.sh` |
-| Mutex poison policy | `crates/mini_racer_sync/src/lock.rs` |
+| Runner-to-caller result handoff, mutex poison policy | `crates/mini_racer_sync/src/handoff.rs`, `crates/mini_racer_sync/src/lock.rs` |
 | std or loom primitives for protocol code | `crates/mini_racer_sync/src/primitives.rs` |
 | Loom models | `crates/mini_racer_sync/tests/loom.rs` |
 | `MiniRacer::Context` methods | `ext/mini_racer_rs/src/context.rs` |
@@ -85,7 +85,7 @@ bundle exec rake compile           # build the extension into lib/mini_racer_rs/
 bundle exec rake test              # Ruby tests (compiles first)
 cargo nextest run --workspace --exclude mini_racer_rs
 scripts/check-exports.sh --write   # after changing #[no_mangle] items or bumping v8
-RUSTFLAGS="--cfg loom" cargo test -p mini_racer_sync --test loom --release --target-dir target/loom
+RUSTFLAGS="--cfg loom -Dwarnings" cargo test -p mini_racer_sync --test loom --release --locked --target-dir target/loom
 scripts/fuzz-smoke.sh 60           # every wire fuzz target, 60 s each, on the pinned nightly
 bundle exec ruby test/upstream/run.rb --strict   # mini_racer's own suite against the ledger
 ```
@@ -96,14 +96,14 @@ bundle exec ruby test/upstream/run.rb --strict   # mini_racer's own suite agains
 - `crates/mini_racer_sync`: `cargo nextest run -p mini_racer_sync`, then the loom command above.
 - `crates/mini_racer_engine`: `cargo nextest run -p mini_racer_engine`. Flag-dependent assertions live in `crates/mini_racer_engine/tests/flags.rs`, one test per process.
 - `ext/` or `lib/`: `bundle exec rake test`, then `scripts/check-exports.sh`, then `bundle exec ruby test/upstream/run.rb --strict`.
-- `scripts/`, `layers.toml`, any `Cargo.toml`: `scripts/check-boundaries.sh` and `scripts/test-boundaries.sh`.
+- `scripts/`, `layers.toml`, any `Cargo.toml`: `scripts/check-boundaries.sh`, `scripts/test-boundaries.sh` and `scripts/check-deny.sh`.
 - `.github/`: `scripts/check-action-pins.sh`.
 
 ## Pitfalls
 
 - `lib/mini_racer_rs/version.rb` holds one version literal; release-please rewrites the first one it finds.
 - Loom builds need `--cfg loom` in `RUSTFLAGS` and their own `--target-dir target/loom`; sharing the default target dir rebuilds everything on every switch.
-- The fuzz crate is outside the workspace with its own `Cargo.lock`; it builds only on the nightly pinned as `toolchains.fuzz` in `tools/versions.toml`.
+- The fuzz crate is its own workspace with its own `Cargo.lock` (checked by `cargo fetch --locked`, cargo deny and cargo audit); it builds only on the nightly pinned as `toolchains.fuzz` in `tools/versions.toml`, which `scripts/fuzz-smoke.sh` installs when missing.
 - `rake compile` builds the dev profile locally and release when `CI` is set (`RB_SYS_CARGO_PROFILE`).
 - A stale `lib/mini_racer_rs/mini_racer_rs.so` keeps loading after Rust edits until `rake compile` runs; `NATIVE_VERSION` only catches version mismatches.
 - Without the variables from `scripts/fetch-v8-archive.sh`, cargo downloads V8 itself and skips the pinned digest.

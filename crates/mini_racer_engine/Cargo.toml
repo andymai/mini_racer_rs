@@ -16,6 +16,7 @@ no-madvise-wrap = []
 [dependencies]
 deno_core_icudata.workspace = true
 libc.workspace = true
+mini_racer_sync.workspace = true
 thiserror.workspace = true
 v8.workspace = true
 

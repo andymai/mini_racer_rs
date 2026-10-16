@@ -1,5 +1,6 @@
 [package]
 edition = "2024"
+license = "MIT"
 name = "mini_racer_wire_fuzz"
 publish = false
 version = "0.0.0"
@@ -11,8 +12,8 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4.13"
 mini_racer_wire = {path = ".."}
 
-# Detached from the main workspace so its nightly-only build never touches the
-# workspace lockfile or lints.
+# Its own workspace root, with its own Cargo.lock; cargo rejects it as a stray
+# member of the root workspace otherwise.
 [workspace]
 
 [[bin]]

@@ -1,11 +1,27 @@
-use crate::primitives::{Mutex, MutexGuard};
+use std::sync::PoisonError;
+use std::time::Duration;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("a thread panicked while holding this lock")]
-pub struct Poisoned;
+use crate::primitives::{Condvar, Mutex, MutexGuard};
 
-pub fn lock_or_poison<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>, Poisoned> {
-    mutex.lock().map_err(|_| Poisoned)
+// Recovering is the poison policy: every critical section in a protocol type is
+// a single write or take, so a panic cannot leave state half-updated, and
+// failing instead would strand the Ruby thread waiting on the other side.
+pub fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+pub fn wait<'a, T>(condvar: &Condvar, guard: MutexGuard<'a, T>) -> MutexGuard<'a, T> {
+    condvar.wait(guard).unwrap_or_else(PoisonError::into_inner)
+}
+
+pub fn wait_timeout<'a, T>(
+    condvar: &Condvar,
+    guard: MutexGuard<'a, T>,
+    timeout: Duration,
+) -> MutexGuard<'a, T> {
+    condvar
+        .wait_timeout(guard, timeout)
+        .map_or_else(|poisoned| poisoned.into_inner().0, |(guard, _)| guard)
 }
 
 #[cfg(all(test, not(loom)))]
@@ -13,21 +29,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn an_uncontended_lock_succeeds() {
-        let mutex = Mutex::new(1);
-
-        assert_eq!(lock_or_poison(&mutex).map(|guard| *guard), Ok(1));
-    }
-
-    #[test]
-    fn a_panic_while_held_poisons_the_lock() {
+    #[expect(
+        clippy::significant_drop_tightening,
+        reason = "the guard must be held while the thread unwinds"
+    )]
+    fn a_panic_while_held_does_not_strand_later_lockers() {
         let mutex = Mutex::new(0);
         let unwound = std::panic::catch_unwind(|| {
-            let _guard = lock_or_poison(&mutex);
+            let mut guard = lock(&mutex);
+            *guard = 1;
             std::panic::resume_unwind(Box::new("unwinding while the lock is held"));
         });
 
         assert!(unwound.is_err());
-        assert!(matches!(lock_or_poison(&mutex), Err(Poisoned)));
+        assert!(mutex.is_poisoned());
+        assert_eq!(*lock(&mutex), 1);
     }
 }

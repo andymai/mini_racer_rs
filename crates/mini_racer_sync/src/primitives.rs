@@ -1,5 +1,10 @@
-// Protocol code names only these, so loom models check the same code that ships.
+// Protocol types name only these, so the loom models in tests/loom.rs check
+// the same code the engine runs.
 #[cfg(loom)]
-pub use loom::sync::{Mutex, MutexGuard};
+pub use loom::sync::atomic::{AtomicBool, Ordering};
+#[cfg(loom)]
+pub use loom::sync::{Condvar, Mutex, MutexGuard};
 #[cfg(not(loom))]
-pub use std::sync::{Mutex, MutexGuard};
+pub use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(not(loom))]
+pub use std::sync::{Condvar, Mutex, MutexGuard};

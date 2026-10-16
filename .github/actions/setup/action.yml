@@ -11,6 +11,9 @@ inputs:
   v8:
     description: Fetch the pinned V8 archive and export RUSTY_V8_* for cargo
     default: "true"
+  cache-workspaces:
+    description: rust-cache workspaces, as `<manifest dir> -> <target dir>`
+    default: ". -> target"
 
 runs:
   using: composite
@@ -40,6 +43,7 @@ runs:
     - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       with:
         save-if: ${{ github.ref == 'refs/heads/main' }}
+        workspaces: ${{ inputs.cache-workspaces }}
     - if: inputs.ruby != ''
       uses: ruby/setup-ruby@651ff0d62c5c79bed6d53ec518387aae20e72c1a # v1.329.0
       with:
