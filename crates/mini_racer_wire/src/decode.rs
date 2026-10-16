@@ -80,18 +80,6 @@ pub trait Visitor {
         value: Self::Value,
     ) -> Result<(), Self::Error>;
 
-    /// `insert` for a sparse array entry whose key V8 wrote as an int32,
-    /// which the decoder reads without making the key a value.
-    fn insert_index(
-        &mut self,
-        frame: &mut Self::Frame,
-        index: i32,
-        value: Self::Value,
-    ) -> Result<(), Self::Error> {
-        let key = self.scalar(Scalar::Int32(index))?;
-        self.insert(frame, key, value)
-    }
-
     fn end(&mut self, frame: Self::Frame) -> Result<Self::Value, Self::Error>;
 
     /// Remembers `value` as V8's object `id` for later back references. Ids
@@ -626,23 +614,7 @@ impl<'a, 'v, V: Visitor> Decoder<'a, 'v, V> {
     fn sparse_array(&mut self, depth: u32) -> Decoded<V> {
         let length = self.reader.varint_u32()?;
         let (mut frame, id, registered) = self.begin(Container::SparseArray { length })?;
-        let mut properties = 0u32;
-        loop {
-            match self.reader.peek()? {
-                tag::END_SPARSE_ARRAY => break,
-                tag::INT32 => {
-                    self.reader.byte()?;
-                    let index = zigzag(self.reader.varint_u32()?);
-                    let value = self.value(Self::child(depth)?)?;
-                    Self::visit(self.visitor.insert_index(&mut frame, index, value))?;
-                }
-                _ => self.insert(&mut frame, depth)?,
-            }
-            properties = properties
-                .checked_add(1)
-                .ok_or(DecodeError::TooManyObjects)?;
-        }
-        self.reader.byte()?;
+        let properties = self.entries(&mut frame, depth, tag::END_SPARSE_ARRAY)?;
         self.expect_count(properties.into(), "element")?;
         self.expect_count(length.into(), "element")?;
         self.end(frame, id, registered)

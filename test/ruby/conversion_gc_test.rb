@@ -64,7 +64,7 @@ class ConversionGcTest < Minitest::Test
           const object = Object.fromEntries(strings.map((s, i) => [s, [i, s]]))
           const holey = new Array(200)
           for (let i = 0; i < 200; i++) holey[i] = "hole " + i
-          return {strings, object, holey, numbers: Array.from({length: 200}, (_, i) => i + 0.5)}
+          return {strings, object, holey, numbers: Array.from({length: 200}, (_, i) => 2 ** 70 + i * 2 ** 20)}
         })()
       JS
     end
@@ -72,7 +72,7 @@ class ConversionGcTest < Minitest::Test
     assert_equal Array.new(200) { |i| "item #{i}" }, value["strings"]
     assert_equal(Array.new(200) { |i| ["item #{i}", [i, "item #{i}"]] }.to_h, value["object"])
     assert_equal Array.new(200) { |i| "hole #{i}" }, value["holey"]
-    assert_equal Array.new(200) { |i| i + 0.5 }, value["numbers"]
+    assert_equal Array.new(200) { |i| (2**70) + (i * (2**20)) }, value["numbers"]
     assert value["object"].keys.all?(&:frozen?)
   end
 

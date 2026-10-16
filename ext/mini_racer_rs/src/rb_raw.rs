@@ -196,17 +196,18 @@ pub fn call_with_array(ruby: &Ruby, receiver: Value, args: RArray) -> Result<Val
     Ok(unsafe { Value::from_raw(raw) })
 }
 
-/// Stores each key and value of `pairs` (key, value, key, value, ...) as
-/// `Hash#[]=` would, under one `rb_protect` for the whole slice.
+/// Stores each key and value as `Hash#[]=` would, under one `rb_protect` for
+/// the whole slice. `pairs` must be where the GC sees them, on the native
+/// stack: storing a key can start a compacting collection.
 // rb_hash_bulk_insert would take the slice in one call, but it rehashes the
 // whole table whenever the hash already has entries.
-pub fn hash_aset_pairs(_ruby: &Ruby, hash: RHash, pairs: &[Value]) -> Result<(), Error> {
+pub fn hash_aset_pairs(_ruby: &Ruby, hash: RHash, pairs: &[[Value; 2]]) -> Result<(), Error> {
     let raw = hash.as_raw();
     protect(|| {
-        for [key, value] in pairs.as_chunks::<2>().0 {
+        for [key, value] in pairs {
             // SAFETY: the `&Ruby` argument proves this thread holds the GVL,
-            // `pairs` lives on the caller's stack where the GC sees it, and
-            // `protect` catches anything rb_hash_aset raises.
+            // the caller keeps `pairs` where the GC sees them, and `protect`
+            // catches anything rb_hash_aset raises.
             unsafe { rb_sys::rb_hash_aset(raw, key.as_raw(), value.as_raw()) };
         }
         raw

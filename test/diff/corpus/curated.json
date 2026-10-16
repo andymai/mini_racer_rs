@@ -316,7 +316,7 @@
     "steps": [
       {
         "op": "eval",
-        "source": "(() => { const a = new Array(40); for (let i = 0; i < 40; i++) if (i % 3) a[i] = 'v' + i; return a })()"
+        "source": "(() => { const a = new Array(100); for (let i = 0; i < 100; i++) if (i % 3) a[i] = 'v' + i; return a })()"
       }
     ]
   },

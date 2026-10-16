@@ -47,94 +47,10 @@ fn classify(n: f64) -> Number {
 // mini_racer's Ruby shapes: an array drops its named properties and a sparse
 // array its indexes, a set becomes an Array, a map keeps its keys as they are,
 // an object's keys become Strings, and an error becomes a ScriptError.
-// Values wait here, on the native stack where Ruby's GC finds them, so a
-// batch of them costs one rb_protect rather than one per element.
-const BATCH: usize = 32;
-
-struct Elements {
-    array: RArray,
-    pending: [Value; BATCH],
-    filled: usize,
-}
-
-impl Elements {
-    fn new(ruby: &Ruby, array: RArray) -> Self {
-        Self {
-            array,
-            pending: [ruby.qnil().as_value(); BATCH],
-            filled: 0,
-        }
-    }
-
-    fn push(&mut self, value: Value) -> Result<(), Error> {
-        if let Some(slot) = self.pending.get_mut(self.filled) {
-            *slot = value;
-            self.filled = self.filled.saturating_add(1);
-        }
-        if self.filled == BATCH {
-            self.flush()?;
-        }
-        Ok(())
-    }
-
-    fn flush(&mut self) -> Result<(), Error> {
-        if self.filled > 0 {
-            self.array
-                .cat(self.pending.get(..self.filled).unwrap_or_default())?;
-            self.filled = 0;
-        }
-        Ok(())
-    }
-}
-
-struct Pairs {
-    hash: RHash,
-    pending: [Value; BATCH],
-    filled: usize,
-}
-
-impl Pairs {
-    fn new(ruby: &Ruby, hash: RHash) -> Self {
-        Self {
-            hash,
-            pending: [ruby.qnil().as_value(); BATCH],
-            filled: 0,
-        }
-    }
-
-    fn insert(&mut self, key: RString, value: Value) -> Result<(), Error> {
-        if let Some([key_slot, value_slot]) = self
-            .pending
-            .get_mut(self.filled..self.filled.saturating_add(2))
-            .and_then(|slots| <&mut [Value; 2]>::try_from(slots).ok())
-        {
-            *key_slot = key.as_value();
-            *value_slot = value;
-            self.filled = self.filled.saturating_add(2);
-        }
-        if self.filled == BATCH {
-            self.flush()?;
-        }
-        Ok(())
-    }
-
-    fn flush(&mut self) -> Result<(), Error> {
-        if self.filled > 0 {
-            rb_raw::hash_aset_pairs(
-                &Ruby::get_with(self.hash),
-                self.hash,
-                self.pending.get(..self.filled).unwrap_or_default(),
-            )?;
-            self.filled = 0;
-        }
-        Ok(())
-    }
-}
-
 enum Frame {
-    Array(Elements),
-    Sparse { elements: Elements, named: bool },
-    Object(Pairs),
+    Array(RArray),
+    Sparse { array: RArray, named: bool },
+    Object(RHash),
     Map(RHash),
     Error(ErrorParts),
 }
@@ -147,14 +63,66 @@ struct ErrorParts {
     cause: Option<Value>,
 }
 
+const BATCH: usize = 32;
+
+#[derive(Clone, Copy)]
+enum Target {
+    Array(RArray),
+    Hash(RHash),
+}
+
+// Decoded elements and object pairs wait here so a batch of them costs one
+// rb_protect rather than one per value. Every container's begin and end
+// empties it, so only the innermost open container ever has values waiting,
+// and whatever a child does (a Map hashing an ancestor as its key) sees each
+// container with every value decoded so far, as mini_racer builds them.
+struct Pending {
+    target: Option<Target>,
+    values: [Value; BATCH],
+    filled: usize,
+}
+
 // The visitor and its frames live on the native stack for the whole decode,
 // where Ruby's GC finds them (I3); `refs` holds every value V8 gave an id.
 struct RubyVisitor<'r> {
     ruby: &'r Ruby,
     refs: RArray,
+    pending: Pending,
 }
 
 impl RubyVisitor<'_> {
+    fn add(&mut self, target: Target, values: &[Value]) -> Result<(), Error> {
+        if self.pending.filled.saturating_add(values.len()) > BATCH {
+            self.flush()?;
+        }
+        if self.pending.filled == 0 {
+            self.pending.target = Some(target);
+        }
+        let start = self.pending.filled;
+        let end = start.saturating_add(values.len());
+        let slots = self
+            .pending
+            .values
+            .get_mut(start..end)
+            .ok_or_else(|| errors::internal(self.ruby, "decode batch overflow"))?;
+        slots.copy_from_slice(values);
+        self.pending.filled = end;
+        Ok(())
+    }
+
+    fn flush(&mut self) -> Result<(), Error> {
+        let filled = std::mem::take(&mut self.pending.filled);
+        let values = self.pending.values.get(..filled).unwrap_or_default();
+        match self.pending.target {
+            _ if filled == 0 => Ok(()),
+            Some(Target::Array(array)) => array.cat(values),
+            Some(Target::Hash(hash)) => {
+                rb_raw::hash_aset_pairs(self.ruby, hash, values.as_chunks::<2>().0)
+            }
+            None => Err(errors::internal(self.ruby, "decode batch without a target")),
+        }
+    }
+
     fn bad_state<T>(&self) -> Result<T, Error> {
         Err(errors::runtime(self.ruby, "bad state"))
     }
@@ -250,18 +218,18 @@ impl Visitor for RubyVisitor<'_> {
     }
 
     fn begin(&mut self, container: Container) -> Result<Begun<Frame, Value>, Error> {
+        self.flush()?;
         let ruby = self.ruby;
         let frame = match container {
-            Container::Values | Container::Set => Frame::Array(Elements::new(ruby, ruby.ary_new())),
-            Container::DenseArray { length } => Frame::Array(Elements::new(
-                ruby,
-                ruby.ary_new_capa(usize::try_from(length).unwrap_or(0)),
-            )),
+            Container::Values | Container::Set => Frame::Array(ruby.ary_new()),
+            Container::DenseArray { length } => {
+                Frame::Array(ruby.ary_new_capa(usize::try_from(length).unwrap_or(0)))
+            }
             Container::SparseArray { .. } => Frame::Sparse {
-                elements: Elements::new(ruby, ruby.ary_new()),
+                array: ruby.ary_new(),
                 named: false,
             },
-            Container::Object => Frame::Object(Pairs::new(ruby, ruby.hash_new())),
+            Container::Object => Frame::Object(ruby.hash_new()),
             Container::Map => Frame::Map(ruby.hash_new()),
             // Allocated now so a cause can refer back to the error itself.
             Container::Error => Frame::Error(ErrorParts {
@@ -272,9 +240,8 @@ impl Visitor for RubyVisitor<'_> {
             }),
         };
         let value = match &frame {
-            Frame::Array(elements) | Frame::Sparse { elements, .. } => elements.array.as_value(),
-            Frame::Object(pairs) => pairs.hash.as_value(),
-            Frame::Map(hash) => hash.as_value(),
+            Frame::Array(array) | Frame::Sparse { array, .. } => array.as_value(),
+            Frame::Object(hash) | Frame::Map(hash) => hash.as_value(),
             Frame::Error(parts) => parts.error,
         };
         Ok(Begun {
@@ -285,7 +252,9 @@ impl Visitor for RubyVisitor<'_> {
 
     fn push(&mut self, frame: &mut Frame, value: Value) -> Result<(), Error> {
         match frame {
-            Frame::Array(elements) | Frame::Sparse { elements, .. } => elements.push(value),
+            Frame::Array(array) | Frame::Sparse { array, .. } => {
+                self.add(Target::Array(*array), &[value])
+            }
             Frame::Object(_) | Frame::Map(_) | Frame::Error(_) => self.bad_state(),
         }
     }
@@ -293,18 +262,21 @@ impl Visitor for RubyVisitor<'_> {
     fn insert(&mut self, frame: &mut Frame, key: Value, value: Value) -> Result<(), Error> {
         match frame {
             Frame::Array(_) => Ok(()),
-            Frame::Sparse { elements, named } => {
+            Frame::Sparse { array, named } => {
                 if !*named && is_index(key) {
-                    elements.push(value)
+                    self.add(Target::Array(*array), &[value])
                 } else {
                     *named = true;
                     Ok(())
                 }
             }
-            Frame::Object(pairs) => match RString::from_value(key) {
-                Some(key) => pairs.insert(key, value),
-                None => pairs.insert(key.funcall::<_, _, RString>("to_s", ())?, value),
-            },
+            Frame::Object(hash) => {
+                let key = match RString::from_value(key) {
+                    Some(key) => key.as_value(),
+                    None => key.funcall::<_, _, Value>("to_s", ())?,
+                };
+                self.add(Target::Hash(*hash), &[key, value])
+            }
             Frame::Map(hash) => hash.aset(key, value),
             Frame::Error(parts) => {
                 let field = RString::from_value(key)
@@ -321,29 +293,11 @@ impl Visitor for RubyVisitor<'_> {
         }
     }
 
-    fn insert_index(&mut self, frame: &mut Frame, index: i32, value: Value) -> Result<(), Error> {
-        if let Frame::Sparse {
-            elements,
-            named: false,
-        } = frame
-        {
-            return elements.push(value);
-        }
-        let key = self.ruby.integer_from_i64(index.into()).as_value();
-        self.insert(frame, key, value)
-    }
-
     fn end(&mut self, frame: Frame) -> Result<Value, Error> {
+        self.flush()?;
         match frame {
-            Frame::Array(mut elements) | Frame::Sparse { mut elements, .. } => {
-                elements.flush()?;
-                Ok(elements.array.as_value())
-            }
-            Frame::Object(mut pairs) => {
-                pairs.flush()?;
-                Ok(pairs.hash.as_value())
-            }
-            Frame::Map(hash) => Ok(hash.as_value()),
+            Frame::Array(array) | Frame::Sparse { array, .. } => Ok(array.as_value()),
+            Frame::Object(hash) | Frame::Map(hash) => Ok(hash.as_value()),
             Frame::Error(parts) => self.script_error(parts),
         }
     }
@@ -369,6 +323,11 @@ pub fn value(ruby: &Ruby, bytes: &[u8]) -> Result<Value, Error> {
     let mut visitor = RubyVisitor {
         ruby,
         refs: ruby.ary_new(),
+        pending: Pending {
+            target: None,
+            values: [ruby.qnil().as_value(); BATCH],
+            filled: 0,
+        },
     };
     decode_value(bytes, RESULT_LIMITS, &mut visitor).map_err(|e| match e {
         DecodeError::Visitor(error) => error,
