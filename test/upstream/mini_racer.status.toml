@@ -116,6 +116,15 @@ status = "upstream-skip"
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_late_watchdog_does_not_terminate_next_eval"]
 status = "xfail:M4"
 
+[tests."test/async_test.rb#MiniRacerAsyncTest#test_late_watchdog_does_not_terminate_next_eval".overrides."ruby-3.3-macos-arm64"]
+status = "pass"
+
+[tests."test/async_test.rb#MiniRacerAsyncTest#test_late_watchdog_does_not_terminate_next_eval".overrides."ruby-3.4-macos-arm64"]
+status = "pass"
+
+[tests."test/async_test.rb#MiniRacerAsyncTest#test_late_watchdog_does_not_terminate_next_eval".overrides."ruby-4.0-macos-arm64"]
+status = "flaky:flaky-test_late_watchdog_does_not_terminate_next_eval"
+
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_late_watchdog_does_not_terminate_next_eval".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
 
@@ -204,9 +213,6 @@ status = "pass"
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_an_empty_snapshot_is_valid"]
-status = "xfail:M5"
-
-[tests."test/mini_racer_test.rb#MiniRacerTest#test_an_empty_snapshot_is_valid".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_array"]
@@ -363,27 +369,15 @@ status = "pass"
 status = "upstream-skip"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_invalid_snapshots_throw_an_exception"]
-status = "xfail:M5"
-
-[tests."test/mini_racer_test.rb#MiniRacerTest#test_invalid_snapshots_throw_an_exception".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_invalid_warmup_sources_throw_an_exception"]
-status = "xfail:M5"
-
-[tests."test/mini_racer_test.rb#MiniRacerTest#test_invalid_warmup_sources_throw_an_exception".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_invalid_warmup_sources_throw_an_exception_2"]
-status = "xfail:M5"
-
-[tests."test/mini_racer_test.rb#MiniRacerTest#test_invalid_warmup_sources_throw_an_exception_2".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_isolates_from_snapshot_dont_get_corrupted_if_the_snapshot_gets_warmed_up_or_GCed"]
-status = "xfail:M5"
-
-[tests."test/mini_racer_test.rb#MiniRacerTest#test_isolates_from_snapshot_dont_get_corrupted_if_the_snapshot_gets_warmed_up_or_GCed".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_it_can_automatically_time_out_context"]
@@ -400,9 +394,6 @@ status = "pass"
 status = "upstream-skip"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_it_can_use_snapshots"]
-status = "xfail:M5"
-
-[tests."test/mini_racer_test.rb#MiniRacerTest#test_it_can_use_snapshots".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_it_handles_malformed_js"]
@@ -493,9 +484,6 @@ status = "upstream-skip"
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_platform_set_flags_raises_an_exception_if_already_initialized"]
-status = "xfail:M5"
-
-[tests."test/mini_racer_test.rb#MiniRacerTest#test_platform_set_flags_raises_an_exception_if_already_initialized".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_platform_set_flags_rejects_nul_bytes"]
@@ -589,45 +577,39 @@ status = "upstream-skip"
 status = "upstream-skip"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_snapshot_dump"]
-status = "xfail:M5"
+status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_snapshot_dump".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_snapshot_exception_with_nul_message_preserves_message"]
-status = "xfail:M5"
+status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_snapshot_exception_with_nul_message_preserves_message".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_snapshot_load"]
-status = "xfail:M5"
+status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_snapshot_load".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_snapshot_load_with_non_binary_encoding"]
-status = "xfail:M5"
+status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_snapshot_load_with_non_binary_encoding".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_snapshot_size"]
-status = "xfail:M5"
+status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_snapshot_size".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_snapshots_can_be_GCed_without_affecting_contexts_created_from_them"]
-status = "xfail:M5"
-
-[tests."test/mini_racer_test.rb#MiniRacerTest#test_snapshots_can_be_GCed_without_affecting_contexts_created_from_them".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_snapshots_can_be_warmed_up_with_no_side_effects"]
-status = "xfail:M5"
-
-[tests."test/mini_racer_test.rb#MiniRacerTest#test_snapshots_can_be_warmed_up_with_no_side_effects".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_string_encoding"]
@@ -673,9 +655,6 @@ status = "pass"
 status = "upstream-skip"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_warming_up_with_invalid_source_does_not_affect_the_snapshot_internal_state"]
-status = "xfail:M5"
-
-[tests."test/mini_racer_test.rb#MiniRacerTest#test_warming_up_with_invalid_source_does_not_affect_the_snapshot_internal_state".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_wasm_ref"]
