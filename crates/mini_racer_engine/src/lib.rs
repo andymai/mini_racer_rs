@@ -4,6 +4,7 @@ mod error;
 pub mod process;
 mod runner;
 mod serialize;
+mod snapshot;
 mod spin;
 #[allow(
     unsafe_code,

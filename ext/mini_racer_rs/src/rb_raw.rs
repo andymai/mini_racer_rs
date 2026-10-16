@@ -1,7 +1,7 @@
 use std::ffi::{c_int, c_void};
 
 use magnus::rb_sys::{AsRawId, AsRawValue, FromRawValue, protect};
-use magnus::value::{IntoId, LazyId};
+use magnus::value::{IntoId, LazyId, ReprValue};
 use magnus::{Error, RArray, RString, Ruby, Value};
 
 static CALL: LazyId = LazyId::new("call");
@@ -194,6 +194,64 @@ pub fn call_with_array(ruby: &Ruby, receiver: Value, args: RArray) -> Result<Val
     })?;
     // SAFETY: `raw` is the live value the call returned.
     Ok(unsafe { Value::from_raw(raw) })
+}
+
+/// How Ruby's own type errors name `value`: nil, true and false by value,
+/// anything else by its class, never a singleton class, printed with `to_s`
+/// as Ruby prints it, overridden or not.
+pub fn type_name(ruby: &Ruby, value: Value) -> String {
+    if value.is_nil() {
+        return "nil".to_owned();
+    }
+    if value.is_kind_of(ruby.class_true_class()) {
+        return "true".to_owned();
+    }
+    if value.is_kind_of(ruby.class_false_class()) {
+        return "false".to_owned();
+    }
+    // SAFETY: the `&Ruby` argument proves this thread holds the GVL, and
+    // rb_obj_class only reads the value's class.
+    let raw = unsafe { rb_sys::rb_obj_class(value.as_raw()) };
+    // SAFETY: `raw` is the live class rb_obj_class returned.
+    let class = unsafe { Value::from_raw(raw) };
+    class
+        .funcall::<_, _, String>("to_s", ())
+        .unwrap_or_else(|_| class_name(ruby, value))
+}
+
+/// The struct name a typed data object was wrapped under, which Ruby's
+/// typed data check names it by.
+pub fn typed_data_name(ruby: &Ruby, value: Value) -> Option<String> {
+    if !matches!(ruby_type(ruby, value), RubyType::Data) {
+        return None;
+    }
+    // SAFETY: `value` is a live T_DATA object and the GVL is held.
+    if !unsafe { rb_sys::RTYPEDDATA_P(value.as_raw()) } {
+        return None;
+    }
+    // SAFETY: as above; the type of a typed data object is static data.
+    let data_type = unsafe { rb_sys::RTYPEDDATA_TYPE(value.as_raw()) };
+    // SAFETY: `data_type` points at the object's static rb_data_type_t.
+    let name = unsafe { (*data_type).wrap_struct_name };
+    if name.is_null() {
+        return None;
+    }
+    // SAFETY: wrap_struct_name is a NUL-terminated static string.
+    Some(
+        unsafe { std::ffi::CStr::from_ptr(name) }
+            .to_string_lossy()
+            .into_owned(),
+    )
+}
+
+/// `rb_str_dup`: a copy of the same class, without `String#dup`'s instance
+/// variables.
+pub fn str_dup(_ruby: &Ruby, s: RString) -> RString {
+    // SAFETY: the `&Ruby` argument proves this thread holds the GVL; rb_str_dup
+    // returns a new live String.
+    let raw = unsafe { rb_sys::rb_str_dup(s.as_raw()) };
+    // SAFETY: `raw` is the String rb_str_dup returned.
+    RString::from_value(unsafe { Value::from_raw(raw) }).unwrap_or(s)
 }
 
 /// A Symbol's name as a String, without calling `Symbol#to_s`.

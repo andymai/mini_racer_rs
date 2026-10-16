@@ -8,7 +8,9 @@ pub enum OptionValue {
     Fixnum(i64),
     Nil,
     False,
-    /// Anything else, by its class name.
+    /// A `MiniRacer::Snapshot`, by its blob; given only for `snapshot:`.
+    Snapshot(Vec<u8>),
+    /// Anything else, by the name Ruby's type errors give it.
     Other(String),
 }
 
@@ -19,6 +21,7 @@ impl OptionValue {
             Self::Fixnum(_) => "Integer".to_owned(),
             Self::Nil => "nil".to_owned(),
             Self::False => "false".to_owned(),
+            Self::Snapshot(_) => "MiniRacer::Snapshot".to_owned(),
             Self::Other(name) => name.clone(),
         }
     }
@@ -28,6 +31,8 @@ impl OptionValue {
 pub enum OptionError {
     #[error("wrong argument type {0} (expected Integer)")]
     Type(String),
+    #[error("wrong argument type {0} (expected mini_racer/snapshot)")]
+    SnapshotType(String),
     #[error("bad {0}")]
     Range(&'static str),
     #[error("bad keyword: {0}")]
@@ -85,10 +90,15 @@ pub fn configure(
                 within(&value, "max_memory", 0..UINT32_MAX)?;
                 return Err(OptionError::Unsupported(key));
             }
-            // nil and false are what leaving these out means.
-            "snapshot" if value == OptionValue::Nil => {}
+            "snapshot" => match value {
+                OptionValue::Nil => {}
+                // mini_racer treats an empty blob as no snapshot.
+                OptionValue::Snapshot(blob) => config.snapshot = (!blob.is_empty()).then_some(blob),
+                other => return Err(OptionError::SnapshotType(other.type_name())),
+            },
+            // nil and false are what leaving it out means.
             "verbose_exceptions" if matches!(value, OptionValue::Nil | OptionValue::False) => {}
-            "snapshot" | "verbose_exceptions" => return Err(OptionError::Unsupported(key)),
+            "verbose_exceptions" => return Err(OptionError::Unsupported(key)),
             _ => return Err(OptionError::Keyword(key)),
         }
     }
@@ -179,11 +189,33 @@ mod tests {
     }
 
     #[test]
+    fn a_snapshot_must_be_one_and_an_empty_one_is_none() {
+        let config = configure_pairs(&[("snapshot", OptionValue::Snapshot(b"blob".to_vec()))]);
+        assert_eq!(
+            config.map(|config| config.snapshot),
+            Ok(Some(b"blob".to_vec()))
+        );
+        let empty = configure_pairs(&[("snapshot", OptionValue::Snapshot(Vec::new()))]);
+        assert_eq!(empty.map(|config| config.snapshot), Ok(None));
+        assert_eq!(
+            configure_pairs(&[("snapshot", OptionValue::False)]).map(drop),
+            Err(OptionError::SnapshotType("false".to_owned()))
+        );
+        assert_eq!(
+            configure_pairs(&[(
+                "snapshot",
+                OptionValue::Other("mini_racer/context".to_owned())
+            )])
+            .map(drop),
+            Err(OptionError::SnapshotType("mini_racer/context".to_owned()))
+        );
+    }
+
+    #[test]
     fn options_not_built_yet_say_so() {
         for pairs in [
             [("max_memory", OptionValue::Fixnum(1))],
             [("ensure_gc_after_idle", OptionValue::Fixnum(1))],
-            [("snapshot", OptionValue::Other("Object".to_owned()))],
             [(
                 "verbose_exceptions",
                 OptionValue::Other("TrueClass".to_owned()),

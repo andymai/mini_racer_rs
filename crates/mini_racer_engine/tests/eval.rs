@@ -208,6 +208,7 @@ fn a_timeout_terminates_only_its_own_script() {
     let context = ContextHandle::spawn(
         ContextConfig {
             timeout: Some(Duration::from_millis(50)),
+            ..ContextConfig::default()
         },
         &mut Parking,
     )
@@ -231,6 +232,7 @@ fn creating_the_isolate_does_not_count_against_a_timeout() {
         ContextHandle::spawn(
             ContextConfig {
                 timeout: Some(Duration::from_millis(1)),
+                ..ContextConfig::default()
             },
             &mut Parking,
         )
@@ -243,6 +245,7 @@ fn a_timeout_reaches_a_getter_run_while_serializing() {
     let context = ContextHandle::spawn(
         ContextConfig {
             timeout: Some(Duration::from_millis(50)),
+            ..ContextConfig::default()
         },
         &mut Parking,
     )

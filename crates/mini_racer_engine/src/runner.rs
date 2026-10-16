@@ -9,6 +9,7 @@ use v8::ValueDeserializerHelper;
 
 use crate::control::{CallbackReply, ControlBlock, Depth, IsolateTerminator, JsText, Request};
 use crate::serialize::{self, Filter, Tc};
+use crate::snapshot;
 use crate::spin::spin_until;
 use crate::{EngineError, JsError, JsErrorKind};
 
@@ -37,9 +38,9 @@ struct Runtime {
     raised: RefCell<Option<v8::Global<v8::Value>>>,
 }
 
-pub fn run(block: &Arc<ControlBlock>) {
+pub fn run(block: &Arc<ControlBlock>, snapshot: Option<Vec<u8>>) {
     let closing = Closing(block);
-    let disposed = catch_unwind(AssertUnwindSafe(|| serve(block))).unwrap_or_else(|_| {
+    let disposed = catch_unwind(AssertUnwindSafe(|| serve(block, snapshot))).unwrap_or_else(|_| {
         if block.channel.ready(Side::V8) {
             let _ = block
                 .channel
@@ -56,11 +57,17 @@ pub fn run(block: &Arc<ControlBlock>) {
 }
 
 // Returns whether it stopped for an explicit dispose.
-fn serve(block: &Arc<ControlBlock>) -> bool {
-    let mut isolate = v8::Isolate::new(v8::CreateParams::default());
+fn serve(block: &Arc<ControlBlock>, snapshot: Option<Vec<u8>>) -> bool {
+    let from_snapshot = snapshot.is_some();
+    let params = v8::CreateParams::default();
+    let params = match snapshot {
+        Some(blob) => params.snapshot_blob(v8::StartupData::from(blob)),
+        None => params,
+    };
+    let mut isolate = v8::Isolate::new(params);
     let contexts = {
         v8::scope!(let scope, &mut isolate);
-        serialize::contexts(scope)
+        serialize::contexts(scope, from_snapshot)
     };
     let Some((context, filter)) = contexts else {
         if receive(block).is_some() {
@@ -84,6 +91,32 @@ fn serve(block: &Arc<ControlBlock>) -> bool {
     let disposed = loop {
         let request = match receive(block) {
             Some(ToV8::Request(Request::Dispose)) => break true,
+            // The snapshot's own isolate is entered with none of this
+            // runner's scopes open.
+            // A build the caller abandoned before it began is not started; once
+            // begun it runs to the end, as nothing can terminate its isolate.
+            Some(ToV8::Request(Request::Snapshot { code, base, depth })) => {
+                let response = match depth {
+                    Depth::Outermost(dispatch) => {
+                        let built = if block.term.check(DispatchKind::Script).is_some() {
+                            Err(EngineError::Internal("halted without a cause".to_owned()))
+                        } else {
+                            snapshot::create(&code, base)
+                        };
+                        block
+                            .term
+                            .end(dispatch)
+                            .map_or(built, |halt| Err(halted(halt)))
+                    }
+                    Depth::Nested => Err(EngineError::Internal(
+                        "snapshot inside a callback".to_owned(),
+                    )),
+                };
+                if block.channel.respond(response).is_err() {
+                    break false;
+                }
+                continue;
+            }
             Some(ToV8::Request(request)) => request,
             // No callback is outstanding here, so there is nothing to reply to.
             Some(ToV8::Reply(_)) => continue,
@@ -148,6 +181,10 @@ fn handle(
         // The extension refuses a dispose from inside a callback before it
         // gets here.
         Request::Dispose => Err(EngineError::DisposeBusy),
+        // Snapshots are built on a context of their own, never nested.
+        Request::Snapshot { .. } => Err(EngineError::Internal(
+            "snapshot inside a callback".to_owned(),
+        )),
     }
 }
 
@@ -479,7 +516,10 @@ fn failure(tc: &Tc<'_, '_, '_, '_>, kind: JsErrorKind) -> EngineError {
     EngineError::from(JsError { kind, message })
 }
 
-fn string<'s>(scope: &v8::PinScope<'s, '_>, text: &JsText) -> Option<v8::Local<'s, v8::String>> {
+pub fn string<'s>(
+    scope: &v8::PinScope<'s, '_>,
+    text: &JsText,
+) -> Option<v8::Local<'s, v8::String>> {
     match text {
         JsText::Utf8(bytes) => v8::String::new_from_utf8(scope, bytes, v8::NewStringType::Normal),
         JsText::Latin1(bytes) => {
@@ -492,6 +532,12 @@ fn string<'s>(scope: &v8::PinScope<'s, '_>, text: &JsText) -> Option<v8::Local<'
 }
 
 fn parse_message(tc: &Tc<'_, '_, '_, '_>) -> Option<String> {
+    located(tc, " at ")
+}
+
+/// The pending exception's message and where it happened, as `mini_racer`
+/// formats both, joined by `separator`.
+pub fn located(tc: &Tc<'_, '_, '_, '_>, separator: &str) -> Option<String> {
     let message = tc.message()?;
     let text = message.get(tc).to_rust_string_lossy(tc);
     let name = message
@@ -501,5 +547,5 @@ fn parse_message(tc: &Tc<'_, '_, '_, '_>) -> Option<String> {
     let line = message.get_line_number(tc).unwrap_or(0);
     // V8's -1 for no column comes back as usize::MAX; mini_racer prints it signed.
     let column = message.get_start_column().cast_signed();
-    Some(format!("{text} at {name}:{line}:{column}"))
+    Some(format!("{text}{separator}{name}:{line}:{column}"))
 }

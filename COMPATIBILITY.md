@@ -4,7 +4,7 @@
 
 | Engine | Done | Planned | Deviation |
 |---|---|---|---|
-| CRuby | 36 | 18 | 13 |
+| CRuby | 42 | 12 | 15 |
 | TruffleRuby | 58 | 0 | 0 |
 
 ## Surface
@@ -27,7 +27,7 @@
 | `class:MiniRacer::RuntimeError < MiniRacer::EvalError` | done | done |
 | `class:MiniRacer::ScriptError < MiniRacer::EvalError` | done | done |
 | `class:MiniRacer::ScriptTerminatedError < MiniRacer::EvalError` | done | done |
-| `class:MiniRacer::Snapshot < Object` | planned (S3b) | done |
+| `class:MiniRacer::Snapshot < Object` | done | done |
 | `class:MiniRacer::SnapshotError < MiniRacer::Error` | done | done |
 | `class:MiniRacer::V8OutOfMemoryError < MiniRacer::EvalError` | done | done |
 | `const:MiniRacer::LIBV8_NODE_VERSION` | done | done |
@@ -60,10 +60,10 @@
 | `imethod:MiniRacer::RuntimeError#backtrace` | done | done |
 | `imethod:MiniRacer::ScriptError#backtrace` | done | done |
 | `imethod:MiniRacer::ScriptError#cause` | done | n/a |
-| `imethod:MiniRacer::Snapshot#dump` | planned (M5) | n/a |
+| `imethod:MiniRacer::Snapshot#dump` | done | n/a |
 | `imethod:MiniRacer::Snapshot#load` | n/a | done |
-| `imethod:MiniRacer::Snapshot#size` | planned (M5) | n/a |
-| `imethod:MiniRacer::Snapshot#warmup!` | planned (M5) | done |
+| `imethod:MiniRacer::Snapshot#size` | done | n/a |
+| `imethod:MiniRacer::Snapshot#warmup!` | done | done |
 | `imethod:MiniRacer::Snapshot#warmup_unsafe!` | n/a | done |
 | `imethod:MiniRacer::SnapshotError#backtrace` | done | done |
 | `kwarg:MiniRacer::Context#eval:filename` | done | done |
@@ -72,7 +72,7 @@
 | `kwarg:MiniRacer::Context#initialize:isolate` | n/a | done |
 | `kwarg:MiniRacer::Context#initialize:marshal_stack_depth` | done | done |
 | `kwarg:MiniRacer::Context#initialize:max_memory` | planned (M3) | done |
-| `kwarg:MiniRacer::Context#initialize:snapshot` | planned (S3b) | done |
+| `kwarg:MiniRacer::Context#initialize:snapshot` | done | done |
 | `kwarg:MiniRacer::Context#initialize:timeout` | done | done |
 | `kwarg:MiniRacer::Context#initialize:verbose_exceptions` | planned (M3) | n/a |
 | `module:MiniRacer` | done | done |
@@ -80,7 +80,7 @@
 | `smethod:MiniRacer::Loader.load` | deviation | n/a |
 | `smethod:MiniRacer::Platform.set_flag_as_str!` | n/a | done |
 | `smethod:MiniRacer::Platform.set_flags!` | done | done |
-| `smethod:MiniRacer::Snapshot.load` | planned (M5) | n/a |
+| `smethod:MiniRacer::Snapshot.load` | done | n/a |
 
 ## Deviations
 
@@ -126,6 +126,12 @@ mini_racer_rs supports glibc Linux on x86_64 and aarch64, plus macOS on arm64 an
 
 Pending review.
 
+### `behavior:snapshot-filter-context@ruby`
+
+mini_racer_rs returns the same filtered results from a snapshot-based context as from a context without a snapshot. In a context made from `MiniRacer::Snapshot.new("Object.getOwnPropertyDescriptors = () => ({})")`, `({a: 1, f() {}})` returns `{"a" => 1}`, and `[1, function() {}]` returns `[1]`. mini_racer 0.22.1 returns `nil` for both. Both gems copy results that V8 refuses to serialize as is through a filter in a separate safe context. mini_racer_rs keeps an untouched context in each snapshot blob and uses it for that filter, while mini_racer 0.22.1 builds the safe context from the snapshot, exposing the filter's built-ins to snapshot code. User code still sees the replacement in both gems: `Object.getOwnPropertyDescriptors({a: 1})` returns `{}`.
+
+Pending review.
+
 ### `behavior:timeout-watchdog@ruby`
 
 mini_racer_rs raises MiniRacer::InternalError when its single process-wide watchdog thread cannot start, and the timed script does not run. mini_racer 0.22.1 starts a watchdog thread for each eval or call on a context created with timeout:; if creation fails, it prints mini_racer: watchdog: pthread_create: <error> to stderr and runs the script without a time limit. This difference prevents a failed watchdog from silently removing the bound often placed on untrusted JavaScript.
@@ -147,6 +153,12 @@ Pending review.
 ### `behavior:v8-version@ruby`
 
 On CRuby, `mini_racer_rs` embeds V8 15.2.124.1 through the `v8` crate 152.2.0, while `mini_racer` 0.22.1 uses V8 13.6.233.17 through `libv8-node` 24.12.0.1. V8-generated text, including parse and runtime error messages and locale formatting, can therefore differ. So can the nesting depth at which V8 stops reading a value: with the default stack limit, `Context#call` accepts arguments about 6,250 levels deep in `mini_racer_rs` and about 3,100 in `mini_racer` 0.22.1, and both limits halve with half the stack. Affected upstream tests are marked `deviation:behavior:v8-version@ruby` in `test/upstream/mini_racer.status.toml`. This difference does not apply on TruffleRuby, where both gems use upstream's GraalJS backend.
+
+Pending review.
+
+### `behavior:warmup-discards-context@ruby`
+
+mini_racer_rs completes `Snapshot#warmup!` when the warmup script creates an object V8 cannot serialize, while mini_racer 0.22.1 stops the process with a `global handle not serialized` trap. mini_racer_rs releases the warmup context before writing the new snapshot blob, so its objects are not written. mini_racer 0.22.1 still holds that context while writing the blob. For `snapshot = MiniRacer::Snapshot.new("function f() { return 1 }")`, `snapshot.warmup!("var formatter = new Intl.DateTimeFormat('en'); f()")` succeeds in mini_racer_rs, and a context created from the snapshot evaluates `[f(), typeof formatter]` to `[1, "undefined"]`. Both gems use a fresh default context, so warmup variables are never part of the result.
 
 Pending review.
 

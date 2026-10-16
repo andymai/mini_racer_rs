@@ -70,6 +70,13 @@ pub enum Request {
         request: Vec<u8>,
         depth: Depth,
     },
+    // Built on the runner of a context made for it, as mini_racer builds one
+    // on a throwaway context: from `code` alone, or by warming `base` up.
+    Snapshot {
+        code: JsText,
+        base: Option<Vec<u8>>,
+        depth: Depth,
+    },
     Dispose,
 }
 
@@ -85,9 +92,12 @@ impl Terminator for IsolateTerminator {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ContextConfig {
     pub timeout: Option<Duration>,
+    /// A blob from `ContextHandle::create_snapshot` the isolate starts from;
+    /// the runner takes it, so V8 holds the only copy.
+    pub snapshot: Option<Vec<u8>>,
 }
 
 /// The context's pending timeout and the earliest deadline the watchdog holds
