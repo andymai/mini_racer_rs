@@ -1,0 +1,38 @@
+accepted = [
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "MIT",
+  "Unicode-3.0",
+  "Zlib",
+]
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+private = {ignore = true}
+targets = [
+  "aarch64-apple-darwin",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-apple-darwin",
+  "x86_64-unknown-linux-gnu",
+]
+
+# Published from a dirty tree, so cargo about cannot find the commit itself;
+# this is the commit .cargo_vcs_info.json records for 152.2.0.
+[v8.clarify]
+license = "MIT"
+override-git-commit = "2768994f664e8a6e3aba27503606c58339136e2a"
+
+[[v8.clarify.git]]
+checksum = "1c6356fb751d45f0c53093ebf8a7f5e580e802f51999178e19d60f3ec39e147d"
+path = "LICENSE"
+
+# LICENSE.txt carries the musl and FreeBSD notices alongside MIT, which the
+# license scanner cannot match, so it would fall back to a bare MIT template.
+[libm.clarify]
+license = "MIT"
+
+[[libm.clarify.files]]
+checksum = "3823dda7cf046602f4b4e77ec8e227863dc4736037cc85bb33d9f19febe16bb7"
+path = "LICENSE.txt"

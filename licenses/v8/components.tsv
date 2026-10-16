@@ -1,0 +1,29 @@
+# Code compiled into rusty_v8's prebuilt archives. archive_path is a source
+# directory the archives' debug strings name: a top-level directory, or one
+# third_party/<name>. source is where its license comes from: a rusty_v8
+# submodule at the release tag ("submodule:<path>"), or a pinned base URL; "-"
+# with file "-" means another section of THIRD_PARTY_NOTICES.md covers it.
+# component	archive_path	source	file
+v8	v8	submodule:v8	LICENSE
+v8	v8	submodule:v8	LICENSE.fdlibm
+v8	v8	submodule:v8	LICENSE.strongtalk
+v8	v8	submodule:v8	LICENSE.v8
+inspector_protocol	v8/third_party/inspector_protocol	submodule:v8	third_party/inspector_protocol/LICENSE
+siphash	v8/third_party/siphash	submodule:v8	third_party/siphash/LICENSE
+rapidhash	v8/third_party/rapidhash-v8	submodule:v8	third_party/rapidhash-v8/LICENSE
+utf8-decoder	v8/third_party/utf8-decoder	submodule:v8	third_party/utf8-decoder/LICENSE
+icu	third_party/icu	submodule:third_party/icu	LICENSE
+abseil-cpp	third_party/abseil-cpp	submodule:third_party/abseil-cpp	LICENSE
+libc++	third_party/libc++	submodule:third_party/libc++/src	LICENSE.TXT
+libc++abi	third_party/libc++abi	submodule:third_party/libc++abi/src	LICENSE.TXT
+llvm-libc	third_party/llvm-libc	submodule:third_party/llvm-libc/src	LICENSE.TXT
+highway	third_party/highway	submodule:third_party/highway/src	LICENSE
+simdutf	third_party/simdutf	submodule:third_party/simdutf	LICENSE
+fast_float	third_party/fast_float	submodule:third_party/fast_float/src	LICENSE-MIT
+dragonbox	third_party/dragonbox	submodule:third_party/dragonbox/src	LICENSE-Boost
+# Chromium's build/ has no license file of its own; its sources defer to
+# Chromium's, pinned at the release line matching V8 15.2.
+chromium-build	build	https://chromium.googlesource.com/chromium/src/+/refs/tags/152.0.7977.89	LICENSE
+# rusty_v8's own bindings: the v8 crate in the Rust crates section.
+rusty_v8	src	-	-
+temporal_capi	third_party/rust/chromium_crates_io/vendor/temporal_capi-v0_2	-	-

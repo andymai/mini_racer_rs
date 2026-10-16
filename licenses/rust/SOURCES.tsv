@@ -1,0 +1,6 @@
+# rust 1.99.1
+# component	file	source	sha256
+std	COPYRIGHT	https://raw.githubusercontent.com/rust-lang/rust/1.99.1/COPYRIGHT	172020dbfd5b53a226dfde77616190a48dcff519b0bc0e6deb91a8450782c4af
+std	LICENSE-APACHE	https://raw.githubusercontent.com/rust-lang/rust/1.99.1/LICENSE-APACHE	62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a
+std	LICENSE-MIT	https://raw.githubusercontent.com/rust-lang/rust/1.99.1/LICENSE-MIT	b71bd43a069ca0641a9ecfe585ca7b3c53b5cc1608f8b68321168698e28b5ea1
+std	COPYRIGHT-library.html	rustc 1.99.1: share/doc/rust/COPYRIGHT-library.html	5647be074c8edf7339fd863055923a8fc80bc5610a8d4661ec3b767b9d392c27

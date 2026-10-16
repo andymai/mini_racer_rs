@@ -65,7 +65,9 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | Error hierarchy and Ruby compositions | `lib/mini_racer_rs/vocabulary.rb` |
 | Native build, link flags | `ext/mini_racer_rs/extconf.rb`, `ext/mini_racer_rs/build.rs` |
 | Export allowlists | `ext/mini_racer_rs/exports.allow.linux`, `ext/mini_racer_rs/exports.allow.macos` |
-| V8 archive pins | `ext/mini_racer_rs/v8-archives.sha256`, `scripts/fetch-v8-archive.sh` |
+| V8 archive pins | `ext/mini_racer_rs/v8-archives.sha256`, `scripts/fetch-v8-archive.sh`, `scripts/update-v8-archives.sh` |
+| Third-party notices: Rust crates, the Rust standard library, and the code in the V8 archives | `THIRD_PARTY_NOTICES.md`, `about.toml`, `about.hbs`, `licenses/v8/`, `licenses/rust/`, `scripts/update-notices.sh` |
+| Dependency updates and advisory scans | `.github/dependabot.yml`, `.github/workflows/dependabot-auto-merge.yml`, `.github/workflows/osv-scan.yml`, `osv-scanner.toml` |
 | CI | `.github/workflows/ci.yml`, `.github/actions/setup/action.yml` |
 | Upstream suite runner, suites, guard, reporter | `test/upstream/run.rb`, `test/upstream/suites.rb`, `test/upstream/preload.rb`, `test/upstream/reporter.rb` |
 | Per-test parity ledgers | `test/upstream/mini_racer.status.toml`, `test/upstream/execjs.status.toml`, `test/upstream/milestones.toml` |
@@ -95,6 +97,8 @@ bundle exec rake compile           # build the extension into lib/mini_racer_rs/
 bundle exec rake test              # Ruby tests (compiles first)
 cargo nextest run --workspace --exclude mini_racer_rs
 scripts/check-exports.sh --write   # after changing #[no_mangle] items or bumping v8
+scripts/update-v8-archives.sh      # repin every target's V8 archive after bumping v8
+scripts/update-notices.sh          # regenerate THIRD_PARTY_NOTICES.md and licenses/v8 (--check to verify)
 RUSTFLAGS="--cfg loom -Dwarnings" cargo test -p mini_racer_sync --test loom --release --locked --target-dir target/loom
 scripts/fuzz-smoke.sh 60           # every wire fuzz target, 60 s each, on the pinned nightly
 bundle exec ruby test/upstream/run.rb --strict   # mini_racer's own suite against the ledger
@@ -117,6 +121,7 @@ bundle exec ruby bench/run.rb     # medians against the real gem; --quick for a 
 - `compat.toml`: `bundle exec rake compat:render`, then `bundle exec rake compat:check`.
 - `scripts/`, `layers.toml`, any `Cargo.toml`: `scripts/check-boundaries.sh`, `scripts/test-boundaries.sh` and `scripts/check-deny.sh`.
 - `.github/`: `scripts/check-action-pins.sh`.
+- `Cargo.lock`, `rust-toolchain.toml`, `licenses/`, `about.*`: `scripts/update-notices.sh --check`.
 
 ## Pitfalls
 
@@ -126,6 +131,8 @@ bundle exec ruby bench/run.rb     # medians against the real gem; --quick for a 
 - `rake compile` builds the dev profile locally and release when `CI` is set (`RB_SYS_CARGO_PROFILE`).
 - A stale `lib/mini_racer_rs/mini_racer_rs.so` keeps loading after Rust edits until `rake compile` runs; `NATIVE_VERSION` only catches version mismatches.
 - Without the variables from `scripts/fetch-v8-archive.sh`, cargo downloads V8 itself and skips the pinned digest.
+- A dependency, toolchain or v8 change regenerates `THIRD_PARTY_NOTICES.md` (`scripts/update-notices.sh`); it downloads every pinned V8 archive and fails if one links source that `licenses/v8/components.tsv` does not list.
+- cargo-about installed from source needs `--features cli`; `bin/setup` passes it.
 - V8's platform and flags are process-global and freeze at first use, so tests that set flags run in their own process.
 - `mini_racer_rs.gemspec` lists files by explicit globs; a new file outside them is missing from the gem.
 - Source builds need libclang; with the `libclang` gem, `ext/mini_racer_rs/extconf.rb` also passes GCC's include directory to bindgen.

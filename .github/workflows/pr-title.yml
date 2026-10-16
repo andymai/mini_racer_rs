@@ -22,18 +22,18 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          sparse-checkout: commitlint.config.js
+          sparse-checkout: |
+            commitlint.config.js
+            package.json
+            package-lock.json
           sparse-checkout-cone-mode: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
-      # The sparse checkout has no package.json, so this installs commitlint and
-      # the shared config alone next to commitlint.config.js. The stub keeps the
-      # ESM config loadable. Versions track the root devDependencies.
+      # The base branch's lockfile, so the title is checked with the commitlint
+      # the hooks use. No install scripts run.
       - name: Install commitlint
-        run: |
-          printf '{ "type": "module", "private": true }\n' > package.json
-          npm install --no-package-lock --no-audit --no-fund @commitlint/cli@21.2.2 @commitlint/config-conventional@21.2.2
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Lint the PR title as a commit subject
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}

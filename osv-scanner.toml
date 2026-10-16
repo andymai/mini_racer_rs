@@ -1,0 +1,6 @@
+# Accepted advisories, each as [[IgnoredVulns]] with id, ignoreUntil and a
+# reason naming the change that removes the dependency.
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0436"
+reason = "paste is unmaintained, with no fixed release. It is a compile-time proc-macro of the v8 crate and is not linked into the gem; it goes when a v8 release drops it."

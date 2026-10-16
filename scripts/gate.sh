@@ -68,6 +68,7 @@ step cargo "+$msrv" check --workspace --all-targets --locked
 step scripts/check-deny.sh
 step cargo audit
 step cargo audit -f crates/mini_racer_wire/fuzz/Cargo.lock
+step scripts/update-notices.sh --check
 step cargo machete
 step scripts/fuzz-smoke.sh 20
 RUSTDOCFLAGS="-D warnings" step cargo doc --workspace --no-deps --locked

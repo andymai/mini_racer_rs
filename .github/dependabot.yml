@@ -1,0 +1,75 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directories: [/, /crates/mini_racer_wire/fuzz]
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+    groups:
+      cargo:
+        update-types: [minor, patch]
+    ignore:
+      # A V8 bump moves the archive digests, the export allowlists and the
+      # notices together; the v8-bump procedure does it, with ICU data to match.
+      - dependency-name: v8
+      - dependency-name: deno_core_icudata
+      # Pinned equal to the rb_sys gem in mini_racer_rs.gemspec
+      # (scripts/check-versions.sh); the two move in one change.
+      - dependency-name: rb-sys
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: bundler
+    directories: [/, /test/consumers/transitive]
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+    groups:
+      bundler:
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: rb_sys
+    open-pull-requests-limit: 5
+
+  # The reference bundle is the parity baseline: mini_racer and its libv8-node
+  # stay at the release the suite and the differential run compare against.
+  - package-ecosystem: bundler
+    directory: /tools/reference
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+    groups:
+      reference:
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: mini_racer
+      - dependency-name: libv8-node
+    open-pull-requests-limit: 3
+
+  - package-ecosystem: npm
+    directories: [/, /test/consumers/js]
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+    groups:
+      npm:
+        patterns: ["*"]
+    open-pull-requests-limit: 3
+
+  - package-ecosystem: github-actions
+    directories: [/, /.github/actions/setup]
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
+    open-pull-requests-limit: 5
