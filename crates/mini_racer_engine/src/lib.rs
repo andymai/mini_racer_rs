@@ -12,5 +12,5 @@ mod spin;
 mod sys;
 
 pub use context::{ContextHandle, Host, Unparker, WaitHandle, WaitOutcome};
-pub use control::{ContextConfig, JsText};
+pub use control::{CallbackReply, ContextConfig, JsText};
 pub use error::{EngineError, FlagError, JsError, JsErrorKind, TerminationCause};

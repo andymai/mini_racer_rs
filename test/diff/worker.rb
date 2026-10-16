@@ -59,10 +59,22 @@ def evaluate(context, step)
   context.eval(step["setup"] ? "#{source(step)}\n;undefined" : source(step))
 end
 
+def attach(context, step)
+  callable = case step.fetch("callable")
+             when "echo" then proc { |*args| args }
+             when "values"
+               values = arguments(step)
+               proc { values }
+             else raise ArgumentError, "unknown callable #{step["callable"]}"
+             end
+  context.attach(step.fetch("name"), callable)
+end
+
 def run(context, step)
   value = case step.fetch("op")
           when "eval" then evaluate(context, step)
           when "call" then context.call(step.fetch("path"), *arguments(step))
+          when "attach" then attach(context, step)
           when "execjs" then execjs(step)
           else raise ArgumentError, "unknown step #{step["op"]}"
           end

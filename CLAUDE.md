@@ -45,9 +45,9 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 |---|---|
 | Flag normalization, single-threaded detection, stack size | `crates/mini_racer_engine/src/process/platform.rs` |
 | V8 initialization and version | `crates/mini_racer_engine/src/process.rs` |
-| Runner thread, script evaluation, mini_racer's error formats | `crates/mini_racer_engine/src/runner.rs` |
+| Runner thread, script evaluation, attach and the callback trampoline, mini_racer's error formats | `crates/mini_racer_engine/src/runner.rs` |
 | Sanitizing results, the filter's safe context, serializing with the filter retry | `crates/mini_racer_engine/src/serialize.rs` |
-| Context handle, dispatch, the `Host` wait contract, stop, dispose, fork guard | `crates/mini_racer_engine/src/context.rs` |
+| Context handle, dispatch, nested dispatch from callbacks, the `Host` contract, stop, dispose, fork guard | `crates/mini_racer_engine/src/context.rs` |
 | Control block shared by a handle and its runner, request types, context config | `crates/mini_racer_engine/src/control.rs` |
 | Timeout watchdog thread | `crates/mini_racer_engine/src/process/watchdog.rs` |
 | Engine errors | `crates/mini_racer_engine/src/error.rs` |
@@ -63,7 +63,7 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | std or loom primitives for protocol code | `crates/mini_racer_sync/src/primitives.rs` |
 | Loom models | `crates/mini_racer_sync/tests/loom.rs` |
 | `MiniRacer::Context` methods, per-context lock | `ext/mini_racer_rs/src/context.rs` |
-| Waiting from a Ruby thread: spin, GVL release, park, interrupts | `ext/mini_racer_rs/src/host.rs` |
+| Waiting from a Ruby thread (spin, GVL release, park, interrupts) and running attached callables | `ext/mini_racer_rs/src/host.rs` |
 | `Context.new` option rules (Ruby-free) | `ext/mini_racer_rs/src/options.rs` |
 | `MiniRacer::Platform.set_flags!` | `ext/mini_racer_rs/src/platform.rs` |
 | JavaScript to Ruby values | `ext/mini_racer_rs/src/decode.rs` |

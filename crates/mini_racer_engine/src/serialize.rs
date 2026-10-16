@@ -54,7 +54,7 @@ pub type Tc<'a, 'b, 'c, 'i> = v8::PinnedRef<'a, v8::TryCatch<'b, 'c, v8::HandleS
 
 /// The context `mini_racer` copies uncloneable values in, and its filter.
 pub struct Filter {
-    context: v8::Global<v8::Context>,
+    pub context: v8::Global<v8::Context>,
     function: v8::Global<v8::Function>,
 }
 
@@ -175,9 +175,10 @@ impl v8::ValueSerializerImpl for Delegate {
     }
 }
 
-fn write(tc: &Tc<'_, '_, '_, '_>, value: v8::Local<'_, v8::Value>) -> Option<Vec<u8>> {
-    let context = tc.get_current_context();
-    let serializer = v8::ValueSerializer::new(tc, Box::new(Delegate));
+/// Serializes `value` with no filter retry; `None` leaves an exception pending.
+pub fn write(scope: &v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<Vec<u8>> {
+    let context = scope.get_current_context();
+    let serializer = v8::ValueSerializer::new(scope, Box::new(Delegate));
     serializer.write_header();
     match serializer.write_value(context, value) {
         Some(true) => Some(serializer.release()),

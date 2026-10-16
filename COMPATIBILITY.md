@@ -4,7 +4,7 @@
 
 | Engine | Done | Planned | Deviation |
 |---|---|---|---|
-| CRuby | 35 | 19 | 10 |
+| CRuby | 36 | 18 | 13 |
 | TruffleRuby | 58 | 0 | 0 |
 
 ## Surface
@@ -38,7 +38,7 @@
 | `feature:json` | done | done |
 | `feature:pathname` | done | done |
 | `imethod:MiniRacer::Binary#data` | done | done |
-| `imethod:MiniRacer::Context#attach` | planned (S3b) | done |
+| `imethod:MiniRacer::Context#attach` | done | done |
 | `imethod:MiniRacer::Context#call` | done | done |
 | `imethod:MiniRacer::Context#call_await` | planned (M4) | done |
 | `imethod:MiniRacer::Context#dispose` | done | done |
@@ -90,9 +90,27 @@ mini_racer_rs returns a BigInt wrapper object's wrapped value as an Integer: `Ob
 
 Pending review.
 
+### `behavior:callback-error-text@ruby`
+
+When an attached Ruby callback raises, JavaScript receives an `Error` whose message is the exception’s `to_s`. mini_racer_rs gives V8 that text using the same rules as `eval` source: ISO-8859-1 as Latin-1, UTF-16LE as two-byte text, and other encodings as UTF-8, with invalid sequences replaced by U+FFFD. mini_racer 0.22.1 treats the string’s bytes as Latin-1 regardless of encoding. With `t` raising `"café"`, `try { t() } catch (e) { e.message }` returns `"café"` from mini_racer_rs and `"cafÃ©"` from mini_racer 0.22.1. UTF-16LE produces a NUL after each letter in mini_racer. ASCII messages match. If JavaScript does not catch the exception, both gems raise the original Ruby exception from `eval` or `call` with its message unchanged.
+
+Pending review.
+
+### `behavior:callback-jump@ruby`
+
+mini_racer_rs terminates the script with `Error: terminated` when a callback attached with `Context#attach` leaves by `throw`, by `return` out of a proc whose method is still running, or by `Thread#kill`. The jump continues after `Context#eval` or `Context#call` returns, and the context stays usable. For example, `catch(:out) { context.eval("thrower(); 'not reached'") }` returns `5` when `thrower` executes `throw :out, 5`. With mini_racer 0.22.1, that `throw` never returns, and neither does `proc { return :x }` when called from the method that created it. The process hangs until killed. A callback calling `Thread.current.kill` instead makes `eval` raise `TypeError` with `exception class/object expected`, without killing the thread. In mini_racer_rs, the thread ends. `break` out of a proc raises `LocalJumpError` in both gems.
+
+Pending review.
+
+### `behavior:callback-reentry@ruby`
+
+Both gems allow an attached callback to call `eval`, `call`, or `attach` on its own context, running the nested call inside the script that invoked the callback. mini_racer_rs accepts the call only from the fiber running the callback. A call from another fiber on the same thread, such as code inside `Enumerator#next`, raises `ThreadError` (`deadlock; lock already owned by another fiber belonging to the same thread`). mini_racer 0.22.1 accepts it: `Enumerator.new { |y| y << context.eval("1") }.next` inside a callback returns `1`. A signal trap that calls the context while a callback waits on a nested `eval` gets `ThreadError` in mini_racer_rs; when rescued, the script completes. With mini_racer 0.22.1, the same program hangs until killed. mini_racer_rs refuses these calls because each nested call must finish before its callback replies, preventing out-of-order replies from being paired with the wrong callback.
+
+Pending review.
+
 ### `behavior:object-ids@ruby`
 
-mini_racer_rs preserves repeated object identity in both directions by numbering every object as V8 does. The serialized form refers back to repeated objects by number, including dates, regular expressions, typed arrays, ArrayBuffers, wrapper objects, and errors. From JavaScript to Ruby, `(() => { const d = new Date(0); const o = {}; return [d, d, o, o] })()` returns `[Time, Time, {}, {}]`, with each pair the same Ruby object. mini_racer 0.22.1 counts only decoded arrays, objects, maps, sets, and errors, so it returns `[Time, nil, {}, nil]`; a repeated error, including its own cause, becomes an empty `Array` instead of the same `MiniRacer::ScriptError`. For `Context#call` arguments, mini_racer 0.22.1 counts only `Array` and `Hash` values, so `context.call("f", time, hash, hash)` gives `f` a Date, an object, and the same Date. mini_racer_rs gives `f` the same object twice.
+mini_racer_rs preserves repeated-object identity in both directions by numbering every object as V8 does, including dates, regular expressions, typed arrays, ArrayBuffers, wrapper objects, and errors. Serialized repeats refer back by number. From JavaScript to Ruby, `(() => { const d = new Date(0); const o = {}; return [d, d, o, o] })()` returns `[Time, Time, {}, {}]`, with each pair the same Ruby object. mini_racer 0.22.1 counts only decoded arrays, objects, maps, sets, and errors, so it returns `[Time, nil, {}, nil]`; a repeated error, including one that is its own cause, becomes `[]` instead of the same `MiniRacer::ScriptError`. From Ruby to JavaScript, mini_racer 0.22.1 counts only Arrays and Hashes, so `context.call("f", time, hash, hash)` gives `f` a Date, an object, and the same Date. mini_racer_rs gives `f` the same object twice. For call arguments and callback results, it also sends a repeated `Time`, `DateTime`, object whose `to_time` returns a `Time`, or `MiniRacer::Binary` as one Date or Uint8Array, calling `to_time` once per object. Thus, with `same = (a, b) => a === b`, `context.call("same", time, time)` returns `true`, while mini_racer returns `false`; distinct equal `Time` objects remain distinct in both.
 
 Pending review.
 

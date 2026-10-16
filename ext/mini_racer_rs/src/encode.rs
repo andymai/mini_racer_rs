@@ -28,8 +28,8 @@ static BINARY: StaticRoot<RClass> = StaticRoot::new(|ruby| {
         .expect("the vocabulary defines MiniRacer::Binary")
 });
 
-pub enum EncodeError {
-    /// `mini_racer`'s text for a value it cannot send, cut as it cuts it.
+enum EncodeError {
+    // mini_racer's text for a value it cannot send, cut as it cuts it.
     Unsupported(Vec<u8>),
     Raised(Error),
 }
@@ -71,8 +71,13 @@ struct Encoder<'r, 'o> {
 }
 
 /// Writes `value` as `mini_racer`'s `serialize` does, with the object ids V8
-/// assigns on reading.
-pub fn encode(ruby: &Ruby, value: Value) -> Result<Vec<u8>, EncodeError> {
+/// assigns on reading. Each caller raises `mini_racer`'s text for a value it
+/// cannot send in its own way, through `unsupported`.
+pub fn encode(
+    ruby: &Ruby,
+    value: Value,
+    unsupported: impl FnOnce(Vec<u8>) -> Error,
+) -> Result<Vec<u8>, Error> {
     let mut out = Vec::new();
     let mut encoder = Encoder {
         ruby,
@@ -83,7 +88,10 @@ pub fn encode(ruby: &Ruby, value: Value) -> Result<Vec<u8>, EncodeError> {
     };
     let root = encoder.pins.push(value);
     encoder.work.push(Item::Value(root));
-    encoder.run()?;
+    encoder.run().map_err(|error| match error {
+        EncodeError::Unsupported(message) => unsupported(message),
+        EncodeError::Raised(error) => error,
+    })?;
     Ok(out)
 }
 
@@ -209,32 +217,56 @@ impl Encoder<'_, '_> {
         Ok(())
     }
 
+    // Dates and typed arrays are objects V8 numbers, so a Ruby object sent
+    // twice goes the second time as a reference, as Arrays and Hashes do.
+    fn repeated(&mut self, value: Value) -> bool {
+        if let Some(&id) = self.seen.get(&rb_raw::identity(value)) {
+            self.writer.object_ref(id);
+            return true;
+        }
+        false
+    }
+
+    fn remember(&mut self, value: Value, id: u32) {
+        self.pins.push(value);
+        self.seen.insert(rb_raw::identity(value), id);
+    }
+
     fn data(&mut self, value: Value) -> Result<(), EncodeError> {
         let ruby = self.ruby;
-        let mut value = value;
+        if self.repeated(value) {
+            return Ok(());
+        }
+        let mut time = value;
         if DATE_TIME.get(ruby).is_some_and(|date_time| {
             rb_raw::identity(value.class().as_value()) == rb_raw::identity(date_time)
         }) {
-            value = value.funcall("to_time", ())?;
-            self.pins.push(value);
+            time = value.funcall("to_time", ())?;
+            self.pins.push(time);
         }
-        if rb_raw::identity(value.class().as_value())
+        if rb_raw::identity(time.class().as_value())
             == rb_raw::identity(ruby.class_time().as_value())
         {
-            self.date(value)
+            let id = self.date(time)?;
+            self.remember(value, id);
         } else {
             self.writer.utf8(b"Undefined Conversion");
-            Ok(())
         }
+        Ok(())
     }
 
     fn object(&mut self, value: Value) -> Result<(), EncodeError> {
         let ruby = self.ruby;
+        if self.repeated(value) {
+            return Ok(());
+        }
         if value.respond_to("to_time", false)? {
             let time: Value = value.funcall("to_time", ())?;
             self.pins.push(time);
             if time.is_kind_of(ruby.class_time()) {
-                return self.date(time);
+                let id = self.date(time)?;
+                self.remember(value, id);
+                return Ok(());
             }
             return Err(EncodeError::unsupported(&format!(
                 "unsupported type {}",
@@ -247,9 +279,8 @@ impl Encoder<'_, '_> {
                 .transpose()?
                 .unwrap_or_else(|| ruby.qnil().as_value());
             let data = rb_raw::expect_string(ruby, data)?;
-            rb_raw::with_string_bytes(ruby, data, |bytes| {
-                self.writer.uint8_array(bytes);
-            });
+            let id = rb_raw::with_string_bytes(ruby, data, |bytes| self.writer.uint8_array(bytes));
+            self.remember(value, id);
             return Ok(());
         }
         Err(EncodeError::unsupported(&format!(
@@ -267,14 +298,14 @@ impl Encoder<'_, '_> {
         clippy::suboptimal_flops,
         reason = "a fused multiply-add would round differently"
     )]
-    fn date(&mut self, value: Value) -> Result<(), EncodeError> {
+    fn date(&mut self, value: Value) -> Result<u32, EncodeError> {
         let time = Time::from_value(value)
             .ok_or_else(|| EncodeError::unsupported("unsupported type Time"))?
             .timespec()?;
         let micros = time.tv_nsec / 1000;
-        self.writer
-            .date(time.tv_sec as f64 * 1e3 + micros as f64 / 1e3);
-        Ok(())
+        Ok(self
+            .writer
+            .date(time.tv_sec as f64 * 1e3 + micros as f64 / 1e3))
     }
 
     fn bigint(&mut self, value: Value) -> Result<(), EncodeError> {

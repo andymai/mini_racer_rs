@@ -1,4 +1,3 @@
-use std::convert::Infallible;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -11,8 +10,25 @@ pub struct Wire;
 impl Protocol for Wire {
     type Request = Request;
     type Response = Result<Vec<u8>, EngineError>;
-    type Callback = Infallible;
-    type Reply = Infallible;
+    type Callback = Vec<u8>;
+    type Reply = CallbackReply;
+}
+
+pub enum CallbackReply {
+    Value(Vec<u8>),
+    /// The callback raised: V8 throws an `Error` with this message, and an
+    /// outermost or nested dispatch it escapes ends with
+    /// `JsErrorKind::HostException`.
+    Raised(JsText),
+    /// The caller abandoned the dispatch: V8 throws `Error: terminated` and
+    /// terminates the script.
+    Abort,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Depth {
+    Outermost(DispatchId),
+    Nested,
 }
 
 /// Text in the encoding Ruby holds it in. V8 reads each form directly, so a
@@ -39,16 +55,20 @@ impl From<&str> for JsText {
 
 pub enum Request {
     Init {
-        dispatch: DispatchId,
+        depth: Depth,
     },
     Eval {
         filename: JsText,
         source: JsText,
-        dispatch: DispatchId,
+        depth: Depth,
     },
     Call {
         request: Vec<u8>,
-        dispatch: DispatchId,
+        depth: Depth,
+    },
+    Attach {
+        request: Vec<u8>,
+        depth: Depth,
     },
     Dispose,
 }

@@ -1,20 +1,21 @@
 use std::cell::Cell;
+use std::io::Write;
 use std::sync::OnceLock;
 
 use magnus::encoding::{EncodingCapable, RbEncoding};
 use magnus::gc::Marker;
 use magnus::r_hash::ForEach;
 use magnus::scan_args::scan_args;
-use magnus::value::ReprValue;
+use magnus::value::{LazyId, ReprValue};
 use magnus::{
     Class, DataTypeFunctions, Error, Fixnum, Module, RArray, RHash, RModule, RString, Ruby, Symbol,
     TypedData, Value,
 };
 use mini_racer_engine::{ContextConfig, ContextHandle, EngineError, JsText};
 
-use crate::encode::{self, EncodeError};
+use crate::encode;
 use crate::gc_root::OwnedRoot;
-use crate::host::RubyHost;
+use crate::host::{Callbacks, RubyHost};
 use crate::options::{self, OptionError, OptionValue};
 use crate::{decode, errors, export, rb_raw};
 
@@ -22,6 +23,10 @@ use crate::{decode, errors, export, rb_raw};
 // isolate and its runner thread.
 const ISOLATE_BYTES: usize = 2 << 20;
 const POLL: std::time::Duration = std::time::Duration::from_millis(1);
+// mini_racer warns of every fiftieth level of js->ruby->js nesting.
+const DEEP_NESTING: u32 = 50;
+
+static OWNED: LazyId = LazyId::new("owned?");
 
 #[derive(Default, TypedData)]
 #[magnus(class = "MiniRacer::Context", free_immediately, size, mark)]
@@ -30,6 +35,9 @@ pub struct Context {
     // One dispatch at a time per context, as mini_racer's per-context mutex;
     // a Ruby Mutex so a waiting thread or fiber stays interruptible.
     lock: OwnedRoot<magnus::Mutex>,
+    // What each attached name calls, indexed by the id V8 sends back.
+    callables: OwnedRoot<RArray>,
+    raised: OwnedRoot<Value>,
     accounted: Cell<bool>,
     // Set before the GVL is released to wait for the runner, so a second
     // initialize cannot start while the first waits.
@@ -39,6 +47,8 @@ pub struct Context {
 impl DataTypeFunctions for Context {
     fn mark(&self, marker: &Marker) {
         self.lock.mark(marker);
+        self.callables.mark(marker);
+        self.raised.mark(marker);
     }
 }
 
@@ -56,6 +66,7 @@ pub fn init(ruby: &Ruby, racer: RModule) -> Result<(), Error> {
     class.define_method("initialize", export!(method Context::initialize, -1))?;
     class.define_method("eval", export!(method Context::eval, -1))?;
     class.define_method("call", export!(method Context::call, -1))?;
+    class.define_method("attach", export!(method Context::attach, 2))?;
     class.define_method("stop", export!(method Context::stop, 0))?;
     class.define_method("dispose", export!(method Context::dispose, 0))?;
     Ok(())
@@ -81,7 +92,7 @@ impl Drop for Locked {
 
 // mini_racer sends ISO-8859-1 and UTF-16LE strings in their own encoding and
 // every other string's bytes as UTF-8.
-fn js_text(ruby: &Ruby, string: RString) -> Result<JsText, Error> {
+pub fn js_text(ruby: &Ruby, string: RString) -> Result<JsText, Error> {
     let bytes = rb_raw::string_bytes(ruby, string);
     Ok(match RbEncoding::from(string.enc_get()).name() {
         "ISO-8859-1" => JsText::Latin1(bytes),
@@ -157,14 +168,25 @@ impl Context {
             .ok_or_else(|| errors::internal(ruby, "context is not initialized"))
     }
 
+    fn callables(&self, ruby: &Ruby) -> Result<RArray, Error> {
+        self.callables
+            .get(ruby)
+            .ok_or_else(|| errors::internal(ruby, "context is not initialized"))
+    }
+
     // trylock first: an uncontended call then works from a signal trap, where
-    // Mutex#lock raises.
-    fn acquire(&self, ruby: &Ruby) -> Result<Locked, Error> {
+    // Mutex#lock raises. A callback's own calls into this context run inside
+    // the dispatch that made the callback, which already holds the lock.
+    fn acquire(&self, ruby: &Ruby) -> Result<Option<Locked>, Error> {
         let mutex = self.mutex(ruby)?;
-        if !mutex.trylock() {
-            rb_raw::mutex_lock(ruby, mutex)?;
+        if mutex.trylock() {
+            return Ok(Some(Locked(mutex)));
         }
-        Ok(Locked(mutex))
+        if self.handle(ruby)?.in_callback() && mutex.funcall::<_, _, bool>(*OWNED, ())? {
+            return Ok(None);
+        }
+        rb_raw::mutex_lock(ruby, mutex)?;
+        Ok(Some(Locked(mutex)))
     }
 
     fn initialize(ruby: &Ruby, rb_self: &Self, args: &[Value]) -> Result<(), Error> {
@@ -176,11 +198,12 @@ impl Context {
         let config = config(ruby, args.keywords)?;
         rb_self.initializing.set(true);
         let mut host = RubyHost::new(ruby);
-        let spawned = ContextHandle::spawn(config, &mut host).map_err(|e| errors::engine(ruby, e));
+        let spawned = ContextHandle::spawn(config, &mut host);
         let handle = host.finish(spawned);
         rb_self.initializing.set(false);
         let handle = handle?;
         rb_self.lock.set(ruby, ruby.mutex_new());
+        rb_self.callables.set(ruby, ruby.ary_new());
         rb_self
             .handle
             .set(handle)
@@ -201,7 +224,8 @@ impl Context {
             _ => JsText::from("<eval>"),
         };
         let source = js_text(ruby, source)?;
-        rb_self.dispatch(ruby, |host| handle.eval(filename, source, host))
+        let bytes = rb_self.dispatch(ruby, |host| handle.eval(filename, source, host))?;
+        decode::value(ruby, &bytes)
     }
 
     fn call(ruby: &Ruby, rb_self: &Self, args: &[Value]) -> Result<Value, Error> {
@@ -210,28 +234,66 @@ impl Context {
         let name = rb_raw::expect_string(ruby, args.required.0)?;
         let request = args.splat;
         request.unshift(name)?;
-        let request = encode::encode(ruby, request.as_value()).map_err(|error| match error {
-            EncodeError::Unsupported(message) => {
-                errors::runtime(ruby, [b"Context.call: ".as_slice(), &message].concat())
-            }
-            EncodeError::Raised(error) => error,
+        let request = encode::encode(ruby, request.as_value(), |message| {
+            errors::runtime(ruby, [b"Context.call: ".as_slice(), &message].concat())
         })?;
-        rb_self.dispatch(ruby, |host| handle.call(request, host))
+        let bytes = rb_self.dispatch(ruby, |host| handle.call(request, host))?;
+        decode::value(ruby, &bytes)
     }
 
-    // Decoding runs Ruby code, so the lock is released first, as in mini_racer.
-    fn dispatch(
+    // The lock is held from choosing the id to sending it, so two threads
+    // attaching at once cannot be given the same one.
+    fn attach(ruby: &Ruby, rb_self: &Self, name: Value, callable: Value) -> Result<Value, Error> {
+        let handle = rb_self.handle(ruby)?;
+        let callables = rb_self.callables(ruby)?;
+        let name = rb_raw::expect_string(ruby, name)?;
+        if handle.is_disposed() {
+            return Err(errors::engine(ruby, EngineError::Disposed));
+        }
+        let _locked = rb_self.acquire(ruby)?;
+        let id = i32::try_from(callables.len())
+            .map_err(|_| errors::runtime(ruby, "too many callbacks"))?;
+        let request = ruby.ary_new_capa(2);
+        request.push(name)?;
+        request.push(id)?;
+        let request = encode::encode(ruby, request.as_value(), |message| {
+            errors::runtime(ruby, message)
+        })?;
+        callables.push(callable)?;
+        rb_self.run_locked(ruby, |host| handle.attach(request, host))?;
+        Ok(ruby.qnil().as_value())
+    }
+
+    // Returns the result undecoded: decoding runs Ruby code, so it happens
+    // after the lock is released, as in mini_racer.
+    fn dispatch<T>(
         &self,
         ruby: &Ruby,
-        run: impl FnOnce(&mut RubyHost<'_>) -> Result<Vec<u8>, EngineError>,
-    ) -> Result<Value, Error> {
-        let bytes = {
-            let _locked = self.acquire(ruby)?;
-            let mut host = RubyHost::new(ruby);
-            let result = run(&mut host).map_err(|e| errors::engine(ruby, e));
-            host.finish(result)?
+        run: impl FnOnce(&mut RubyHost<'_>) -> Result<T, EngineError>,
+    ) -> Result<T, Error> {
+        let _locked = self.acquire(ruby)?;
+        self.run_locked(ruby, run)
+    }
+
+    fn run_locked<T>(
+        &self,
+        ruby: &Ruby,
+        run: impl FnOnce(&mut RubyHost<'_>) -> Result<T, EngineError>,
+    ) -> Result<T, Error> {
+        let depth = self.handle(ruby)?.depth();
+        if depth > 0 && depth % DEEP_NESTING == 0 {
+            let _ = writeln!(
+                std::io::stderr(),
+                "mini_racer: deep js->ruby->js recursion, depth={depth}"
+            );
+        }
+        let callbacks = Callbacks {
+            callables: self.callables(ruby)?,
+            raised: &self.raised,
         };
-        decode::value(ruby, &bytes)
+        let mut host = RubyHost::with_callbacks(ruby, callbacks);
+        let result = run(&mut host);
+        host.finish(result)
     }
 
     fn stop(ruby: &Ruby, rb_self: &Self) -> Result<(), Error> {
@@ -251,7 +313,9 @@ impl Context {
     fn dispose(ruby: &Ruby, rb_self: &Self) -> Result<(), Error> {
         let handle = rb_self.handle(ruby)?;
         let mutex = rb_self.mutex(ruby)?;
-        if mutex.funcall::<_, _, bool>("owned?", ())? {
+        // From inside a callback, on any fiber of its thread, the lock can
+        // never be had, so mini_racer's busy error comes before anything stops.
+        if handle.in_callback() || mutex.funcall::<_, _, bool>(*OWNED, ())? {
             return Err(errors::engine(ruby, EngineError::DisposeBusy));
         }
         handle.begin_dispose();
@@ -271,6 +335,8 @@ impl Context {
             match rb_raw::mutex_lock(ruby, mutex) {
                 Ok(()) => break,
                 Err(error) if refused_in_trap(ruby, &error) => polling = true,
+                // Waiting on a lock another fiber of this thread holds.
+                Err(error) if error.is_kind_of(ruby.exception_thread_error()) => return Err(error),
                 Err(error) => {
                     interrupted.get_or_insert(error);
                 }
@@ -278,9 +344,7 @@ impl Context {
         }
         let _locked = Locked(mutex);
         let mut host = RubyHost::new(ruby);
-        let result = handle
-            .dispose(&mut host)
-            .map_err(|e| errors::engine(ruby, e));
+        let result = handle.dispose(&mut host);
         let disposed = host.finish(result);
         if disposed.is_ok() && rb_self.accounted.replace(false) {
             rb_raw::adjust_memory(ruby, -ISOLATE_BYTES.cast_signed());
