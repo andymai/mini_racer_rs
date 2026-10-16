@@ -60,6 +60,16 @@ pub fn init(ruby: &Ruby, racer: RModule) -> Result<(), Error> {
 
 struct Locked(magnus::Mutex);
 
+// Mutex#lock's refusal to wait inside a signal trap, told apart by its message
+// from a ThreadError another thread raised into this one.
+fn refused_in_trap(ruby: &Ruby, error: &Error) -> bool {
+    error.is_kind_of(ruby.exception_thread_error())
+        && error
+            .value()
+            .and_then(|exception| exception.funcall::<_, _, String>("message", ()).ok())
+            .is_some_and(|message| message == "can't be called from trap context")
+}
+
 impl Drop for Locked {
     fn drop(&mut self) {
         let _ = self.0.unlock();
@@ -194,8 +204,7 @@ impl Context {
             }
             match rb_raw::mutex_lock(ruby, mutex) {
                 Ok(()) => break,
-                // Mutex#lock refuses to wait inside a signal trap.
-                Err(error) if error.is_kind_of(ruby.exception_thread_error()) => polling = true,
+                Err(error) if refused_in_trap(ruby, &error) => polling = true,
                 Err(error) => {
                     interrupted.get_or_insert(error);
                 }
