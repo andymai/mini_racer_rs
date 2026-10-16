@@ -1,0 +1,36 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+  pull_request:
+    types: [labeled, synchronize]
+
+concurrency:
+  group: nightly-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions: {}
+
+jobs:
+  sanitizers:
+    name: Sanitizers
+    if: github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'sanitizers') && (github.event.action != 'labeled' || github.event.label.name == 'sanitizers'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          tools: taplo-cli
+          cache-workspaces: ". -> target/asan"
+      - name: Ensure llvm-symbolizer
+        run: |
+          command -v llvm-symbolizer || find /usr/bin -name 'llvm-symbolizer-*' | grep -q . ||
+            { sudo apt-get update && sudo apt-get install -y llvm; }
+      - run: scripts/sanitizers.sh
