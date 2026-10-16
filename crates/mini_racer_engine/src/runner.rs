@@ -1,17 +1,16 @@
-use std::cell::RefCell;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use mini_racer_sync::{DispatchKind, Halt, Side, TerminationCause, ToV8};
+use mini_racer_sync::{DispatchKind, Halt, Side, TerminationCause, ToV8, lock};
 use v8::ValueDeserializerHelper;
 
 use crate::control::{CallbackReply, ControlBlock, Depth, IsolateTerminator, JsText, Request};
+use crate::process::platform::{self, Mode};
 use crate::serialize::{self, Filter, Tc};
-use crate::snapshot;
 use crate::spin::spin_until;
 use crate::{EngineError, JsError, JsErrorKind};
+use crate::{snapshot, sys};
 
 // Spinning after each response catches a busy caller's next request without a
 // futex wake on either side; an idle context then parks.
@@ -28,14 +27,15 @@ impl Drop for Closing<'_> {
     }
 }
 
-// Kept in an isolate slot: the callback trampoline gets only the isolate.
+// Kept in an isolate slot: the callback trampoline gets only the isolate. A
+// shared isolate's slots must be Send, as any thread may lock it.
 struct Runtime {
     block: Arc<ControlBlock>,
     context: v8::Global<v8::Context>,
     filter: Filter,
     // The exception last thrown for a raising callback; mini_racer keeps one
     // per isolate and compares what escapes a dispatch against it.
-    raised: RefCell<Option<v8::Global<v8::Value>>>,
+    raised: Mutex<Option<v8::Global<v8::Value>>>,
 }
 
 pub fn run(block: &Arc<ControlBlock>, snapshot: Option<Vec<u8>>) {
@@ -77,19 +77,36 @@ fn serve(block: &Arc<ControlBlock>, snapshot: Option<Vec<u8>>) -> bool {
         }
         return false;
     };
-    let runtime = Rc::new(Runtime {
+    let runtime = Arc::new(Runtime {
         block: Arc::clone(block),
         context,
         filter,
-        raised: RefCell::default(),
+        raised: Mutex::default(),
     });
-    isolate.set_slot(Rc::clone(&runtime));
+    isolate.set_slot(Arc::clone(&runtime));
     // Installed only once the context exists, so nothing terminates its setup.
     block
         .term
         .install(IsolateTerminator(isolate.thread_safe_handle()));
+    let Some(shared) = sys::share(isolate) else {
+        if receive(block).is_some() {
+            let _ = block.channel.respond(Err(EngineError::Internal(
+                "isolate could not be shared".to_owned(),
+            )));
+        }
+        return false;
+    };
+    // A single-threaded runner holds its isolate only while it serves a
+    // request, as mini_racer's does; a multi-threaded one holds it throughout.
+    let release_when_idle = platform::mode() == Mode::SingleThreaded;
+    let mut locker = Some(shared.lock());
     let disposed = loop {
-        let request = match receive(block) {
+        if release_when_idle {
+            locker = None;
+        }
+        let message = receive(block);
+        let isolate = locker.get_or_insert_with(|| shared.lock());
+        let request = match message {
             Some(ToV8::Request(Request::Dispose)) => break true,
             // The snapshot's own isolate is entered with none of this
             // runner's scopes open.
@@ -123,7 +140,7 @@ fn serve(block: &Arc<ControlBlock>, snapshot: Option<Vec<u8>>) -> bool {
             None => break false,
         };
         let response = {
-            v8::scope_with_context!(let scope, &mut isolate, &runtime.context);
+            v8::scope_with_context!(let scope, &mut **isolate, &runtime.context);
             handle(scope, &runtime, request)
         };
         if block.channel.respond(response).is_err() {
@@ -131,9 +148,12 @@ fn serve(block: &Arc<ControlBlock>, snapshot: Option<Vec<u8>>) -> bool {
         }
     };
     block.term.uninstall();
-    drop(isolate.remove_slot::<Rc<Runtime>>());
+    // Its handles are released under the lock, before the isolate goes.
+    let mut isolate = locker.unwrap_or_else(|| shared.lock());
+    drop(isolate.remove_slot::<Arc<Runtime>>());
     drop(runtime);
     drop(isolate);
+    drop(shared);
     disposed
 }
 
@@ -233,9 +253,7 @@ fn escaped(tc: &Tc<'_, '_, '_, '_>, runtime: &Runtime) -> bool {
     let Some(exception) = tc.exception() else {
         return false;
     };
-    runtime
-        .raised
-        .borrow()
+    lock(&runtime.raised)
         .as_ref()
         .is_some_and(|raised| v8::Local::new(tc, raised).same_value(exception))
 }
@@ -379,7 +397,7 @@ fn trampoline<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     rv: v8::ReturnValue<'s, v8::Value>,
 ) {
-    let Some(runtime) = scope.get_slot::<Rc<Runtime>>().cloned() else {
+    let Some(runtime) = scope.get_slot::<Arc<Runtime>>().cloned() else {
         return;
     };
     let outcome = catch_unwind(AssertUnwindSafe(|| callback(scope, &runtime, &args, rv)));
@@ -472,9 +490,7 @@ fn callback<'s>(
             }
             CallbackReply::Raised(message) => {
                 let exception = error(scope, &message);
-                runtime
-                    .raised
-                    .replace(Some(v8::Global::new(scope, exception)));
+                *lock(&runtime.raised) = Some(v8::Global::new(scope, exception));
                 scope.throw_exception(exception);
             }
         }

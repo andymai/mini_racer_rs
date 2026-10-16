@@ -19,3 +19,12 @@ pub extern "C" fn __wrap_madvise(
     });
     forwarded.unwrap_or_else(|_| std::process::abort())
 }
+
+/// Turns a runner's isolate into one any thread can lock, so it can be served
+/// without being held between requests. `None` if V8 refuses.
+pub fn share(isolate: v8::OwnedIsolate) -> Option<v8::SharedIsolate> {
+    // SAFETY: the runner calls this on the thread that created `isolate`, with
+    // no reference from `Global::open` live, and the only slot it sets, an
+    // `Arc<Runtime>`, is Send.
+    unsafe { isolate.try_into_shared() }.ok()
+}
