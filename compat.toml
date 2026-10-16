@@ -95,7 +95,7 @@ status = "done"
 status = "done"
 
 [ids."class:MiniRacer::Snapshot < Object"]
-status = "todo:S3b"
+status = "done"
 
 [ids."class:MiniRacer::SnapshotError < MiniRacer::Error"]
 status = "done"
@@ -195,16 +195,16 @@ status = "done"
 status = "done"
 
 [ids."imethod:MiniRacer::Snapshot#dump@ruby"]
-status = "todo:M5"
+status = "done"
 
 [ids."imethod:MiniRacer::Snapshot#load@truffleruby"]
 status = "done"
 
 [ids."imethod:MiniRacer::Snapshot#size@ruby"]
-status = "todo:M5"
+status = "done"
 
 [ids."imethod:MiniRacer::Snapshot#warmup!"]
-status = "todo:M5"
+status = "done"
 
 [ids."imethod:MiniRacer::Snapshot#warmup_unsafe!@truffleruby"]
 status = "done"
@@ -232,7 +232,7 @@ status = "todo:M3"
 
 [ids."kwarg:MiniRacer::Context#initialize:snapshot"]
 depends_on = ["class:MiniRacer::Snapshot < Object"]
-status = "todo:S3b"
+status = "done"
 
 [ids."kwarg:MiniRacer::Context#initialize:timeout"]
 status = "done"
@@ -258,4 +258,4 @@ status = "done"
 status = "done"
 
 [ids."smethod:MiniRacer::Snapshot.load@ruby"]
-status = "todo:M5"
+status = "done"

@@ -17,7 +17,7 @@ use crate::encode;
 use crate::gc_root::OwnedRoot;
 use crate::host::{Callbacks, RubyHost};
 use crate::options::{self, OptionError, OptionValue};
-use crate::{decode, errors, export, rb_raw};
+use crate::{decode, errors, export, rb_raw, snapshot};
 
 // What Ruby's GC is told a live context holds outside its heap: roughly an
 // isolate and its runner thread.
@@ -120,6 +120,9 @@ fn resolve_date_time(ruby: &Ruby) -> Result<(), Error> {
 }
 
 fn option_value(ruby: &Ruby, value: Value) -> OptionValue {
+    if let Some(blob) = snapshot::blob_of(ruby, value) {
+        return OptionValue::Snapshot(blob);
+    }
     let other = || {
         if value.is_nil() {
             OptionValue::Nil
@@ -142,7 +145,7 @@ fn config(ruby: &Ruby, keywords: RHash) -> Result<ContextConfig, Error> {
         Ok(ForEach::Continue)
     })?;
     options::configure(pairs.into_iter()).map_err(|error| match error {
-        OptionError::Type(_) => {
+        OptionError::Type(_) | OptionError::SnapshotType(_) => {
             errors::raised(ruby, ruby.exception_type_error(), error.to_string())
         }
         OptionError::Range(_) => {

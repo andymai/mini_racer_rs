@@ -50,6 +50,9 @@ pub enum EngineError {
     Busy,
     #[error("context dispose: {}", ebusy())]
     DisposeBusy,
+    /// `mini_racer`'s text for a snapshot that could not be built.
+    #[error("{0}")]
+    Snapshot(String),
     #[error("internal error: {0}")]
     Internal(String),
 }

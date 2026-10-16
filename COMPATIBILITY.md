@@ -4,7 +4,7 @@
 
 | Engine | Done | Planned | Deviation |
 |---|---|---|---|
-| CRuby | 36 | 18 | 13 |
+| CRuby | 42 | 12 | 13 |
 | TruffleRuby | 58 | 0 | 0 |
 
 ## Surface
@@ -27,7 +27,7 @@
 | `class:MiniRacer::RuntimeError < MiniRacer::EvalError` | done | done |
 | `class:MiniRacer::ScriptError < MiniRacer::EvalError` | done | done |
 | `class:MiniRacer::ScriptTerminatedError < MiniRacer::EvalError` | done | done |
-| `class:MiniRacer::Snapshot < Object` | planned (S3b) | done |
+| `class:MiniRacer::Snapshot < Object` | done | done |
 | `class:MiniRacer::SnapshotError < MiniRacer::Error` | done | done |
 | `class:MiniRacer::V8OutOfMemoryError < MiniRacer::EvalError` | done | done |
 | `const:MiniRacer::LIBV8_NODE_VERSION` | done | done |
@@ -60,10 +60,10 @@
 | `imethod:MiniRacer::RuntimeError#backtrace` | done | done |
 | `imethod:MiniRacer::ScriptError#backtrace` | done | done |
 | `imethod:MiniRacer::ScriptError#cause` | done | n/a |
-| `imethod:MiniRacer::Snapshot#dump` | planned (M5) | n/a |
+| `imethod:MiniRacer::Snapshot#dump` | done | n/a |
 | `imethod:MiniRacer::Snapshot#load` | n/a | done |
-| `imethod:MiniRacer::Snapshot#size` | planned (M5) | n/a |
-| `imethod:MiniRacer::Snapshot#warmup!` | planned (M5) | done |
+| `imethod:MiniRacer::Snapshot#size` | done | n/a |
+| `imethod:MiniRacer::Snapshot#warmup!` | done | done |
 | `imethod:MiniRacer::Snapshot#warmup_unsafe!` | n/a | done |
 | `imethod:MiniRacer::SnapshotError#backtrace` | done | done |
 | `kwarg:MiniRacer::Context#eval:filename` | done | done |
@@ -72,7 +72,7 @@
 | `kwarg:MiniRacer::Context#initialize:isolate` | n/a | done |
 | `kwarg:MiniRacer::Context#initialize:marshal_stack_depth` | done | done |
 | `kwarg:MiniRacer::Context#initialize:max_memory` | planned (M3) | done |
-| `kwarg:MiniRacer::Context#initialize:snapshot` | planned (S3b) | done |
+| `kwarg:MiniRacer::Context#initialize:snapshot` | done | done |
 | `kwarg:MiniRacer::Context#initialize:timeout` | done | done |
 | `kwarg:MiniRacer::Context#initialize:verbose_exceptions` | planned (M3) | n/a |
 | `module:MiniRacer` | done | done |
@@ -80,7 +80,7 @@
 | `smethod:MiniRacer::Loader.load` | deviation | n/a |
 | `smethod:MiniRacer::Platform.set_flag_as_str!` | n/a | done |
 | `smethod:MiniRacer::Platform.set_flags!` | done | done |
-| `smethod:MiniRacer::Snapshot.load` | planned (M5) | n/a |
+| `smethod:MiniRacer::Snapshot.load` | done | n/a |
 
 ## Deviations
 

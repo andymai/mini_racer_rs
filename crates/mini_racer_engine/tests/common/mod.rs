@@ -55,6 +55,7 @@ pub fn churn() {
                         let timed = ContextHandle::spawn(
                             ContextConfig {
                                 timeout: Some(Duration::from_millis(20)),
+                                ..ContextConfig::default()
                             },
                             &mut Parking,
                         )

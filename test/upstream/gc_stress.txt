@@ -32,3 +32,6 @@ test/mini_racer_test.rb#MiniRacerTest#test_function_rval
 test/mini_racer_test.rb#MiniRacerTest#test_ruby_based_property_in_rval
 test/mini_racer_test.rb#MiniRacerTest#test_callback_string_arguments_are_not_frozen
 test/mini_racer_test.rb#MiniRacerTest#test_ruby_exception
+test/mini_racer_test.rb#MiniRacerTest#test_it_can_use_snapshots
+test/mini_racer_test.rb#MiniRacerTest#test_snapshot_load
+test/mini_racer_test.rb#MiniRacerTest#test_snapshots_can_be_warmed_up_with_no_side_effects

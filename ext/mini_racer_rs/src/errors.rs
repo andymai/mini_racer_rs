@@ -48,6 +48,7 @@ roots! {
     DISPOSED = "MiniRacer"::"ContextDisposedError";
     PLATFORM_INITIALIZED = "MiniRacer"::"PlatformAlreadyInitialized";
     INTERNAL = "MiniRacer"::"InternalError";
+    SNAPSHOT = "MiniRacer"::"SnapshotError";
 }
 
 pub fn engine(ruby: &Ruby, error: EngineError) -> Error {
@@ -79,6 +80,7 @@ pub fn engine(ruby: &Ruby, error: EngineError) -> Error {
         }
         EngineError::Busy => raised(ruby, INTERNAL.get(ruby), error.to_string()),
         EngineError::Internal(message) => raised(ruby, INTERNAL.get(ruby), &message),
+        EngineError::Snapshot(message) => Error::new(SNAPSHOT.get(ruby), message),
     }
 }
 

@@ -50,6 +50,7 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | Context handle, dispatch, nested dispatch from callbacks, the `Host` contract, stop, dispose, fork guard | `crates/mini_racer_engine/src/context.rs` |
 | Control block shared by a handle and its runner, request types, context config | `crates/mini_racer_engine/src/control.rs` |
 | Timeout watchdog thread | `crates/mini_racer_engine/src/process/watchdog.rs` |
+| Building and warming up startup snapshots | `crates/mini_racer_engine/src/snapshot.rs` |
 | Engine errors | `crates/mini_racer_engine/src/error.rs` |
 | `madvise` wrapper (fork safety) | `crates/mini_racer_engine/src/sys.rs`, `crates/mini_racer_engine/build.rs` |
 | Wire decoding, writing and text transcoding | `crates/mini_racer_wire/src/decode.rs`, `crates/mini_racer_wire/src/write.rs`, `crates/mini_racer_wire/src/text.rs` |
@@ -65,6 +66,7 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | `MiniRacer::Context` methods, per-context lock | `ext/mini_racer_rs/src/context.rs` |
 | Waiting from a Ruby thread (spin, GVL release, park, interrupts) and running attached callables | `ext/mini_racer_rs/src/host.rs` |
 | `Context.new` option rules (Ruby-free) | `ext/mini_racer_rs/src/options.rs` |
+| `MiniRacer::Snapshot` | `ext/mini_racer_rs/src/snapshot.rs` |
 | `MiniRacer::Platform.set_flags!` | `ext/mini_racer_rs/src/platform.rs` |
 | JavaScript to Ruby values | `ext/mini_racer_rs/src/decode.rs` |
 | Ruby to JavaScript values (`Context#call` arguments) | `ext/mini_racer_rs/src/encode.rs` |

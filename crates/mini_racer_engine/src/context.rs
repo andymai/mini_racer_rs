@@ -198,6 +198,26 @@ impl ContextHandle {
         .map(drop)
     }
 
+    /// Builds a startup snapshot from `code`, or warms `base` up with it, on
+    /// a context made for the purpose and disposed after, as `mini_racer`
+    /// does.
+    pub fn create_snapshot(
+        code: JsText,
+        base: Option<Vec<u8>>,
+        host: &mut impl Host,
+    ) -> Result<Vec<u8>, EngineError> {
+        let context = Self::spawn(ContextConfig::default(), host)?;
+        let built = context.dispatch(
+            DispatchKind::Script,
+            |depth| Request::Snapshot { code, base, depth },
+            host,
+        );
+        context.begin_dispose();
+        let disposed = context.dispose(host);
+        let blob = built?;
+        disposed.map(|()| blob)
+    }
+
     /// Whether this thread is running one of this context's callbacks, where a
     /// dispatch runs nested in the one that made the callback.
     #[must_use]

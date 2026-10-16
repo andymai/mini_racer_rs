@@ -9,6 +9,7 @@ use v8::ValueDeserializerHelper;
 
 use crate::control::{CallbackReply, ControlBlock, Depth, IsolateTerminator, JsText, Request};
 use crate::serialize::{self, Filter, Tc};
+use crate::snapshot;
 use crate::spin::spin_until;
 use crate::{EngineError, JsError, JsErrorKind};
 
@@ -57,7 +58,12 @@ pub fn run(block: &Arc<ControlBlock>) {
 
 // Returns whether it stopped for an explicit dispose.
 fn serve(block: &Arc<ControlBlock>) -> bool {
-    let mut isolate = v8::Isolate::new(v8::CreateParams::default());
+    let params = v8::CreateParams::default();
+    let params = match &block.config.snapshot {
+        Some(blob) => params.snapshot_blob(v8::StartupData::from(blob.to_vec())),
+        None => params,
+    };
+    let mut isolate = v8::Isolate::new(params);
     let contexts = {
         v8::scope!(let scope, &mut isolate);
         serialize::contexts(scope)
@@ -84,6 +90,24 @@ fn serve(block: &Arc<ControlBlock>) -> bool {
     let disposed = loop {
         let request = match receive(block) {
             Some(ToV8::Request(Request::Dispose)) => break true,
+            // The snapshot's own isolate is entered with none of this
+            // runner's scopes open.
+            Some(ToV8::Request(Request::Snapshot { code, base, depth })) => {
+                let built = snapshot::create(&code, base);
+                let response = match depth {
+                    Depth::Outermost(dispatch) => block
+                        .term
+                        .end(dispatch)
+                        .map_or(built, |halt| Err(halted(halt))),
+                    Depth::Nested => Err(EngineError::Internal(
+                        "snapshot inside a callback".to_owned(),
+                    )),
+                };
+                if block.channel.respond(response).is_err() {
+                    break false;
+                }
+                continue;
+            }
             Some(ToV8::Request(request)) => request,
             // No callback is outstanding here, so there is nothing to reply to.
             Some(ToV8::Reply(_)) => continue,
@@ -148,6 +172,10 @@ fn handle(
         // The extension refuses a dispose from inside a callback before it
         // gets here.
         Request::Dispose => Err(EngineError::DisposeBusy),
+        // Snapshots are built on a context of their own, never nested.
+        Request::Snapshot { .. } => Err(EngineError::Internal(
+            "snapshot inside a callback".to_owned(),
+        )),
     }
 }
 

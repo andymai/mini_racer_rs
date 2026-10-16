@@ -12,6 +12,7 @@ mod platform;
     reason = "the only module that calls rb-sys directly (invariant I6)"
 )]
 mod rb_raw;
+mod snapshot;
 
 use magnus::{Error, Module, Ruby};
 
@@ -36,5 +37,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     errors::init(ruby)?;
     platform::init(ruby, racer)?;
     context::init(ruby, racer)?;
+    snapshot::init(ruby, racer)?;
     Ok(())
 }
