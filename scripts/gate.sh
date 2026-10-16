@@ -24,6 +24,7 @@ done
 . scripts/fetch-v8-archive.sh
 
 step cargo fmt --all -- --check
+step cargo fmt --manifest-path crates/mini_racer_wire/fuzz/Cargo.toml -- --check
 step taplo fmt --check
 step bundle exec rubocop
 step scripts/check-boundaries.sh
@@ -43,6 +44,7 @@ step cargo clippy --workspace --all-targets --locked -- -D warnings
 
 step cargo nextest run --workspace --exclude mini_racer_rs --locked
 step cargo test --doc --workspace --exclude mini_racer_rs --locked
+RUSTFLAGS="--cfg loom -Dwarnings" step cargo test -p mini_racer_sync --test loom --release --locked --target-dir target/loom
 step bundle exec rake compile
 step scripts/check-exports.sh
 step bundle exec rake test
@@ -56,6 +58,7 @@ step cargo "+$msrv" check --workspace --all-targets --locked
 step cargo deny check
 step cargo audit
 step cargo machete
+step scripts/fuzz-smoke.sh 20
 RUSTDOCFLAGS="-D warnings" step cargo doc --workspace --no-deps --locked
 step gem build mini_racer_rs.gemspec --output tmp/mini_racer_rs.gem
 step gem build shim/mini_racer.gemspec --output tmp/mini_racer-shim.gem

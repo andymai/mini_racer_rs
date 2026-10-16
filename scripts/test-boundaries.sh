@@ -55,11 +55,15 @@ CASES = [
     ("undeclared normal dependency", "check-boundaries.sh", "deps", [
         replace("crates/mini_racer_wire/Cargo.toml", "[dependencies]\n", "[dependencies]\nlibc.workspace = true\n"),
     ]),
+    ("loom outside cfg(loom)", "check-boundaries.sh", "deps", [
+        replace("crates/mini_racer_sync/Cargo.toml", "[target.'cfg(loom)'.dependencies]\nloom.workspace = true\n\n", ""),
+        replace("crates/mini_racer_sync/Cargo.toml", "thiserror.workspace = true\n", "loom.workspace = true\nthiserror.workspace = true\n"),
+    ]),
     ("dev-dependency on a higher layer", "check-boundaries.sh", "dev-deps", [
         append("crates/mini_racer_wire/Cargo.toml", "\n[dev-dependencies]\nmini_racer_engine.workspace = true\n"),
     ]),
     ("Ruby crate reached from L0", "check-boundaries.sh", "transitive", [
-        replace("crates/mini_racer_sync/Cargo.toml", "\n[lints]", "\n[dependencies]\nmagnus.workspace = true\n\n[lints]"),
+        replace("crates/mini_racer_sync/Cargo.toml", "[dependencies]\n", "[dependencies]\nmagnus.workspace = true\n"),
         replace("layers.toml", 'normal = ["thiserror"]\npath = "crates/mini_racer_sync"', 'normal = ["magnus", "thiserror"]\npath = "crates/mini_racer_sync"'),
     ]),
     ("v8 named outside the engine", "check-boundaries.sh", "engine-only", [

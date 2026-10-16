@@ -1,5 +1,6 @@
 # Single source of the crate layering. scripts/check-boundaries.sh enforces it.
 # `normal` lists every allowed normal dependency by package name; anything else fails.
+# `target_normal` allows more only under the named cfg target, such as loom for model checking.
 
 [crates.mini_racer_wire]
 layer = 0
@@ -11,6 +12,7 @@ unsafe = "forbid"
 layer = 0
 normal = ["thiserror"]
 path = "crates/mini_racer_sync"
+target_normal = {"cfg(loom)" = ["loom"]}
 unsafe = "forbid"
 
 [crates.mini_racer_engine]

@@ -9,6 +9,8 @@ cargo-nextest = "0.9.143"
 taplo-cli = "0.9.3"
 
 [toolchains]
+# Nightly for cargo-fuzz and sanitizer builds.
+fuzz = "nightly-2026-10-01"
 msrv = "1.91.0"
 
 # Submodule pins: the tag each tracks and the commit that tag names.

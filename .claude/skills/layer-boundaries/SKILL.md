@@ -31,7 +31,7 @@ The engine never calls Ruby; the extension never names `v8` or `mini_racer_sync`
 
 ## Procedures
 
-**Adding a dependency.** Add it to the crate's `Cargo.toml` and to that crate's `normal` list in `layers.toml`, then run `scripts/check-boundaries.sh`. A Ruby crate (`magnus`, `rb-sys`) reachable from L0 or L1, even transitively, fails; move the code up a layer instead.
+**Adding a dependency.** Add it to the crate's `Cargo.toml` and to that crate's `normal` list in `layers.toml` (or, for one that exists only under a cfg such as loom, to `target_normal` keyed by that cfg), then run `scripts/check-boundaries.sh`. A Ruby crate (`magnus`, `rb-sys`) reachable from L0 or L1, even transitively, fails; move the code up a layer instead.
 
 **Writing unsafe code.** Put it in a fenced module (`engine::sys`, `ext::rb_raw`, `ext::guard`, `ext::gc_root`), one operation per `unsafe` block, each with a `// SAFETY:` comment. A new fenced module needs an entry in `unsafe_modules` in `layers.toml` and an `#[allow(unsafe_code, reason = "...")]` on its `mod` line in the crate's lib.rs, nowhere else.
 
