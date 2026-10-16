@@ -8,5 +8,8 @@ repository.workspace = true
 rust-version.workspace = true
 version.workspace = true
 
+[target.'cfg(loom)'.dependencies]
+loom.workspace = true
+
 [lints]
 workspace = true

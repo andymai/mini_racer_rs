@@ -25,6 +25,8 @@ allow = [
   "Zlib",
 ]
 confidence-threshold = 0.8
+# libFuzzer, built only for the wire fuzz targets and never shipped.
+exceptions = [{allow = ["NCSA"], crate = "libfuzzer-sys"}]
 
 [bans]
 allow-wildcard-paths = true

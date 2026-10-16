@@ -5,7 +5,7 @@ Every check prints `VIOLATION [<tag>]: <detail>` (or `[settings]`) and exits non
 | Script | Tag | Means | Fix |
 |---|---|---|---|
 | `scripts/check-boundaries.sh` | `members` | A workspace member is missing from `layers.toml`, or the reverse | Add the crate to both |
-| | `deps` | A normal dependency is not in the crate's `normal` list | Remove it, move the code, or add it deliberately |
+| | `deps` | A normal dependency is not in the crate's `normal` list, or a cfg-scoped one is not in `target_normal` for that cfg | Remove it, move the code, or add it deliberately |
 | | `dev-deps` | A dev or build dependency points at a higher layer | Test through the lower layer's own API |
 | | `transitive` | `magnus` or `rb-sys` is reachable from L0 or L1 | Move the code into the extension crate |
 | | `engine-only` | A crate other than the engine names `v8` | Route through `mini_racer_engine` |

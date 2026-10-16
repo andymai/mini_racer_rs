@@ -55,6 +55,12 @@ CASES = [
     ("undeclared normal dependency", "check-boundaries.sh", "deps", [
         replace("crates/mini_racer_wire/Cargo.toml", "[dependencies]\n", "[dependencies]\nlibc.workspace = true\n"),
     ]),
+    ("loom outside cfg(loom)", "check-boundaries.sh", "deps", [
+        replace("crates/mini_racer_sync/Cargo.toml", "[target.'cfg(loom)'.dependencies]\n", "[dependencies]\n"),
+    ]),
+    ("cfg-scoped dependency not listed for its cfg", "check-boundaries.sh", "deps", [
+        replace("crates/mini_racer_sync/Cargo.toml", "loom.workspace = true\n", "libc.workspace = true\nloom.workspace = true\n"),
+    ]),
     ("dev-dependency on a higher layer", "check-boundaries.sh", "dev-deps", [
         append("crates/mini_racer_wire/Cargo.toml", "\n[dev-dependencies]\nmini_racer_engine.workspace = true\n"),
     ]),

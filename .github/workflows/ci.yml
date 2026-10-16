@@ -53,6 +53,7 @@ jobs:
         with:
           persist-credentials: false
       - run: rustup toolchain install && cargo fmt --all -- --check
+      - run: cargo fmt --manifest-path crates/mini_racer_wire/fuzz/Cargo.toml -- --check
 
   taplo:
     name: TOML Format
@@ -116,7 +117,7 @@ jobs:
         with:
           v8: "false"
           tools: cargo-deny
-      - run: cargo deny check
+      - run: scripts/check-deny.sh
 
   # A prebuilt cargo-audit: building it from source pulls the newest releases of
   # its dependencies, and one bad upstream publish then fails every run.
@@ -135,6 +136,7 @@ jobs:
           v8: "false"
           tools: cargo-audit
       - run: cargo audit
+      - run: cargo audit -f crates/mini_racer_wire/fuzz/Cargo.lock
 
   boundaries:
     name: Boundaries
@@ -257,6 +259,50 @@ jobs:
       - run: cargo nextest run --workspace --exclude mini_racer_rs --locked
       # nextest does not run doctests, so they get their own step.
       - run: cargo test --doc --workspace --exclude mini_racer_rs --locked
+
+  loom:
+    name: Loom
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          v8: "false"
+      - run: cargo test -p mini_racer_sync --test loom --release --locked --target-dir target/loom
+        env:
+          RUSTFLAGS: --cfg loom -Dwarnings
+
+  fuzz-smoke:
+    name: Fuzz Smoke
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          v8: "false"
+          tools: cargo-fuzz
+          cache-workspaces: crates/mini_racer_wire/fuzz -> target
+      - run: scripts/fuzz-smoke.sh 60
+      - name: Keep crash inputs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-artifacts
+          path: crates/mini_racer_wire/fuzz/artifacts
 
   gem-verify:
     name: Gem Contents
@@ -390,7 +436,7 @@ jobs:
   ci-pass:
     name: CI Pass
     if: ${{ !cancelled() }}
-    needs: [changes, fmt, taplo, rubocop, machete, deny, audit, boundaries, repo-checks, msrv, rustdoc, clippy, rust-test, gem-verify, ruby, truffleruby]
+    needs: [changes, fmt, taplo, rubocop, machete, deny, audit, boundaries, repo-checks, msrv, rustdoc, clippy, rust-test, loom, fuzz-smoke, gem-verify, ruby, truffleruby]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

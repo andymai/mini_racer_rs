@@ -1,0 +1,31 @@
+[package]
+edition = "2024"
+license = "MIT"
+name = "mini_racer_wire_fuzz"
+publish = false
+version = "0.0.0"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4.13"
+mini_racer_wire = {path = ".."}
+
+# Its own workspace root, with its own Cargo.lock; cargo rejects it as a stray
+# member of the root workspace otherwise.
+[workspace]
+
+[[bin]]
+bench = false
+doc = false
+name = "decode_arbitrary"
+path = "fuzz_targets/decode_arbitrary.rs"
+test = false
+
+[[bin]]
+bench = false
+doc = false
+name = "text_roundtrip"
+path = "fuzz_targets/text_roundtrip.rs"
+test = false

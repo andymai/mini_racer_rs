@@ -32,8 +32,9 @@ jq -r --argjson layers "$layers" '. as $meta |
   | $meta.packages[] | select(.id as $id | $ids | index($id)) as $pkg
   | ($layers.crates[$pkg.name] // empty) as $rule
   | $pkg.dependencies[] | select(.kind == null)
-  | select(.name as $dep | $rule.normal | index($dep) | not)
-  | "\($pkg.name) depends on \(.name), which layers.toml does not allow"
+  | (if .target then ($rule.target_normal[.target] // []) else [] end) as $scoped
+  | select(.name as $dep | $rule.normal + $scoped | index($dep) | not)
+  | "\($pkg.name) depends on \(.name)\(if .target then " under \(.target)" else "" end), which layers.toml does not allow"
 ' "$meta" | report deps
 
 jq -r --argjson layers "$layers" '. as $meta |
