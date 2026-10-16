@@ -1,9 +1,10 @@
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use mini_racer_sync::{Channel, DispatchId, Protocol, TermCell, Terminator};
+use mini_racer_sync::{Channel, DispatchId, Protocol, TermCell, Terminator, lock};
 
 use crate::EngineError;
+use crate::process::fork::RunnerPhase;
 
 pub struct Wire;
 
@@ -114,4 +115,38 @@ pub struct ControlBlock {
     pub term: TermCell<IsolateTerminator>,
     pub config: ContextConfig,
     pub timer: Mutex<Timer>,
+    pub phase: RunnerPhase,
+    pub isolate: OnceLock<v8::IsolateHandle>,
+    // An idle single-threaded runner leaves its isolate here, its only owner
+    // then, so a forked child can hand it to a runner of its own.
+    pub custody: Mutex<Option<v8::SharedIsolate>>,
+}
+
+impl Drop for ControlBlock {
+    // An isolate is dropped only by a runner (I8). One still here was never
+    // taken back, as when its runner thread could not start or panicked.
+    fn drop(&mut self) {
+        let isolate = lock(&self.custody).take();
+        if let Some(isolate) = isolate {
+            #[expect(
+                clippy::mem_forget,
+                reason = "leaked rather than disposed off its runner"
+            )]
+            std::mem::forget(isolate);
+        }
+    }
+}
+
+impl ControlBlock {
+    pub fn new(config: ContextConfig) -> Self {
+        Self {
+            channel: Channel::default(),
+            term: TermCell::default(),
+            config,
+            timer: Mutex::default(),
+            phase: RunnerPhase::default(),
+            isolate: OnceLock::new(),
+            custody: Mutex::new(None),
+        }
+    }
 }

@@ -1,3 +1,4 @@
+pub mod fork;
 pub mod platform;
 pub(crate) mod watchdog;
 
@@ -12,7 +13,8 @@ thread_local! {
 }
 
 /// Names the calling thread for the life of the process; never 0.
-pub(crate) fn thread_token() -> u64 {
+#[must_use]
+pub fn thread_token() -> u64 {
     THREAD.with(|token| *token)
 }
 

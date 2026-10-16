@@ -2,6 +2,7 @@ mod context;
 mod decode;
 mod encode;
 mod errors;
+mod fork;
 mod gc_root;
 mod guard;
 mod host;
@@ -38,5 +39,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     platform::init(ruby, racer)?;
     context::init(ruby, racer)?;
     snapshot::init(ruby, racer)?;
+    fork::init(ruby, rs)?;
     Ok(())
 }

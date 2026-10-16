@@ -28,3 +28,21 @@ pub fn share(isolate: v8::OwnedIsolate) -> Option<v8::SharedIsolate> {
     // `Arc<Runtime>`, is Send.
     unsafe { isolate.try_into_shared() }.ok()
 }
+
+/// Asks the isolate's runner to park for a pending fork the next time V8
+/// checks for interrupts, where JavaScript may be running for a long time.
+pub fn interrupt_for_fork(handle: &v8::IsolateHandle) {
+    handle.request_interrupt(park_for_fork, std::ptr::null_mut());
+}
+
+extern "C" fn park_for_fork(isolate: v8::UnsafeRawIsolatePtr, _data: *mut std::ffi::c_void) {
+    let parked = std::panic::catch_unwind(|| {
+        // SAFETY: V8 calls an interrupt callback on the thread that has the
+        // isolate entered, with its own non-null pointer to it.
+        let isolate = unsafe { v8::Isolate::ref_from_raw_isolate_ptr(&isolate) };
+        crate::runner::park_for_fork(isolate);
+    });
+    if parked.is_err() {
+        std::process::abort();
+    }
+}

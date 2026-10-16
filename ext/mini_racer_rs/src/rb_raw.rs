@@ -182,6 +182,18 @@ pub fn identity(value: Value) -> u64 {
     value.as_raw()
 }
 
+/// `super` with no arguments, from the method Ruby is running.
+pub fn call_super(_ruby: &Ruby) -> Result<Value, Error> {
+    let raw = protect(|| {
+        // SAFETY: the `&Ruby` argument proves this thread holds the GVL, the
+        // caller is a method body Ruby called, and `protect` catches anything
+        // super raises or throws.
+        unsafe { rb_sys::rb_call_super(0, std::ptr::null()) }
+    })?;
+    // SAFETY: `raw` is the live value super returned.
+    Ok(unsafe { Value::from_raw(raw) })
+}
+
 /// `receiver.call(*args)`, with Ruby reading the arguments from `args`
 /// itself, so they stay where the GC sees them for the whole call.
 pub fn call_with_array(ruby: &Ruby, receiver: Value, args: RArray) -> Result<Value, Error> {

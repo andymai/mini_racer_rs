@@ -1,13 +1,16 @@
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use mini_racer_sync::{
-    Channel, ChannelError, DispatchKind, Interrupt, Side, TermCell, TermError, ToRuby,
+    Channel, ChannelError, DispatchKind, Interrupt, Side, TermError, ToRuby, lock,
 };
 
 use crate::control::{CallbackReply, ContextConfig, ControlBlock, Depth, JsText, Request, Wire};
+use crate::process::fork::{self, Generation, Phase};
+use crate::process::platform::Mode;
 use crate::process::{self, platform, watchdog};
+use crate::runner::Start;
 use crate::spin::spin_until;
 use crate::{EngineError, runner};
 
@@ -80,9 +83,18 @@ impl Unparker<'_> {
 }
 
 pub struct ContextHandle {
-    block: Arc<ControlBlock>,
-    pid: u32,
+    lineage: Lineage,
     session: Session,
+}
+
+// The control block this handle uses in each process of its fork lineage. A
+// child that takes an idle context over gives it a block of its own and never
+// touches the inherited one, whose locks threads that are gone may hold.
+struct Lineage {
+    pid: u32,
+    // None where the context was in use at the fork, so the child left it.
+    block: Option<Arc<ControlBlock>>,
+    next: OnceLock<Box<Self>>,
 }
 
 // The thread running the outermost dispatch, the callbacks it is running and
@@ -131,25 +143,18 @@ impl ContextHandle {
     pub fn spawn(mut config: ContextConfig, host: &mut impl Host) -> Result<Self, EngineError> {
         let snapshot = config.snapshot.take();
         process::ensure_initialized();
-        let block = Arc::new(ControlBlock {
-            channel: Channel::default(),
-            term: TermCell::default(),
-            config,
-            timer: Mutex::default(),
-        });
-        let runner_block = Arc::clone(&block);
-        let stack = platform::stack_size_kb().map_or(MIN_RUNNER_STACK_BYTES, |kb| {
-            (kb.saturating_mul(1024).saturating_add(STACK_HEADROOM_BYTES))
-                .max(MIN_RUNNER_STACK_BYTES)
-        });
-        std::thread::Builder::new()
-            .name("mini_racer_rs".to_owned())
-            .stack_size(stack)
-            .spawn(move || runner::run(&runner_block, snapshot))
-            .map_err(|e| EngineError::Internal(format!("spawn runner: {e}")))?;
+        let generation = fork::current();
+        if generation.forking(process::thread_token()) {
+            return Err(EngineError::ForkInProgress);
+        }
+        let block = Arc::new(ControlBlock::new(config));
+        start(&block, generation, Start::Fresh(snapshot))?;
         let handle = Self {
-            block,
-            pid: std::process::id(),
+            lineage: Lineage {
+                pid: std::process::id(),
+                block: Some(block),
+                next: OnceLock::new(),
+            },
             session: Session::default(),
         };
         handle.dispatch(
@@ -238,50 +243,53 @@ impl ContextHandle {
 
     /// Terminates the running script, or the next one if none is running.
     pub fn stop(&self) -> Result<(), EngineError> {
-        if self.orphaned() {
+        let Some(block) = self.block() else {
             return Ok(());
-        }
+        };
         if self.is_disposed() {
             return Err(EngineError::Disposed);
         }
-        self.block.term.request(Interrupt::Stop);
+        block.term.request(Interrupt::Stop);
         Ok(())
     }
 
     /// Refuses new dispatches and terminates one in flight on another thread.
     /// The caller then waits for that dispatch to finish before `dispose`.
     pub fn begin_dispose(&self) {
-        if !self.orphaned() {
-            self.block.term.dispose();
+        if let Some(block) = self.block() {
+            block.term.dispose();
         }
     }
 
     /// Shuts the runner down and returns once its isolate is gone. Expects
     /// `begin_dispose` and no dispatch in flight; a second call is a no-op.
     pub fn dispose(&self, host: &mut impl Host) -> Result<(), EngineError> {
-        // mini_racer returns quietly for an idle context a forked child inherits.
-        if self.orphaned() {
-            return Ok(());
-        }
+        // mini_racer refuses a single-threaded context a child inherited in use.
+        let Some(block) = self.block() else {
+            return match platform::mode() {
+                Mode::SingleThreaded => Err(EngineError::DisposeBusy),
+                Mode::MultiThreaded => Ok(()),
+            };
+        };
         if self.session.callbacks.load(Ordering::Relaxed) > 0 {
             return Err(EngineError::DisposeBusy);
         }
-        self.block.term.dispose();
-        match self.block.channel.request(Request::Dispose) {
+        block.term.dispose();
+        match block.channel.request(Request::Dispose) {
             Ok(()) => {}
             Err(ChannelError::Closed) => return Ok(()),
             Err(error) => return Err(protocol(error)),
         }
         let wait = WaitHandle {
-            channel: &self.block.channel,
+            channel: &block.channel,
         };
         loop {
             host.wait_blocking(&wait);
-            match self.block.channel.recv_ruby() {
+            match block.channel.recv_ruby() {
                 Ok(Some(ToRuby::Response(response))) => return response.map(drop),
                 Err(ChannelError::Closed) => return Ok(()),
                 Ok(Some(ToRuby::Callback(_))) => {
-                    let _ = self.block.channel.reply(CallbackReply::Abort);
+                    let _ = block.channel.reply(CallbackReply::Abort);
                 }
                 Ok(None) => {}
                 Err(error) => return Err(protocol(error)),
@@ -291,12 +299,38 @@ impl ContextHandle {
 
     #[must_use]
     pub fn is_disposed(&self) -> bool {
-        self.block.channel.is_closed() || self.block.term.is_disposing()
+        self.block()
+            .is_some_and(|block| block.channel.is_closed() || block.term.is_disposing())
     }
 
-    // A forked child inherits this handle but not the runner thread behind it.
-    fn orphaned(&self) -> bool {
-        std::process::id() != self.pid
+    // This process's block, taking the context over first in a forked child;
+    // None for a context the child cannot take over.
+    fn block(&self) -> Option<&Arc<ControlBlock>> {
+        let pid = std::process::id();
+        let mut lineage = &self.lineage;
+        while lineage.pid != pid {
+            let inherited = lineage.block.as_ref();
+            lineage = lineage
+                .next
+                .get_or_init(|| Box::new(self.inherit(inherited, pid)));
+        }
+        lineage.block.as_ref()
+    }
+
+    fn inherit(&self, inherited: Option<&Arc<ControlBlock>>, pid: u32) -> Lineage {
+        let block = inherited.and_then(|inherited| adopt(inherited));
+        if block.is_some() {
+            // A thread of the parent may have claimed the context just before
+            // the fork, without sending anything.
+            self.session.owner.store(0, Ordering::Release);
+            self.session.callbacks.store(0, Ordering::Relaxed);
+            self.session.waits.store(0, Ordering::Relaxed);
+        }
+        Lineage {
+            pid,
+            block,
+            next: OnceLock::new(),
+        }
     }
 
     fn dispatch(
@@ -305,18 +339,20 @@ impl ContextHandle {
         request: impl FnOnce(Depth) -> Request,
         host: &mut impl Host,
     ) -> Result<Vec<u8>, EngineError> {
-        if self.orphaned() {
-            return Err(EngineError::Orphaned);
-        }
         let thread = process::thread_token();
+        if fork::current().forking(thread) {
+            return Err(EngineError::ForkInProgress);
+        }
+        let Some(block) = self.block() else {
+            return Err(EngineError::Orphaned);
+        };
         match self.session.owner.load(Ordering::Acquire) {
             0 => {}
             _ if self.session.in_callback(thread) => {
-                return self.nested(request(Depth::Nested), host);
+                return self.nested(block, request(Depth::Nested), host);
             }
             _ => return Err(EngineError::Busy),
         }
-        let block = &self.block;
         let dispatch = block.term.begin(kind).map_err(|error| match error {
             TermError::Disposing => EngineError::Disposed,
             TermError::AlreadyArmed => EngineError::Busy,
@@ -331,7 +367,7 @@ impl ContextHandle {
         self.session.owner.store(thread, Ordering::Release);
         let owning = Owning(&self.session.owner);
         let result = match block.channel.request(request(Depth::Outermost(dispatch))) {
-            Ok(()) => self.await_response(false, host),
+            Ok(()) => self.await_response(block, false, host),
             Err(error) => Err(channel(error)),
         };
         drop(owning);
@@ -341,13 +377,18 @@ impl ContextHandle {
         result
     }
 
-    fn nested(&self, request: Request, host: &mut impl Host) -> Result<Vec<u8>, EngineError> {
-        if self.block.term.is_disposing() {
+    fn nested(
+        &self,
+        block: &ControlBlock,
+        request: Request,
+        host: &mut impl Host,
+    ) -> Result<Vec<u8>, EngineError> {
+        if block.term.is_disposing() {
             return Err(EngineError::Disposed);
         }
-        self.block.channel.request(request).map_err(channel)?;
+        block.channel.request(request).map_err(channel)?;
         let _waiting = Counted::enter(&self.session.waits);
-        self.await_response(true, host)
+        self.await_response(block, true, host)
     }
 
     // Once the dispatch is abandoned, callbacks still in flight are answered
@@ -356,8 +397,12 @@ impl ContextHandle {
     // nested call: the dispatch it runs in carries on once it has unwound. A
     // dispose that lands while a callback runs ends the dispatch as disposed,
     // as mini_racer's callback finds its context gone.
-    fn await_response(&self, nested: bool, host: &mut impl Host) -> Result<Vec<u8>, EngineError> {
-        let block = &self.block;
+    fn await_response(
+        &self,
+        block: &ControlBlock,
+        nested: bool,
+        host: &mut impl Host,
+    ) -> Result<Vec<u8>, EngineError> {
         let wait = WaitHandle {
             channel: &block.channel,
         };
@@ -417,15 +462,56 @@ impl ContextHandle {
 impl Drop for ContextHandle {
     // A finalizer never blocks: the runner sees the closed channel, drops its
     // isolate on its own thread and exits.
-    // An inherited handle is never touched: its locks may have been held by
-    // parent threads that do not exist in this process.
+    // An inherited context this process never took over is left as it is: its
+    // locks may have been held by parent threads that do not exist here.
     fn drop(&mut self) {
-        if self.orphaned() {
-            return;
+        let pid = std::process::id();
+        let mut lineage = Some(&self.lineage);
+        while let Some(current) = lineage.filter(|lineage| lineage.pid != pid) {
+            lineage = current.next.get().map(|next| &**next);
         }
-        self.block.term.dispose();
-        self.block.channel.close();
+        if let Some(block) = lineage.and_then(|lineage| lineage.block.as_ref()) {
+            block.term.dispose();
+            block.channel.close();
+        }
     }
+}
+
+fn start(
+    block: &Arc<ControlBlock>,
+    generation: &'static Generation,
+    start: Start,
+) -> Result<(), EngineError> {
+    // Registered before the runner starts, so a fork either waits for it or
+    // finds it waiting for the fork.
+    generation.register(block);
+    let runner_block = Arc::clone(block);
+    let stack = platform::stack_size_kb().map_or(MIN_RUNNER_STACK_BYTES, |kb| {
+        (kb.saturating_mul(1024).saturating_add(STACK_HEADROOM_BYTES)).max(MIN_RUNNER_STACK_BYTES)
+    });
+    std::thread::Builder::new()
+        .name("mini_racer_rs".to_owned())
+        .stack_size(stack)
+        .spawn(move || runner::run(&runner_block, generation, start))
+        .map_err(|e| EngineError::Internal(format!("spawn runner: {e}")))?;
+    Ok(())
+}
+
+// A forked child takes over a context whose runner was idle, with nothing in
+// flight, at a fork that waited for every runner; any other stays the parent's.
+fn adopt(inherited: &ControlBlock) -> Option<Arc<ControlBlock>> {
+    let generation = fork::current();
+    if !generation.quiesced()
+        || inherited.phase.get() != Phase::Deposited
+        || !inherited.channel.idle()
+    {
+        return None;
+    }
+    let isolate = lock(&inherited.custody).take()?;
+    let block = Arc::new(ControlBlock::new(inherited.config.clone()));
+    *lock(&block.custody) = Some(isolate);
+    start(&block, generation, Start::Adopted).ok()?;
+    Some(block)
 }
 
 fn protocol(error: ChannelError) -> EngineError {
