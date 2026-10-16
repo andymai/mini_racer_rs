@@ -75,11 +75,11 @@ Locally, write runs into a fresh directory with `--out <dir>/<name>.jsonl` (one 
 
 | Task | Command |
 |---|---|
-| Prove the harness is deterministic | `bundle exec ruby test/diff/run.rb --pair reference` (must show no divergence) |
 | Check this gem against the ledger | `bundle exec ruby test/diff/run.rb --strict` |
+| Also prove the harness is deterministic | add `--twin`: a second copy of the real gem must agree with the first on every case |
 | Record outcomes after a change | `bundle exec ruby test/diff/run.rb --write-ledger` (a new divergence becomes `xfail:S3`; existing milestones stay) |
 | Minimize new divergences | `bundle exec ruby test/diff/run.rb --shrink` (writes `test/diff/corpus/min-<id>.json`) |
 
-`test/diff/candidate.status.toml` holds `same`, `accepted:<divergence>` or `xfail:<milestone>` per case. An accepted divergence lives in `test/diff/divergences.toml` and must name a `compat.toml` deviation. Results land in `tmp/diff/`.
+Each worker first reports the gem it loaded, so a broken reference bundle aborts the run instead of matching itself. `test/diff/candidate.status.toml` holds `same`, `accepted:<divergence>`, `xfail:<milestone>` (diverges) or `crash:<milestone>` (the candidate crashes or hangs) per case. An accepted divergence lives in `test/diff/divergences.toml`, matches one step, and must name a `compat.toml` deviation. Results and worker logs land in `tmp/diff/`.
 
 Details: [reference.md](reference.md).

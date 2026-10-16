@@ -4,8 +4,8 @@ require "test_helper"
 require_relative "../diff/ledger"
 
 class DiffLedgerTest < Minitest::Test
-  REF = [["raise", "MiniRacer::RuntimeError", "SyntaxError: old text"]].freeze
-  OURS = [["raise", "MiniRacer::RuntimeError", "SyntaxError: new text"]].freeze
+  REF = [["raise", "MiniRacer::RuntimeError", ["string", "UTF-8", "text", "SyntaxError: old text"]]].freeze
+  OURS = [["raise", "MiniRacer::RuntimeError", ["string", "UTF-8", "text", "SyntaxError: new text"]]].freeze
   WORDING = { "id" => "syntax-wording", "compat" => "behavior:v8-version@ruby",
               "expected" => "old text", "actual" => "new text", }.freeze
 
@@ -13,10 +13,23 @@ class DiffLedgerTest < Minitest::Test
     { "id" => id, "class" => klass }
   end
 
-  def test_outcomes_are_same_accepted_or_diverged
+  def test_outcomes_are_same_accepted_crashed_or_diverged
     assert_equal "same", DiffLedger.classify(REF, REF, [])
     assert_equal "diverged", DiffLedger.classify(REF, OURS, [])
     assert_equal "accepted:syntax-wording", DiffLedger.classify(REF, OURS, [WORDING])
+    assert_equal "crashed", DiffLedger.classify(REF, [["crash", "signal 11"]], [])
+  end
+
+  def test_an_accepted_step_never_covers_another
+    assert_equal "diverged", DiffLedger.classify(REF + [%w[int 2]], OURS + [%w[int 3]], [WORDING])
+  end
+
+  def test_the_signature_keeps_the_failure_and_blurs_digits
+    bad_tag = ->(tag) { [["raise", "MiniRacer::RuntimeError", ["string", "UTF-8", "text", "bad tag: #{tag}"]]] }
+
+    assert_equal DiffLedger.signature([%w[int 1]], bad_tag.call("0x41")),
+                 DiffLedger.signature([%w[int 2]], bad_tag.call("0x6f"))
+    refute_equal DiffLedger.signature([%w[int 1]], bad_tag.call("0x41")), DiffLedger.signature(REF, OURS)
   end
 
   def test_an_accepted_divergence_must_cite_a_compat_deviation
@@ -30,6 +43,7 @@ class DiffLedgerTest < Minitest::Test
     assert_equal "xfail:S3", DiffLedger.ledger_status(nil, "diverged")
     assert_equal "xfail:M2", DiffLedger.ledger_status("xfail:M2", "diverged")
     assert_equal "same", DiffLedger.ledger_status("xfail:M2", "same")
+    assert_equal "crash:S3", DiffLedger.ledger_status("xfail:M2", "crashed")
   end
 
   def test_strict_mode_rejects_ratchets_unlisted_stale_and_undeclared
@@ -44,7 +58,11 @@ class DiffLedgerTest < Minitest::Test
                  problems
   end
 
-  def test_a_known_gap_passes
+  def test_a_known_gap_passes_but_a_new_crash_does_not
     assert_empty DiffLedger.ledger_problems({ "a" => { "status" => "xfail:S3" } }, [result("a", "diverged")], %w[S3])
+    assert_empty DiffLedger.ledger_problems({ "a" => { "status" => "crash:S3" } }, [result("a", "crashed")], %w[S3])
+    assert_match "a candidate crash needs crash:",
+                 DiffLedger.ledger_problems({ "a" => { "status" => "xfail:S3" } }, [result("a", "crashed")],
+                                            %w[S3],).first
   end
 end

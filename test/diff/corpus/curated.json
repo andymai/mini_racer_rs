@@ -125,7 +125,8 @@
     "steps": [
       {
         "op": "eval",
-        "source": "globalThis.counter = 0; globalThis.bump = () => ++counter"
+        "source": "globalThis.counter = 0; globalThis.bump = () => ++counter",
+        "setup": true
       },
       {
         "op": "eval",
@@ -154,7 +155,8 @@
     "steps": [
       {
         "op": "eval",
-        "source": "globalThis.a = { b: { c: (x) => x * 2 } }"
+        "source": "globalThis.a = { b: { c: (x) => x * 2 } }",
+        "setup": true
       },
       {
         "op": "call",

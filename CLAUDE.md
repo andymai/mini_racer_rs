@@ -96,7 +96,7 @@ bundle exec ruby test/upstream/run.rb --strict   # mini_racer's own suite agains
 bundle exec rake compat:check      # compat.toml against the reference surface and this gem
 bundle exec rake compat:render     # regenerate everything compat.toml generates
 bundle exec rake compat:verify     # compat:check plus a fresh reflection of the real gem (needs tools/reference)
-bundle exec ruby test/diff/run.rb --strict      # the real gem and this one on the same values (needs tools/reference)
+bundle exec ruby test/diff/run.rb --twin --strict   # the real gem and this one on the same values (needs tools/reference)
 ```
 
 ## Which tests to run

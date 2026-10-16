@@ -56,8 +56,7 @@ step bundle exec ruby test/upstream/run.rb --strict
 msrv=$(taplo get -f tools/versions.toml toolchains.msrv)
 step scripts/test-boundaries.sh
 step bundle exec ruby test/upstream/run.rb --scripts
-step bundle exec ruby test/diff/run.rb --pair reference
-step bundle exec ruby test/diff/run.rb --strict
+step bundle exec ruby test/diff/run.rb --twin --strict
 step cargo "+$msrv" check --workspace --all-targets --locked
 step scripts/check-deny.sh
 step cargo audit

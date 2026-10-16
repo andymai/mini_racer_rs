@@ -3,9 +3,9 @@
 require "json"
 
 # Seeded cases for the differential run. A JS case is a value tree rendered to
-# source and evaluated; a Ruby case is a list of canonical values passed through
-# Context#call and returned. Trees, not source, are kept so the shrinker can cut
-# them down.
+# source and evaluated; a Ruby case is a list of value trees made canonical and
+# passed through Context#call. Trees, not source or canonical values, are kept
+# so the shrinker can cut them down without breaking shared references.
 module DiffGenerate
   JS_LEAVES = [
     "undefined", "null", "true", "false", "0", "-0", "1", "-1", "2147483647", "-2147483648", "2147483648",
@@ -23,7 +23,8 @@ module DiffGenerate
     ["string", "UTF-8", "text", ""], ["string", "UTF-8", "text", "a"], ["string", "UTF-8", "text", "é\u{1F600}"],
     ["string", "ISO-8859-1", "hex", "e9"], ["string", "ASCII-8BIT", "hex", "ff00"],
     ["string", "UTF-16LE", "hex", "6800"],
-    ["symbol", "sym"], ["time", "0", 0], ["time", "1600000000", 123_456_789], ["binary", "0102ff"],
+    ["symbol", %w[string US-ASCII text sym]], ["time", "0", 0, 0, true],
+    ["time", "1600000000", 123_456_789, 32_400, false], ["binary", "0102ff"],
   ].freeze
 
   module_function
@@ -33,7 +34,7 @@ module DiffGenerate
     js_cases = Array.new(javascript) { |n| { "id" => "js-#{seed}-#{n}", "kind" => "js", "tree" => js_tree(random, 3) } }
     ruby_cases = Array.new(ruby) do |n|
       { "id" => "rb-#{seed}-#{n}", "kind" => "ruby",
-        "args" => Array.new(random.rand(1..3)) { canonical(ruby_tree(random, 3)) }, }
+        "args" => Array.new(random.rand(1..3)) { ruby_tree(random, 3) }, }
     end
     js_cases + ruby_cases
   end
@@ -51,7 +52,7 @@ module DiffGenerate
     end
   end
 
-  HASH_KEYS = [%w[string UTF-8 text k], %w[symbol s], %w[int 7],
+  HASH_KEYS = [%w[string UTF-8 text k], ["symbol", %w[string US-ASCII text s]], %w[int 7],
                %w[string UTF-8 text é],].freeze
 
   def ruby_tree(random, depth)
@@ -98,11 +99,13 @@ module DiffGenerate
 
   ECHO = "globalThis.__diff_echo = (...args) => args"
 
+  # A setup step's value is not compared, only whether it raised.
   def steps(kase)
     case kase.fetch("kind")
     when "js" then [{ "op" => "eval", "source" => render(kase.fetch("tree")) }]
-    when "ruby" then [{ "op" => "eval", "source" => ECHO },
-                      { "op" => "call", "path" => "__diff_echo", "args" => kase.fetch("args") },]
+    when "ruby"
+      [{ "op" => "eval", "source" => ECHO, "setup" => true },
+       { "op" => "call", "path" => "__diff_echo", "args" => kase.fetch("args").map { |arg| canonical(arg) } },]
     else kase.fetch("steps")
     end
   end

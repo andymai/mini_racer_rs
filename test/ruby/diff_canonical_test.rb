@@ -8,7 +8,7 @@ require_relative "../diff/shrink"
 
 class DiffCanonicalTest < Minitest::Test
   def test_every_generated_ruby_value_round_trips
-    trees = DiffGenerate::RUBY_LEAVES + DiffGenerate.cases(seed: 7, javascript: 0, ruby: 50).flat_map { |kase| kase["args"] }
+    trees = DiffGenerate::RUBY_LEAVES + DiffGenerate.cases(seed: 7, javascript: 0, ruby: 50).flat_map { |kase| kase["args"].map { |arg| DiffGenerate.canonical(arg) } }
 
     trees.each { |tree| assert_equal tree, DiffCanonical.encode(DiffCanonical.decode(tree)) }
   end
@@ -24,11 +24,20 @@ class DiffCanonicalTest < Minitest::Test
     assert_same decoded[0], decoded[1]["a"]
   end
 
-  def test_floats_and_strings_keep_what_a_comparison_needs
+  def test_floats_strings_symbols_and_times_keep_what_a_comparison_needs
     refute_equal DiffCanonical.encode(0.0), DiffCanonical.encode(-0.0)
     assert_equal %w[float nan], DiffCanonical.encode(Float::NAN)
     assert_equal %w[string ASCII-8BIT hex ff], DiffCanonical.encode("\xFF".b)
     refute_equal DiffCanonical.encode("a"), DiffCanonical.encode("a".encode("UTF-16LE"))
+    refute_equal DiffCanonical.encode(:a), DiffCanonical.encode("a".encode("UTF-16LE").to_sym)
+    refute_equal DiffCanonical.encode(Time.at(0).utc), DiffCanonical.encode(Time.at(0).localtime(0))
+  end
+
+  def test_an_error_message_keeps_its_encoding_and_stays_json_safe
+    failure = DiffCanonical.failure(RuntimeError.new("\xFF".b))
+
+    assert_equal ["raise", "RuntimeError", %w[string ASCII-8BIT hex ff]], failure
+    assert JSON.generate(failure)
   end
 
   def test_generation_is_deterministic_per_seed
@@ -53,11 +62,22 @@ class DiffCanonicalTest < Minitest::Test
   end
 
   def test_shrinking_ruby_arguments_keeps_one_argument
-    args = [%w[int 1], ["array", [%w[symbol s], ["hash", [[%w[int 7], %w[float nan]]]]]]]
+    args = [%w[int 1],
+            ["array", [["symbol", %w[string US-ASCII text s]], ["hash", [[%w[int 7], %w[float nan]]]]]],]
     minimal = DiffShrink.minimize({ "kind" => "ruby", "args" => args }) do |variant|
       JSON.generate(variant["args"]).include?("nan")
     end
 
     assert_equal [%w[float nan]], minimal["args"]
+  end
+
+  def test_a_shared_value_shrinks_and_stays_shared
+    shared = ["shared", ["array", [%w[int 1], ["array", [%w[int 2]]]]]]
+    minimal = DiffShrink.minimize({ "kind" => "ruby", "args" => [shared] }) do |variant|
+      variant["args"].first.first == "shared"
+    end
+
+    assert_equal [["shared", ["array", []]]], minimal["args"]
+    assert_equal ["array", [["array", []], ["ref", 1]]], DiffGenerate.canonical(minimal["args"].first)
   end
 end
