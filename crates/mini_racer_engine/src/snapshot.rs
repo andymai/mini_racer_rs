@@ -5,6 +5,10 @@ use crate::serialize::{self, Tc};
 
 const UNEXPECTED: &str = "unexpected failure";
 
+/// Where every blob keeps a context no script has run in, for the filter's
+/// safe context of a context made from the blob.
+pub const PRISTINE: usize = 0;
+
 // mini_racer reads the code back from V8 as UTF-8, which turns a lone
 // surrogate into U+FFFD; V8 decodes UTF-8 and Latin-1 as mini_racer's does.
 fn source<'s>(tc: &Tc<'s, '_, '_, '_>, code: &JsText) -> Option<v8::Local<'s, v8::String>> {
@@ -45,6 +49,13 @@ pub fn create(code: &JsText, base: Option<Vec<u8>>) -> Result<Vec<u8>, EngineErr
     };
     let outcome = {
         v8::scope!(let scope, &mut isolate);
+        // A new context of a warmup's base blob would carry the snapshot's
+        // script, so the base blob's own pristine context is kept.
+        let pristine = warmup
+            .then(|| v8::Context::from_snapshot(scope, PRISTINE, v8::ContextOptions::default()))
+            .flatten()
+            .unwrap_or_else(|| v8::Context::new(scope, v8::ContextOptions::default()));
+        scope.add_context(pristine);
         let context = v8::Context::new(scope, v8::ContextOptions::default());
         let outcome = {
             let scope = &mut v8::ContextScope::new(scope, context);

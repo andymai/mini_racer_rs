@@ -37,6 +37,24 @@ class SnapshotTest < Minitest::Test
     assert_equal "wrong argument type mini_racer/context (expected mini_racer/snapshot)", error.message
     error = assert_raises(TypeError) { MiniRacer::Context.new(snapshot: String) }
     assert_equal "wrong argument type Class (expected mini_racer/snapshot)", error.message
+    renamed = Class.new { def self.to_s = "Renamed" }
+    error = assert_raises(TypeError) { MiniRacer::Context.new(snapshot: renamed.new) }
+    assert_equal "wrong argument type Renamed (expected mini_racer/snapshot)", error.message
+  end
+
+  # Deviation behavior:snapshot-filter-context@ruby: mini_racer 0.22.1 builds
+  # the filter's safe context from the snapshot too, so these values come
+  # back as nil.
+  def test_snapshot_code_cannot_change_how_values_are_copied
+    snapshot = MiniRacer::Snapshot.new("Object.getOwnPropertyDescriptors = () => ({})")
+    context = MiniRacer::Context.new(snapshot: snapshot)
+
+    assert_equal({ "a" => 1 }, context.eval("({a: 1, f() {}})"))
+    assert_equal [1], context.eval("[1, function() {}]")
+    assert_equal({}, context.eval("Object.getOwnPropertyDescriptors({a: 1})"))
+    snapshot.warmup!("1")
+
+    assert_equal({ "a" => 1 }, MiniRacer::Context.new(snapshot: snapshot).eval("({a: 1, f() {}})"))
   end
 
   # Deviation behavior:warmup-discards-context@ruby: mini_racer 0.22.1 keeps

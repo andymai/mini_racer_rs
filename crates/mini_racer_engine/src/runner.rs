@@ -58,6 +58,7 @@ pub fn run(block: &Arc<ControlBlock>, snapshot: Option<Vec<u8>>) {
 
 // Returns whether it stopped for an explicit dispose.
 fn serve(block: &Arc<ControlBlock>, snapshot: Option<Vec<u8>>) -> bool {
+    let from_snapshot = snapshot.is_some();
     let params = v8::CreateParams::default();
     let params = match snapshot {
         Some(blob) => params.snapshot_blob(v8::StartupData::from(blob)),
@@ -66,7 +67,7 @@ fn serve(block: &Arc<ControlBlock>, snapshot: Option<Vec<u8>>) -> bool {
     let mut isolate = v8::Isolate::new(params);
     let contexts = {
         v8::scope!(let scope, &mut isolate);
-        serialize::contexts(scope)
+        serialize::contexts(scope, from_snapshot)
     };
     let Some((context, filter)) = contexts else {
         if receive(block).is_some() {

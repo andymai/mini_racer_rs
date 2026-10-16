@@ -4,7 +4,7 @@
 
 | Engine | Done | Planned | Deviation |
 |---|---|---|---|
-| CRuby | 42 | 12 | 14 |
+| CRuby | 42 | 12 | 15 |
 | TruffleRuby | 58 | 0 | 0 |
 
 ## Surface
@@ -123,6 +123,12 @@ Pending review.
 ### `behavior:platforms@ruby`
 
 mini_racer_rs supports glibc Linux on x86_64 and aarch64, plus macOS on arm64 and x86_64. Installation stops on musl-based Linux, including Alpine, and on Windows, with a message naming the supported platforms.
+
+Pending review.
+
+### `behavior:snapshot-filter-context@ruby`
+
+mini_racer_rs returns the same filtered results from a snapshot-based context as from a context without a snapshot. In a context made from `MiniRacer::Snapshot.new("Object.getOwnPropertyDescriptors = () => ({})")`, `({a: 1, f() {}})` returns `{"a" => 1}`, and `[1, function() {}]` returns `[1]`. mini_racer 0.22.1 returns `nil` for both. Both gems copy results that V8 refuses to serialize as is through a filter in a separate safe context. mini_racer_rs keeps an untouched context in each snapshot blob and uses it for that filter, while mini_racer 0.22.1 builds the safe context from the snapshot, exposing the filter's built-ins to snapshot code. User code still sees the replacement in both gems: `Object.getOwnPropertyDescriptors({a: 1})` returns `{}`.
 
 Pending review.
 

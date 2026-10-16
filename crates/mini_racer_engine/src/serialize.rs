@@ -1,4 +1,6 @@
 use mini_racer_wire::marker;
+
+use crate::snapshot;
 use v8::ValueSerializerHelper;
 
 // mini_racer's filter (mini_racer_v8.cc, MIT, Copyright (c) 2016-2019 the
@@ -68,8 +70,19 @@ pub fn origin<'s>(
 /// Creates the safe context, then the user context, as `mini_racer` does. The
 /// filter's setup reads the user context's `Map` and `Set` once, under a
 /// shared security token that is revoked right after.
-pub fn contexts(scope: &mut v8::PinScope<'_, '_, ()>) -> Option<(v8::Global<v8::Context>, Filter)> {
-    let safe = v8::Context::new(scope, v8::ContextOptions::default());
+///
+/// On an isolate made from a snapshot, the safe context is the blob's
+/// pristine one, so snapshot code cannot reach the filter's built-ins either.
+pub fn contexts(
+    scope: &mut v8::PinScope<'_, '_, ()>,
+    from_snapshot: bool,
+) -> Option<(v8::Global<v8::Context>, Filter)> {
+    let safe = from_snapshot
+        .then(|| {
+            v8::Context::from_snapshot(scope, snapshot::PRISTINE, v8::ContextOptions::default())
+        })
+        .flatten()
+        .unwrap_or_else(|| v8::Context::new(scope, v8::ContextOptions::default()));
     let user = v8::Context::new(scope, v8::ContextOptions::default());
     let function = {
         let scope = &mut v8::ContextScope::new(scope, safe);

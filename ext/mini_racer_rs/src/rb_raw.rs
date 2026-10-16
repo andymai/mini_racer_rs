@@ -197,7 +197,8 @@ pub fn call_with_array(ruby: &Ruby, receiver: Value, args: RArray) -> Result<Val
 }
 
 /// How Ruby's own type errors name `value`: nil, true and false by value,
-/// anything else by its class, never a singleton class.
+/// anything else by its class, never a singleton class, printed with `to_s`
+/// as Ruby prints it, overridden or not.
 pub fn type_name(ruby: &Ruby, value: Value) -> String {
     if value.is_nil() {
         return "nil".to_owned();
