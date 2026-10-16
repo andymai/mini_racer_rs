@@ -416,6 +416,14 @@ jobs:
       - run: bundle exec rake test
       - name: Fork stress
         run: bundle exec ruby -Ilib test/stress/fork_loop.rb
+      # On macOS spawns go through fork() and the engine's fork handlers.
+      - name: Spawns under context churn, both V8 platform modes
+        run: |
+          bundle exec ruby -Ilib test/stress/spawn_churn.rb single
+          bundle exec ruby -Ilib test/stress/spawn_churn.rb multi
+      - name: A fork child without the madvise wrapper crashes
+        if: matrix.os == 'ubuntu-24.04' && matrix.ruby == '3.4'
+        run: scripts/madvise-fixture.sh
       - name: Extension unit tests
         run: cargo test -p mini_racer_rs --lib --locked
       - name: Compatibility ledger

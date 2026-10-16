@@ -329,6 +329,50 @@ fn a_quiesced_fork_never_overlaps_a_runner_using_its_isolate() {
     });
 }
 
+// Model 10: a runner interrupted in JavaScript for a fork holds no isolate
+// until that fork ends, parks again when a second fork begins before it
+// wakes, and an interrupt that lands after its fork ended returns at once.
+#[test]
+fn an_interrupted_runner_parks_for_its_fork_and_no_longer() {
+    bounded(3, || {
+        let gate = Arc::new(ForkGate::default());
+        let phase = Arc::new(RunnerPhase::default());
+        let using = Arc::new(AtomicBool::new(true));
+        let interrupt = Arc::new(AtomicBool::new(false));
+        let runner = {
+            let (gate, phase) = (Arc::clone(&gate), Arc::clone(&phase));
+            let (using, interrupt) = (Arc::clone(&using), Arc::clone(&interrupt));
+            thread::spawn(move || {
+                // Where V8 checks for interrupts while the script runs.
+                for _ in 0..3 {
+                    if interrupt.swap(false, Ordering::SeqCst) {
+                        using.store(false, Ordering::SeqCst);
+                        gate.pause(&phase);
+                        using.store(true, Ordering::SeqCst);
+                    }
+                    thread::yield_now();
+                }
+                using.store(false, Ordering::SeqCst);
+                phase.set(Phase::Deposited);
+            })
+        };
+
+        for _ in 0..2 {
+            gate.begin();
+            interrupt.store(true, Ordering::SeqCst);
+            while phase.get() == Phase::Running {
+                thread::yield_now();
+            }
+            assert!(!using.load(Ordering::SeqCst));
+            thread::yield_now();
+            assert!(!using.load(Ordering::SeqCst));
+            gate.end();
+        }
+        interrupt.store(true, Ordering::SeqCst);
+        runner.join().expect("runner thread");
+    });
+}
+
 struct Owned;
 
 impl Protocol for Owned {

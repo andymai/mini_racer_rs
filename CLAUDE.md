@@ -54,7 +54,7 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | Forks: the fork epoch, per-process generations, quiescing runners inside `fork()` (`pthread_atfork`), taking idle contexts over in the child, dispatches orphaned by a fork from a callback | `crates/mini_racer_engine/src/process/fork.rs`, `crates/mini_racer_engine/src/sys.rs`, `crates/mini_racer_engine/src/context.rs` (`Lineage`, `adopt`) |
 | Building and warming up startup snapshots | `crates/mini_racer_engine/src/snapshot.rs` |
 | Engine errors | `crates/mini_racer_engine/src/error.rs` |
-| `madvise` wrapper (fork safety) | `crates/mini_racer_engine/src/sys.rs`, `crates/mini_racer_engine/build.rs` |
+| `madvise` wrapper (fork safety), and the fixture showing a child crashes without it | `crates/mini_racer_engine/src/sys.rs`, `crates/mini_racer_engine/build.rs`, `scripts/madvise-fixture.sh`, `test/stress/madvise_fixture.rb` |
 | Wire decoding, writing and text transcoding | `crates/mini_racer_wire/src/decode.rs`, `crates/mini_racer_wire/src/write.rs`, `crates/mini_racer_wire/src/text.rs` |
 | The string that stands in for a function result | `crates/mini_racer_wire/src/marker.rs` |
 | What V8 writes for a corpus of expressions, and its reviewed decoding | `crates/mini_racer_wire/tests/golden/`, `crates/mini_racer_engine/examples/gen_wire_golden.rs` |
@@ -104,7 +104,7 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | Consumer workloads (Babel, Terser, Handlebars, React) and their ledger | `test/consumers/workloads.rb`, `test/consumers/js/`, `test/consumers/candidate.status.toml` |
 | rtlcss resolving through the shim to mini_racer_rs | `test/consumers/transitive/` |
 | Benchmarks against the real gem (informational), including mini_racer's own `benchmark/serde` suite | `bench/run.rb`, `bench/measure.rb`, `bench/payload.rb`, `bench/serde.rb` |
-| Memory, lifecycle and fork stress runs | `test/stress/round_trips.rb`, `test/stress/churn.rb`, `test/stress/fork_loop.rb` |
+| Memory, lifecycle, fork and spawn stress runs | `test/stress/round_trips.rb`, `test/stress/churn.rb`, `test/stress/fork_loop.rb`, `test/stress/spawn_churn.rb` |
 | Differential ledgers and corpus | `test/diff/candidate.status.toml`, `test/diff/divergences.toml`, `test/diff/corpus/` |
 | Vendored TruffleRuby backend | `lib/mini_racer/truffleruby.rb`, `lib/mini_racer/shared.rb` |
 | Public surface status per id, deviation reasons | `compat.toml`, `compat/surface.json` |
@@ -146,6 +146,8 @@ bundle exec ruby bench/run.rb     # medians against the real gem; --quick for a 
 bundle exec ruby -Ilib test/stress/round_trips.rb   # 1M evals after a 500k warm-up; fails on RSS growth over 5%
 bundle exec ruby -Ilib test/stress/churn.rb 8 600   # 8 threads creating, evaluating and releasing contexts for 10 min
 bundle exec ruby -Ilib test/stress/fork_loop.rb    # 500 forks with idle contexts, 100 during an eval loop, single-threaded
+bundle exec ruby -Ilib test/stress/spawn_churn.rb single   # 1,000 backticks and IO.popen under context churn (also: multi)
+scripts/madvise-fixture.sh         # Linux: build without the madvise wrapper and show a fork child crash
 bundle exec rake package:stage PLATFORM=x86_64-linux-gnu   # copy the compiled extension to tmp/native/<platform>/<ruby minor>/
 bundle exec rake package:native PLATFORM=x86_64-linux-gnu  # a native gem from every staged Ruby's extension, into pkg/
 bundle exec rake package:source    # the source gem, into pkg/
