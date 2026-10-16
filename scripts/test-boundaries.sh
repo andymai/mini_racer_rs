@@ -62,7 +62,7 @@ CASES = [
         replace("crates/mini_racer_sync/Cargo.toml", "loom.workspace = true\n", "libc.workspace = true\nloom.workspace = true\n"),
     ]),
     ("dev-dependency on a higher layer", "check-boundaries.sh", "dev-deps", [
-        append("crates/mini_racer_wire/Cargo.toml", "\n[dev-dependencies]\nmini_racer_engine.workspace = true\n"),
+        replace("crates/mini_racer_wire/Cargo.toml", "[dev-dependencies]\n", "[dev-dependencies]\nmini_racer_engine.workspace = true\n"),
     ]),
     ("Ruby crate reached from L0", "check-boundaries.sh", "transitive", [
         replace("crates/mini_racer_sync/Cargo.toml", "[dependencies]\n", "[dependencies]\nmagnus.workspace = true\n"),
