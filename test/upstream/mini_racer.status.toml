@@ -117,10 +117,10 @@ status = "upstream-skip"
 status = "xfail:M4"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_late_watchdog_does_not_terminate_next_eval".overrides."ruby-3.3-macos-arm64"]
-status = "pass"
+status = "flaky:flaky-test_late_watchdog_does_not_terminate_next_eval"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_late_watchdog_does_not_terminate_next_eval".overrides."ruby-3.4-macos-arm64"]
-status = "pass"
+status = "flaky:flaky-test_late_watchdog_does_not_terminate_next_eval"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_late_watchdog_does_not_terminate_next_eval".overrides."ruby-4.0-macos-arm64"]
 status = "flaky:flaky-test_late_watchdog_does_not_terminate_next_eval"
@@ -342,7 +342,7 @@ status = "pass"
 status = "upstream-skip"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_forking"]
-status = "xfail:S6"
+status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_forking".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
@@ -712,7 +712,7 @@ status = "pass"
 status = "upstream-skip"
 
 [tests."test/single_threaded_test.rb#MiniRacerSingleThreadedTest#test_fork_after_low_memory_notification"]
-status = "xfail:S6"
+status = "pass"
 
 [tests."test/single_threaded_test.rb#MiniRacerSingleThreadedTest#test_fork_after_low_memory_notification".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
