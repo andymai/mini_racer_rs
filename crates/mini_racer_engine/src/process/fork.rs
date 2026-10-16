@@ -19,8 +19,9 @@ const INTERRUPT_AFTER: Duration = Duration::from_millis(50);
 // locks or frees what it inherited, which a thread that is gone may hold.
 pub struct Generation {
     pid: u32,
-    // Whether this process came from a fork its runners were idle for: the
-    // parent's `prepared`, as the child inherited it at the fork.
+    // Whether every fork that led to this process found its runners idle: a
+    // runner caught mid-change by any of them may have left V8's process-wide
+    // state locked for every process after it. True for the first process.
     quiesced: bool,
     prepared: AtomicBool,
     gate: ForkGate,
@@ -45,7 +46,7 @@ impl Generation {
         }
     }
 
-    /// Whether this process came from a fork its runners were idle for.
+    /// Whether every fork that led to this process found its runners idle.
     pub const fn quiesced(&self) -> bool {
         self.quiesced
     }
@@ -78,9 +79,9 @@ impl Generation {
 /// The generation of the calling process.
 pub fn current() -> &'static Generation {
     let pid = std::process::id();
-    let mut generation = ROOT.get_or_init(|| Generation::new(pid, false));
+    let mut generation = ROOT.get_or_init(|| Generation::new(pid, true));
     while generation.pid != pid {
-        let quiesced = generation.prepared.load(Ordering::SeqCst);
+        let quiesced = generation.quiesced && generation.prepared.load(Ordering::SeqCst);
         generation = generation
             .next
             .get_or_init(|| Box::new(Generation::new(pid, quiesced)));
