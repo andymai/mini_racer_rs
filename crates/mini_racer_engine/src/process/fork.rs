@@ -1,4 +1,5 @@
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::cell::Cell;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
@@ -6,7 +7,6 @@ use mini_racer_sync::{ForkGate, Phase, lock};
 
 use crate::control::ControlBlock;
 use crate::process::platform::{self, Mode};
-use crate::sys;
 
 // Long enough for any runner to answer and go idle, short enough that a fork
 // that cannot be quiesced is merely slow.
@@ -24,9 +24,9 @@ pub struct Generation {
     // state locked for every process after it. True for the first process.
     quiesced: bool,
     prepared: AtomicBool,
+    // Whether this process's pending fork shut the gate.
+    begun: AtomicBool,
     gate: ForkGate,
-    // The thread whose fork is pending, which must not wait on a runner.
-    forker: AtomicU64,
     blocks: Mutex<Vec<Weak<ControlBlock>>>,
     next: OnceLock<Box<Self>>,
 }
@@ -39,8 +39,8 @@ impl Generation {
             pid,
             quiesced,
             prepared: AtomicBool::new(false),
+            begun: AtomicBool::new(false),
             gate: ForkGate::default(),
-            forker: AtomicU64::new(0),
             blocks: Mutex::new(Vec::new()),
             next: OnceLock::new(),
         }
@@ -49,12 +49,6 @@ impl Generation {
     /// Whether every fork that led to this process found its runners idle.
     pub const fn quiesced(&self) -> bool {
         self.quiesced
-    }
-
-    /// Whether `thread` is forking, so that waiting on a runner would wait on
-    /// the fork that waits for it.
-    pub fn forking(&self, thread: u64) -> bool {
-        self.forker.load(Ordering::SeqCst) == thread
     }
 
     pub fn register(&self, block: &Arc<ControlBlock>) {
@@ -76,7 +70,6 @@ impl Generation {
     }
 }
 
-/// The generation of the calling process.
 pub fn current() -> &'static Generation {
     let pid = std::process::id();
     let mut generation = ROOT.get_or_init(|| Generation::new(pid, true));
@@ -89,15 +82,28 @@ pub fn current() -> &'static Generation {
     generation
 }
 
-/// Before a fork: with a single-threaded V8, waits until every runner is idle
-/// or parked, so the child sees no isolate mid-change. Pair it with
-/// `after_fork` in the parent.
-pub fn prepare_fork(thread: u64) {
-    if platform::mode() != Mode::SingleThreaded {
+thread_local! {
+    // Set while a fork from Ruby runs on this thread. Forks that run no Ruby
+    // in the child (spawn, system and backticks on macOS) leave runners be.
+    static INTENDED: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Marks the calling thread's forks, until cleared, as ones whose child runs
+/// Ruby and may use the contexts it inherits.
+pub fn intend(forking: bool) {
+    INTENDED.with(|intended| intended.set(forking));
+}
+
+// pthread_atfork's prepare handler, on the forking thread inside fork() and
+// after every Ruby `_fork` hook, so no Ruby code runs while runners are held.
+// With a single-threaded V8 it waits until every runner is idle or parked, so
+// the child sees no isolate mid-change. No runner needs Ruby to get there:
+// one waiting on a callback already counts as parked.
+pub(crate) fn prepare() {
+    if !INTENDED.with(Cell::get) || platform::mode() != Mode::SingleThreaded {
         return;
     }
     let generation = current();
-    generation.forker.store(thread, Ordering::SeqCst);
     // Begun before the registry is read: a runner registered later sees it.
     generation.gate.begin();
     let blocks: Vec<Arc<ControlBlock>> = lock(&generation.blocks)
@@ -121,20 +127,21 @@ pub fn prepare_fork(thread: u64) {
         if !interrupted && waited >= INTERRUPT_AFTER {
             interrupted = true;
             for block in running {
-                if let Some(handle) = block.isolate.get() {
-                    sys::interrupt_for_fork(handle);
-                }
+                block.interrupt_for_fork();
             }
         }
         std::thread::sleep(POLL);
     };
     generation.prepared.store(quiesced, Ordering::SeqCst);
+    generation.begun.store(true, Ordering::SeqCst);
 }
 
-/// In the parent once the fork is over, whether or not it succeeded.
-pub fn after_fork() {
+// pthread_atfork's parent handler, whether or not the fork succeeded. The
+// child needs none: it reads what it inherited from `prepared`.
+pub(crate) fn parent() {
     let generation = current();
-    generation.prepared.store(false, Ordering::SeqCst);
-    generation.forker.store(0, Ordering::SeqCst);
-    generation.gate.end();
+    if generation.begun.swap(false, Ordering::SeqCst) {
+        generation.prepared.store(false, Ordering::SeqCst);
+        generation.gate.end();
+    }
 }

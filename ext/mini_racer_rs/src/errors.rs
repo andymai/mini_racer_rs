@@ -75,7 +75,7 @@ pub fn engine(ruby: &Ruby, error: EngineError) -> Error {
             Error::new(root.get(ruby), js.message)
         }
         EngineError::Disposed => raised(ruby, DISPOSED.get(ruby), "disposed context"),
-        EngineError::Orphaned | EngineError::DisposeBusy | EngineError::ForkInProgress => {
+        EngineError::Orphaned | EngineError::DisposeBusy => {
             raised(ruby, RUNTIME.get(ruby), error.to_string())
         }
         EngineError::Busy => raised(ruby, INTERNAL.get(ruby), error.to_string()),

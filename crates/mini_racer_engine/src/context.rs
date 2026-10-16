@@ -92,9 +92,30 @@ pub struct ContextHandle {
 // touches the inherited one, whose locks threads that are gone may hold.
 struct Lineage {
     pid: u32,
-    // None where the context was in use at the fork, so the child left it.
-    block: Option<Arc<ControlBlock>>,
+    held: Held,
     next: OnceLock<Box<Self>>,
+}
+
+enum Held {
+    Block(Arc<ControlBlock>),
+    // Disposed before the fork that led here.
+    Disposed,
+    // In use at the fork, or after a fork that did not wait for the runners.
+    Orphaned,
+}
+
+impl Lineage {
+    // The link for `pid`, without making one.
+    fn find(&self, pid: u32) -> Result<&Self, &Self> {
+        let mut lineage = self;
+        while lineage.pid != pid {
+            match lineage.next.get() {
+                Some(next) => lineage = next,
+                None => return Err(lineage),
+            }
+        }
+        Ok(lineage)
+    }
 }
 
 // The thread running the outermost dispatch, the callbacks it is running and
@@ -144,15 +165,12 @@ impl ContextHandle {
         let snapshot = config.snapshot.take();
         process::ensure_initialized();
         let generation = fork::current();
-        if generation.forking(process::thread_token()) {
-            return Err(EngineError::ForkInProgress);
-        }
         let block = Arc::new(ControlBlock::new(config));
         start(&block, generation, Start::Fresh(snapshot))?;
         let handle = Self {
             lineage: Lineage {
                 pid: std::process::id(),
-                block: Some(block),
+                held: Held::Block(block),
                 next: OnceLock::new(),
             },
             session: Session::default(),
@@ -243,20 +261,21 @@ impl ContextHandle {
 
     /// Terminates the running script, or the next one if none is running.
     pub fn stop(&self) -> Result<(), EngineError> {
-        let Some(block) = self.block() else {
-            return Ok(());
-        };
-        if self.is_disposed() {
-            return Err(EngineError::Disposed);
+        match self.held() {
+            Held::Block(_) if self.is_disposed() => Err(EngineError::Disposed),
+            Held::Block(block) => {
+                block.term.request(Interrupt::Stop);
+                Ok(())
+            }
+            Held::Disposed => Err(EngineError::Disposed),
+            Held::Orphaned => Ok(()),
         }
-        block.term.request(Interrupt::Stop);
-        Ok(())
     }
 
     /// Refuses new dispatches and terminates one in flight on another thread.
     /// The caller then waits for that dispatch to finish before `dispose`.
     pub fn begin_dispose(&self) {
-        if let Some(block) = self.block() {
+        if let Held::Block(block) = self.held() {
             block.term.dispose();
         }
     }
@@ -264,12 +283,16 @@ impl ContextHandle {
     /// Shuts the runner down and returns once its isolate is gone. Expects
     /// `begin_dispose` and no dispatch in flight; a second call is a no-op.
     pub fn dispose(&self, host: &mut impl Host) -> Result<(), EngineError> {
-        // mini_racer refuses a single-threaded context a child inherited in use.
-        let Some(block) = self.block() else {
-            return match platform::mode() {
-                Mode::SingleThreaded => Err(EngineError::DisposeBusy),
-                Mode::MultiThreaded => Ok(()),
-            };
+        let block = match self.held() {
+            Held::Block(block) => block,
+            Held::Disposed => return Ok(()),
+            // mini_racer refuses a single-threaded context a child inherited in use.
+            Held::Orphaned => {
+                return match platform::mode() {
+                    Mode::SingleThreaded => Err(EngineError::DisposeBusy),
+                    Mode::MultiThreaded => Ok(()),
+                };
+            }
         };
         if self.session.callbacks.load(Ordering::Relaxed) > 0 {
             return Err(EngineError::DisposeBusy);
@@ -297,29 +320,46 @@ impl ContextHandle {
         }
     }
 
+    /// Answers without taking an inherited context over.
     #[must_use]
     pub fn is_disposed(&self) -> bool {
-        self.block()
-            .is_some_and(|block| block.channel.is_closed() || block.term.is_disposing())
+        match self.lineage.find(std::process::id()) {
+            Ok(lineage) => match &lineage.held {
+                Held::Block(block) => block.channel.is_closed() || block.term.is_disposing(),
+                Held::Disposed => true,
+                Held::Orphaned => false,
+            },
+            Err(inherited) => match &inherited.held {
+                Held::Block(block) => block.channel.is_closed(),
+                Held::Disposed => true,
+                Held::Orphaned => false,
+            },
+        }
     }
 
-    // This process's block, taking the context over first in a forked child;
-    // None for a context the child cannot take over.
-    fn block(&self) -> Option<&Arc<ControlBlock>> {
+    // What this process holds of the context, taking it over first in a
+    // forked child.
+    fn held(&self) -> &Held {
         let pid = std::process::id();
         let mut lineage = &self.lineage;
         while lineage.pid != pid {
-            let inherited = lineage.block.as_ref();
+            let inherited = &lineage.held;
             lineage = lineage
                 .next
                 .get_or_init(|| Box::new(self.inherit(inherited, pid)));
         }
-        lineage.block.as_ref()
+        &lineage.held
     }
 
-    fn inherit(&self, inherited: Option<&Arc<ControlBlock>>, pid: u32) -> Lineage {
-        let block = inherited.and_then(|inherited| adopt(inherited));
-        if block.is_some() {
+    fn inherit(&self, inherited: &Held, pid: u32) -> Lineage {
+        let held = match inherited {
+            // The closed flag is an atomic, safe to read in what was inherited.
+            Held::Block(block) if block.channel.is_closed() => Held::Disposed,
+            Held::Block(block) => adopt(block).map_or(Held::Orphaned, Held::Block),
+            Held::Disposed => Held::Disposed,
+            Held::Orphaned => Held::Orphaned,
+        };
+        if matches!(held, Held::Block(_)) {
             // A thread of the parent may have claimed the context just before
             // the fork, without sending anything.
             self.session.owner.store(0, Ordering::Release);
@@ -328,7 +368,7 @@ impl ContextHandle {
         }
         Lineage {
             pid,
-            block,
+            held,
             next: OnceLock::new(),
         }
     }
@@ -339,13 +379,12 @@ impl ContextHandle {
         request: impl FnOnce(Depth) -> Request,
         host: &mut impl Host,
     ) -> Result<Vec<u8>, EngineError> {
-        let thread = process::thread_token();
-        if fork::current().forking(thread) {
-            return Err(EngineError::ForkInProgress);
-        }
-        let Some(block) = self.block() else {
-            return Err(EngineError::Orphaned);
+        let block = match self.held() {
+            Held::Block(block) => block,
+            Held::Disposed => return Err(EngineError::Disposed),
+            Held::Orphaned => return Err(EngineError::Orphaned),
         };
+        let thread = process::thread_token();
         match self.session.owner.load(Ordering::Acquire) {
             0 => {}
             _ if self.session.in_callback(thread) => {
@@ -465,12 +504,11 @@ impl Drop for ContextHandle {
     // An inherited context this process never took over is left as it is: its
     // locks may have been held by parent threads that do not exist here.
     fn drop(&mut self) {
-        let pid = std::process::id();
-        let mut lineage = Some(&self.lineage);
-        while let Some(current) = lineage.filter(|lineage| lineage.pid != pid) {
-            lineage = current.next.get().map(|next| &**next);
-        }
-        if let Some(block) = lineage.and_then(|lineage| lineage.block.as_ref()) {
+        if let Ok(Lineage {
+            held: Held::Block(block),
+            ..
+        }) = self.lineage.find(std::process::id())
+        {
             block.term.dispose();
             block.channel.close();
         }

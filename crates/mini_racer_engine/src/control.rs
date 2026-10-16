@@ -116,6 +116,8 @@ pub struct ControlBlock {
     pub timer: Mutex<Timer>,
     pub phase: RunnerPhase,
     pub isolate: OnceLock<v8::IsolateHandle>,
+    // The isolate a snapshot is being built in on this runner, if any.
+    pub building: Mutex<Option<v8::IsolateHandle>>,
     // An idle single-threaded runner leaves its isolate here, its only owner
     // then, so a forked child can hand it to a runner of its own.
     pub custody: Mutex<Option<v8::SharedIsolate>>,
@@ -137,6 +139,18 @@ impl Drop for ControlBlock {
 }
 
 impl ControlBlock {
+    /// Asks the runner to park for a pending fork, in JavaScript or in a
+    /// snapshot build, wherever V8 next checks for interrupts.
+    pub fn interrupt_for_fork(&self) {
+        if let Some(handle) = self.isolate.get() {
+            crate::sys::interrupt_for_fork(handle);
+        }
+        let building = lock(&self.building).clone();
+        if let Some(handle) = building {
+            crate::sys::interrupt_for_fork(&handle);
+        }
+    }
+
     pub fn new(config: ContextConfig) -> Self {
         Self {
             channel: Channel::default(),
@@ -145,6 +159,7 @@ impl ControlBlock {
             timer: Mutex::default(),
             phase: RunnerPhase::default(),
             isolate: OnceLock::new(),
+            building: Mutex::new(None),
             custody: Mutex::new(None),
         }
     }

@@ -108,9 +108,9 @@ Both gems allow an attached callback to call `eval`, `call`, or `attach` on its 
 
 Pending review.
 
-### `behavior:fork-hook-reentry@ruby`
+### `behavior:fork-quiesce-bound@ruby`
 
-With the `:single_threaded` platform flag, mini_racer_rs raises `MiniRacer::RuntimeError` with the message `context busy: fork in progress` when the forking thread calls `context.eval("1")` from an earlier prepended `Process._fork` hook invoked through `super`. mini_racer 0.22.1 has no fork hook, so the same call returns `1`. mini_racer_rs waits for every context runner to become idle before forking and keeps runners waiting during the fork, so allowing that call to wait would deadlock. In the child, after `super` returns, the call returns `1` in both gems. Other threads wait until the fork finishes. Without `:single_threaded`, mini_racer_rs returns `1`.
+With the `:single_threaded` platform flag, mini_racer_rs waits up to 500 ms inside Ruby's `fork` or `Process.daemon` for every context's runner to become idle or parked. If another thread runs an operation V8 does not interrupt, such as `JSON.parse` of a large string, the child refuses every inherited context: calling an idle one raises `MiniRacer::RuntimeError` with `single-threaded runner: Device or resource busy`. New contexts created in the child work. mini_racer 0.22.1 does not wait for its runners. With `JSON.parse` of a 3,000,000-element array's JSON, its fork took 15 ms and its child's idle context returned `42`; mini_racer_rs took 523 ms and refused that context.
 
 Pending review.
 

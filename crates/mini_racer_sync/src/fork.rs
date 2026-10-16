@@ -69,7 +69,6 @@ impl ForkGate {
         self.released.notify_all();
     }
 
-    /// Called by a runner about to use its isolate.
     pub fn resume(&self, phase: &RunnerPhase) {
         let mut pending = lock(&self.pending);
         while *pending {

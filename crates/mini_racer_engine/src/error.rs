@@ -50,10 +50,6 @@ pub enum EngineError {
     Busy,
     #[error("context dispose: {}", ebusy())]
     DisposeBusy,
-    /// A context used from the thread whose fork is in progress, inside a
-    /// `Process._fork` hook.
-    #[error("context busy: fork in progress")]
-    ForkInProgress,
     /// `mini_racer`'s text for a snapshot that could not be built.
     #[error("{0}")]
     Snapshot(String),

@@ -30,7 +30,12 @@ fn source<'s>(tc: &Tc<'s, '_, '_, '_>, code: &JsText) -> Option<v8::Local<'s, v8
 /// from `code` run in a fresh context, or, with `base`, by running `code` in
 /// a context of that snapshot that is then discarded, keeping the code V8
 /// compiled meanwhile.
-pub fn create(code: &JsText, base: Option<Vec<u8>>) -> Result<Vec<u8>, EngineError> {
+/// `building` sees the isolate first, so a pending fork can interrupt it.
+pub fn create(
+    code: &JsText,
+    base: Option<Vec<u8>>,
+    building: impl FnOnce(&mut v8::Isolate),
+) -> Result<Vec<u8>, EngineError> {
     let warmup = base.is_some();
     let mut isolate = base.map_or_else(
         || v8::Isolate::snapshot_creator(None, None),
@@ -42,6 +47,7 @@ pub fn create(code: &JsText, base: Option<Vec<u8>>) -> Result<Vec<u8>, EngineErr
             )
         },
     );
+    building(&mut isolate);
     let (name, handling) = if warmup {
         ("<warmup>", v8::FunctionCodeHandling::Keep)
     } else {

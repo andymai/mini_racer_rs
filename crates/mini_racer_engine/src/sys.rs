@@ -26,7 +26,9 @@ pub fn share(isolate: v8::OwnedIsolate) -> Option<v8::SharedIsolate> {
     // SAFETY: the runner calls this on the thread that created `isolate`, with
     // no reference from `Global::open` live, and the only slot it sets, an
     // `Arc<Runtime>`, is Send.
-    unsafe { isolate.try_into_shared() }.ok()
+    let shared = unsafe { isolate.try_into_shared() };
+    // A refused isolate comes back to be dropped here, on its runner.
+    shared.map_err(|refused| drop(refused.into_isolate())).ok()
 }
 
 /// Asks the isolate's runner to park for a pending fork the next time V8
@@ -43,6 +45,26 @@ extern "C" fn park_for_fork(isolate: v8::UnsafeRawIsolatePtr, _data: *mut std::f
         crate::runner::park_for_fork(isolate);
     });
     if parked.is_err() {
+        std::process::abort();
+    }
+}
+
+/// Runs the engine's fork handlers inside every `fork()` of the process.
+pub fn register_fork_handlers() {
+    // SAFETY: both handlers are plain functions that live as long as the
+    // process and never unwind.
+    let registered = unsafe { libc::pthread_atfork(Some(on_prepare), Some(on_parent), None) };
+    debug_assert_eq!(registered, 0, "pthread_atfork");
+}
+
+extern "C" fn on_prepare() {
+    if std::panic::catch_unwind(crate::process::fork::prepare).is_err() {
+        std::process::abort();
+    }
+}
+
+extern "C" fn on_parent() {
+    if std::panic::catch_unwind(crate::process::fork::parent).is_err() {
         std::process::abort();
     }
 }

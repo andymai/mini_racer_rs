@@ -104,6 +104,8 @@ pub fn park_for_fork(isolate: &v8::Isolate) {
 }
 
 fn refuse(block: &ControlBlock, message: &str) -> bool {
+    // Holding no isolate, it never keeps a fork waiting.
+    block.phase.set(Phase::Deposited);
     if receive(block).is_some() {
         let _ = block
             .channel
@@ -156,6 +158,7 @@ fn adopt(
     generation: &'static Generation,
     shared: v8::SharedIsolate,
 ) -> bool {
+    generation.resume(block);
     let runtime = {
         let mut locker = shared.lock();
         let Some(inherited) = locker.get_slot::<Arc<Runtime>>().cloned() else {
@@ -200,7 +203,7 @@ enum Served {
     Stop { disposed: bool },
 }
 
-fn serve_held(block: &ControlBlock, shared: &v8::SharedIsolate, runtime: &Runtime) -> bool {
+fn serve_held(block: &ControlBlock, shared: &v8::SharedIsolate, runtime: &Arc<Runtime>) -> bool {
     let mut isolate = shared.lock();
     loop {
         if let Served::Stop { disposed } = serve_one(&mut isolate, block, runtime, receive(block)) {
@@ -214,7 +217,7 @@ fn serve_held(block: &ControlBlock, shared: &v8::SharedIsolate, runtime: &Runtim
 fn serve_released(
     block: &ControlBlock,
     shared: v8::SharedIsolate,
-    runtime: &Runtime,
+    runtime: &Arc<Runtime>,
 ) -> (bool, Option<v8::SharedIsolate>) {
     let mut held = Some(shared);
     loop {
@@ -236,7 +239,7 @@ fn serve_released(
 fn serve_one(
     isolate: &mut v8::Isolate,
     block: &ControlBlock,
-    runtime: &Runtime,
+    runtime: &Arc<Runtime>,
     message: Option<ToV8<crate::control::Wire>>,
 ) -> Served {
     let request = match message {
@@ -251,7 +254,12 @@ fn serve_one(
                     let built = if block.term.check(DispatchKind::Script).is_some() {
                         Err(EngineError::Internal("halted without a cause".to_owned()))
                     } else {
-                        snapshot::create(&code, base)
+                        let built = snapshot::create(&code, base, |isolate| {
+                            isolate.set_slot(Arc::clone(runtime));
+                            *lock(&block.building) = Some(isolate.thread_safe_handle());
+                        });
+                        lock(&block.building).take();
+                        built
                     };
                     block
                         .term
