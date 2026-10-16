@@ -7,7 +7,7 @@ require "minitest"
 # immediately, so the runner can tell which test was in flight if the process
 # hangs or dies.
 module UpstreamReporter
-  ROOT = File.expand_path("../../vendor/mini_racer", __dir__)
+  ROOT = ENV.fetch("MINI_RACER_RS_UPSTREAM_ROOT") { File.expand_path("../../vendor/mini_racer", __dir__) }
 
   class Reporter < Minitest::AbstractReporter
     def initialize(path)

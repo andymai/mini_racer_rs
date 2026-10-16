@@ -51,6 +51,7 @@ step bundle exec rake test
 step bundle exec rake compat:check
 CHECK=1 step bundle exec rake compat:render
 step bundle exec ruby test/upstream/run.rb --strict
+step bundle exec ruby test/upstream/run.rb --suite execjs --strict
 [ "$mode" = default ] && passed
 
 msrv=$(taplo get -f tools/versions.toml toolchains.msrv)

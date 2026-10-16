@@ -5,13 +5,14 @@ description: Use when running mini_racer's own test suite against mini_racer_rs,
 
 # Parity Suite
 
-Parity means mini_racer 0.22.1's own tests pass unmodified. `vendor/mini_racer` is that release as a submodule and is never edited. `test/upstream/run.rb` runs its suite against this gem (or, with `--reference`, against the real mini_racer from `tools/reference`) and compares every result with the ledger.
+Parity means mini_racer 0.22.1's own tests pass unmodified. `vendor/mini_racer` is that release as a submodule and is never edited. `test/upstream/run.rb` runs its suite against this gem (or, with `--reference`, against the real mini_racer from `tools/reference`) and compares every result with the ledger. `--suite execjs` runs ExecJS 2.10.2's suite (`vendor/execjs`) the same way with `EXECJS_RUNTIME=MiniRacer`, against `test/upstream/execjs.status.toml`; its failures belong to milestone M8.
 
 ## Quick reference
 
 | Task | Command |
 |---|---|
 | Run the suite, strict | `bundle exec ruby test/upstream/run.rb --strict` |
+| ExecJS's suite, strict | `bundle exec ruby test/upstream/run.rb --suite execjs --strict` |
 | One test | `bundle exec ruby test/upstream/run.rb -n test_it_can_stop` |
 | One file | `bundle exec ruby test/upstream/run.rb --files test/function_test.rb` |
 | Real mini_racer (reference) | `cd tools/reference && BUNDLE_PATH=vendor/bundle bundle install` (a relative `BUNDLE_PATH` resolves against the Gemfile's directory), then add `--reference` |
@@ -37,9 +38,9 @@ An `xfail` or `crash` test that starts passing fails strict mode on purpose: upd
 
 ## Regenerating
 
-1. Add the `ledger-generate` label to the PR; `.github/workflows/ledger-generate.yml` runs the reference once and three candidate seeds on every leg.
+1. Add the `ledger-generate` label to the PR; `.github/workflows/ledger-generate.yml` runs the reference once and three candidate seeds of both suites on every leg.
 2. `gh run watch <run-id>`, then `gh run download <run-id> -D tmp/ledger-<sha>`.
-3. `bundle exec rake ledger:merge DIR=tmp/ledger-<sha>`. The ledger's `legs` list records every leg merged so far; a test's base status is the one most of those legs share, so a merge from fewer legs never changes what the others inherit. Tests and legs without results keep their statuses; milestones, causes, deviations and `timeout_s` survive. A test that passed and now fails is kept as `pass` with a warning unless `ALLOW_REGRESSIONS=1`; `PRUNE=1` removes tests and legs with no result.
+3. `bundle exec rake ledger:merge DIR=tmp/ledger-<sha>`, then again with `SUITE=execjs`. The ledger's `legs` list records every leg merged so far; a test's base status is the one most of those legs share, so a merge from fewer legs never changes what the others inherit. Tests and legs without results keep their statuses; milestones, causes, deviations and `timeout_s` survive. A test that passed and now fails is kept as `pass` with a warning unless `ALLOW_REGRESSIONS=1`; `PRUNE=1` removes tests and legs with no result.
 4. Review the diff, commit it, and remove the label.
 
 Locally, write runs into a fresh directory with `--out <dir>/<name>.jsonl` (one reference, several candidate seeds) and merge that directory; old runs in it would count as extra seeds.
