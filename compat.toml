@@ -18,6 +18,26 @@ status = "deviation"
 reason = "Both gems allow an attached callback to call `eval`, `call`, or `attach` on its own context, running the nested call inside the script that invoked the callback. mini_racer_rs accepts the call only from the fiber running the callback. A call from another fiber on the same thread, such as code inside `Enumerator#next`, raises `ThreadError` (`deadlock; lock already owned by another fiber belonging to the same thread`). mini_racer 0.22.1 accepts it: `Enumerator.new { |y| y << context.eval(\"1\") }.next` inside a callback returns `1`. A signal trap that calls the context while a callback waits on a nested `eval` gets `ThreadError` in mini_racer_rs; when rescued, the script completes. With mini_racer 0.22.1, the same program hangs until killed. mini_racer_rs refuses these calls because each nested call must finish before its callback replies, preventing out-of-order replies from being paired with the wrong callback."
 status = "deviation"
 
+[ids."behavior:fiber-scheduler@ruby"]
+reason = "mini_racer_rs parks only a non-blocking fiber waiting for a context under a fiber scheduler, so the thread's other fibers keep running during `Context.new`, `eval`, `call`, `attach`, `dispose`, and nested callback calls. mini_racer 0.22.1 releases the GVL and blocks the whole thread until JavaScript returns. Three 100 ms busy loops in separate contexts and fibers inside `Sync` finish in 100 ms with mini_racer_rs, with a 10 ms ticker ticking 9 times; mini_racer takes 300 ms, with 3 ticks. With mini_racer_rs, `task.with_timeout(0.05) { context.call(\"busy\", 300) }` raises `Async::TimeoutError` after 50 ms and terminates JavaScript; mini_racer returns `300` after 300 ms. In both gems the context stays usable afterward. Fibers sharing a context take turns in both gems. Without a scheduler or in a blocking fiber, mini_racer_rs blocks the thread while waiting, as mini_racer does. `Snapshot.new` also blocks the thread."
+status = "deviation"
+
+[ids."behavior:fork-from-callback@ruby"]
+reason = "With an attached callback that calls `fork` under the `:single_threaded` platform flag, the parent's `eval` returns `\"parent\"` in both gems, and its later `context.eval(\"1 + 1\")` returns `2`. mini_racer 0.22.1's child is still running five seconds later, when the test kills it. In mini_racer_rs's child, the `eval` that invokes the callback raises `MiniRacer::RuntimeError` with `single-threaded runner: Device or resource busy` when the callback returns, because the JavaScript thread stays with the parent. A call on the same context from inside the child callback, and every later call, raises the same error. A new child context works: `MiniRacer::Context.new.eval(\"6 * 7\")` returns `42`."
+status = "deviation"
+
+[ids."behavior:fork-quiesce-bound@ruby"]
+reason = "With the `:single_threaded` platform flag, mini_racer_rs waits up to 500 ms inside Ruby's `fork` or `Process.daemon` for every context's runner to become idle or parked. If another thread runs an operation V8 does not interrupt, such as `JSON.parse` of a large string, the child refuses every inherited context: calling an idle one raises `MiniRacer::RuntimeError` with `single-threaded runner: Device or resource busy`. New contexts created in the child work. mini_racer 0.22.1 does not wait for its runners. With `JSON.parse` of a 3,000,000-element array's JSON, its fork took 15 ms and its child's idle context returned `42`; mini_racer_rs took 523 ms and refused that context."
+status = "deviation"
+
+[ids."behavior:multi-threaded-fork@ruby"]
+reason = "In a child forked from a process using V8's default multi-threaded platform, mini_racer 0.22.1 hangs when an inherited context runs `context.eval(\"1 + 1\")`; the observed child was still waiting after 3 seconds. mini_racer_rs instead raises `MiniRacer::RuntimeError` at once with `single-threaded runner: Device or resource busy`, while the parent's contexts remain unaffected. The child inherits none of the context runner or V8 worker threads. A new `MiniRacer::Context` in the child can evaluate `eval(\"2\")` to `2`, but work requiring V8 worker threads may never finish. Contexts intended to keep working in a child should use `:single_threaded`."
+status = "deviation"
+
+[ids."behavior:native-fork@ruby"]
+reason = "With the `:single_threaded` platform flag, mini_racer_rs refuses every context inherited by a child of a fork that bypasses Ruby's `fork`, including idle contexts: calls raise `MiniRacer::RuntimeError` with `single-threaded runner: Device or resource busy`. In a libc `fork()` test through Fiddle, mini_racer 0.22.1's child returned `42` from an inherited idle context holding `var answer = 42`, while mini_racer_rs raised that error. In both gems, new child contexts and the parent's context work. Calling `dispose` on an inherited child context returns `nil`, after which calls raise `MiniRacer::ContextDisposedError`. mini_racer_rs cannot rule out an in-progress V8 state change without the runner wait used by Ruby's `fork`, `IO.popen(\"-\")`, and `Process.daemon`."
+status = "deviation"
+
 [ids."behavior:object-ids@ruby"]
 reason = "mini_racer_rs preserves repeated-object identity in both directions by numbering every object as V8 does, including dates, regular expressions, typed arrays, ArrayBuffers, wrapper objects, and errors. Serialized repeats refer back by number. From JavaScript to Ruby, `(() => { const d = new Date(0); const o = {}; return [d, d, o, o] })()` returns `[Time, Time, {}, {}]`, with each pair the same Ruby object. mini_racer 0.22.1 counts only decoded arrays, objects, maps, sets, and errors, so it returns `[Time, nil, {}, nil]`; a repeated error, including one that is its own cause, becomes `[]` instead of the same `MiniRacer::ScriptError`. From Ruby to JavaScript, mini_racer 0.22.1 counts only Arrays and Hashes, so `context.call(\"f\", time, hash, hash)` gives `f` a Date, an object, and the same Date. mini_racer_rs gives `f` the same object twice. For call arguments and callback results, it also sends a repeated `Time`, `DateTime`, object whose `to_time` returns a `Time`, or `MiniRacer::Binary` as one Date or Uint8Array, calling `to_time` once per object. Thus, with `same = (a, b) => a === b`, `context.call(\"same\", time, time)` returns `true`, while mini_racer returns `false`; distinct equal `Time` objects remain distinct in both."
 status = "deviation"
@@ -169,7 +189,7 @@ status = "done"
 status = "done"
 
 [ids."imethod:MiniRacer::Context#low_memory_notification"]
-status = "todo:M3"
+status = "done"
 
 [ids."imethod:MiniRacer::Context#perform_microtask_checkpoint@ruby"]
 status = "todo:M4"

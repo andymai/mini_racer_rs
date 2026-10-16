@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use crate::FlagError;
@@ -76,9 +77,17 @@ pub fn push_flag(name: &[u8], value: Option<&[u8]>) -> Result<(), FlagError> {
     Ok(())
 }
 
+// The mode once frozen, readable without the flags lock, which runner threads
+// must not take: a fork that does not wait for them could leave it held.
+static FROZEN_MODE: AtomicU8 = AtomicU8::new(0);
+
 #[must_use]
 pub fn mode() -> Mode {
-    flags().mode
+    match FROZEN_MODE.load(Ordering::Acquire) {
+        1 => Mode::MultiThreaded,
+        2 => Mode::SingleThreaded,
+        _ => flags().mode,
+    }
 }
 
 #[must_use]
@@ -100,6 +109,11 @@ pub fn stack_size_kb() -> Option<usize> {
 pub(crate) fn freeze() -> Vec<String> {
     let mut flags = flags();
     flags.frozen = true;
+    let frozen = match flags.mode {
+        Mode::MultiThreaded => 1,
+        Mode::SingleThreaded => 2,
+    };
+    FROZEN_MODE.store(frozen, Ordering::Release);
     flags.list.clone()
 }
 

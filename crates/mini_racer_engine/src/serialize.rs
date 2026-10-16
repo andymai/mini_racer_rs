@@ -55,6 +55,7 @@ const FILTER_SOURCE: &str = r#"
 pub type Tc<'a, 'b, 'c, 'i> = v8::PinnedRef<'a, v8::TryCatch<'b, 'c, v8::HandleScope<'i>>>;
 
 /// The context `mini_racer` copies uncloneable values in, and its filter.
+#[derive(Clone)]
 pub struct Filter {
     pub context: v8::Global<v8::Context>,
     function: v8::Global<v8::Function>,

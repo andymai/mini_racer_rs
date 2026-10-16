@@ -1,9 +1,10 @@
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use mini_racer_sync::{Channel, DispatchId, Protocol, TermCell, Terminator};
+use mini_racer_sync::{Channel, DispatchId, Protocol, RunnerPhase, TermCell, Terminator, lock};
 
 use crate::EngineError;
+use crate::notify::NotifyFd;
 
 pub struct Wire;
 
@@ -70,6 +71,9 @@ pub enum Request {
         request: Vec<u8>,
         depth: Depth,
     },
+    LowMemoryNotification {
+        depth: Depth,
+    },
     // Built on the runner of a context made for it, as mini_racer builds one
     // on a throwaway context: from `code` alone, or by warming `base` up.
     Snapshot {
@@ -114,4 +118,55 @@ pub struct ControlBlock {
     pub term: TermCell<IsolateTerminator>,
     pub config: ContextConfig,
     pub timer: Mutex<Timer>,
+    pub notify: NotifyFd,
+    pub phase: RunnerPhase,
+    pub isolate: OnceLock<v8::IsolateHandle>,
+    // The isolate a snapshot is being built in on this runner, if any.
+    pub building: Mutex<Option<v8::IsolateHandle>>,
+    // An idle single-threaded runner leaves its isolate here, its only owner
+    // then, so a forked child can hand it to a runner of its own.
+    pub custody: Mutex<Option<v8::SharedIsolate>>,
+}
+
+impl Drop for ControlBlock {
+    // An isolate is dropped only by a runner (I8). One still here was never
+    // taken back, as when its runner thread could not start or panicked.
+    fn drop(&mut self) {
+        let isolate = lock(&self.custody).take();
+        if let Some(isolate) = isolate {
+            #[expect(
+                clippy::mem_forget,
+                reason = "leaked rather than disposed off its runner"
+            )]
+            std::mem::forget(isolate);
+        }
+    }
+}
+
+impl ControlBlock {
+    /// Asks the runner to park for a pending fork, in JavaScript or in a
+    /// snapshot build, wherever V8 next checks for interrupts.
+    pub fn interrupt_for_fork(&self) {
+        if let Some(handle) = self.isolate.get() {
+            crate::sys::interrupt_for_fork(handle);
+        }
+        let building = lock(&self.building).clone();
+        if let Some(handle) = building {
+            crate::sys::interrupt_for_fork(&handle);
+        }
+    }
+
+    pub fn new(config: ContextConfig) -> Self {
+        Self {
+            channel: Channel::default(),
+            term: TermCell::default(),
+            config,
+            timer: Mutex::default(),
+            notify: NotifyFd::default(),
+            phase: RunnerPhase::default(),
+            isolate: OnceLock::new(),
+            building: Mutex::new(None),
+            custody: Mutex::new(None),
+        }
+    }
 }

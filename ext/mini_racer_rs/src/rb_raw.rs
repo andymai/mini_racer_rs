@@ -95,6 +95,15 @@ pub fn release_memory(bytes: usize) {
     unsafe { rb_sys::rb_gc_adjust_memory_usage(diff) };
 }
 
+/// Whether the current fiber has a scheduler that waits for it, so a wait can
+/// park the fiber instead of the thread.
+pub fn fiber_scheduler(_ruby: &Ruby) -> bool {
+    // SAFETY: the `&Ruby` argument proves this thread holds the GVL, and
+    // rb_fiber_scheduler_current only reads the current thread and fiber.
+    let scheduler = unsafe { rb_sys::rb_fiber_scheduler_current() };
+    scheduler != rb_sys::Qnil as rb_sys::VALUE
+}
+
 pub fn dbl2big(_ruby: &Ruby, n: f64) -> Value {
     // SAFETY: rb_dbl2big allocates a Bignum and requires the GVL, which the
     // `&Ruby` argument proves this thread holds.
@@ -180,6 +189,21 @@ pub fn ruby_type(_ruby: &Ruby, value: Value) -> RubyType {
 /// containers by; stable only while the object is pinned.
 pub fn identity(value: Value) -> u64 {
     value.as_raw()
+}
+
+/// `super(*values)`, from the method Ruby is running.
+pub fn call_super(_ruby: &Ruby, values: &[Value]) -> Result<Value, Error> {
+    let raw_values: Vec<rb_sys::VALUE> = values.iter().map(|value| value.as_raw()).collect();
+    let count = c_int::try_from(raw_values.len()).unwrap_or(c_int::MAX);
+    let raw = protect(|| {
+        // SAFETY: the `&Ruby` argument proves this thread holds the GVL, the
+        // caller is a method body Ruby called, `raw_values` holds `count`
+        // values the caller keeps alive on its stack, and `protect` catches
+        // anything super raises or throws.
+        unsafe { rb_sys::rb_call_super(count, raw_values.as_ptr()) }
+    })?;
+    // SAFETY: `raw` is the live value super returned.
+    Ok(unsafe { Value::from_raw(raw) })
 }
 
 /// `receiver.call(*args)`, with Ruby reading the arguments from `args`

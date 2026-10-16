@@ -5,9 +5,10 @@ use std::time::Duration;
 use loom::sync::Arc;
 use loom::sync::atomic::{AtomicBool, Ordering};
 use loom::thread;
+use mini_racer_sync::primitives::{Condvar, Mutex};
 use mini_racer_sync::{
-    Channel, ChannelError, DispatchKind, Halt, Interrupt, Nesting, Protocol, Side, TermCell,
-    TerminationCause, Terminator, ToRuby, ToV8,
+    Channel, ChannelError, DispatchKind, ForkGate, Halt, Interrupt, Nesting, Notifier, Phase,
+    Protocol, RunnerPhase, Side, TermCell, TerminationCause, Terminator, ToRuby, ToV8, lock, wait,
 };
 
 struct Numbers;
@@ -232,6 +233,99 @@ fn an_external_wake_ends_a_park() {
         channel.park(Side::Ruby, None);
         interrupter.join().expect("interrupter thread");
         assert!(!channel.ready(Side::Ruby));
+    });
+}
+
+// Stands in for the descriptor a fiber waits on: level-triggered, it stays
+// rung until drained, and only the channel's notifier rings it.
+#[derive(Default)]
+struct Doorbell {
+    rung: Mutex<bool>,
+    ring: Condvar,
+}
+
+impl Doorbell {
+    fn drain(&self) {
+        *lock(&self.rung) = false;
+    }
+
+    fn wait(&self) {
+        let mut rung = lock(&self.rung);
+        while !*rung {
+            rung = wait(&self.ring, rung);
+        }
+    }
+}
+
+struct Ring(Arc<Doorbell>);
+
+impl Notifier for Ring {
+    fn notify(&self) {
+        *lock(&self.0.rung) = true;
+        self.0.ring.notify_one();
+    }
+}
+
+// Model 6: a waiter that drains its descriptor, then waits on it with
+// `park_notified`, never sleeps through the response or a callback.
+#[test]
+fn a_waiter_woken_by_the_notifier_never_misses_its_turn() {
+    bounded(3, || {
+        let channel = Arc::new(Channel::<Numbers>::default());
+        let bell = Arc::new(Doorbell::default());
+        channel.set_notifier(Side::Ruby, Some(Box::new(Ring(Arc::clone(&bell)))));
+        let runner = Arc::clone(&channel);
+        let v8 = thread::spawn(move || {
+            let value = request(next_for_v8(&runner)).expect("a request");
+            runner.callback(value + 1).expect("open");
+            let value = reply(next_for_v8(&runner)).expect("a reply");
+            runner.respond(value + 1).expect("open");
+        });
+
+        channel.request(1).expect("open");
+        let next = || loop {
+            if let Some(message) = channel.recv_ruby().expect("open") {
+                return message;
+            }
+            bell.drain();
+            channel.park_notified(Side::Ruby, || bell.wait());
+        };
+        assert_eq!(callback(Ok(next())), Some(2));
+        channel.reply(3).expect("open");
+        assert_eq!(response(Ok(next())), Some(4));
+        v8.join().expect("runner thread");
+    });
+}
+
+// Model 7: a fork that finds no runner `Running` never overlaps a runner using
+// its isolate, whether the runner wakes just before the fork begins or just
+// after, until the fork ends.
+#[test]
+fn a_quiesced_fork_never_overlaps_a_runner_using_its_isolate() {
+    bounded(3, || {
+        let gate = Arc::new(ForkGate::default());
+        let phase = Arc::new(RunnerPhase::default());
+        let using = Arc::new(AtomicBool::new(false));
+        phase.set(Phase::Deposited);
+        let runner = {
+            let (gate, phase, using) = (Arc::clone(&gate), Arc::clone(&phase), Arc::clone(&using));
+            thread::spawn(move || {
+                gate.resume(&phase);
+                using.store(true, Ordering::SeqCst);
+                using.store(false, Ordering::SeqCst);
+                phase.set(Phase::Deposited);
+            })
+        };
+
+        gate.begin();
+        while phase.get() == Phase::Running {
+            thread::yield_now();
+        }
+        assert!(!using.load(Ordering::SeqCst));
+        thread::yield_now();
+        assert!(!using.load(Ordering::SeqCst));
+        gate.end();
+        runner.join().expect("runner thread");
     });
 }
 

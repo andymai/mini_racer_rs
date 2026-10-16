@@ -1,17 +1,17 @@
-use std::cell::RefCell;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use mini_racer_sync::{DispatchKind, Halt, Side, TerminationCause, ToV8};
+use mini_racer_sync::{DispatchId, DispatchKind, Halt, Phase, Side, TerminationCause, ToV8, lock};
 use v8::ValueDeserializerHelper;
 
 use crate::control::{CallbackReply, ControlBlock, Depth, IsolateTerminator, JsText, Request};
+use crate::process::fork::Generation;
+use crate::process::platform::{self, Mode};
 use crate::serialize::{self, Filter, Tc};
-use crate::snapshot;
 use crate::spin::spin_until;
 use crate::{EngineError, JsError, JsErrorKind};
+use crate::{snapshot, sys};
 
 // Spinning after each response catches a busy caller's next request without a
 // futex wake on either side; an idle context then parks.
@@ -28,19 +28,59 @@ impl Drop for Closing<'_> {
     }
 }
 
-// Kept in an isolate slot: the callback trampoline gets only the isolate.
+// Kept in an isolate slot: the callback trampoline gets only the isolate. A
+// shared isolate's slots must be Send, as any thread may lock it.
 struct Runtime {
     block: Arc<ControlBlock>,
+    generation: &'static Generation,
+    // Whether the runner holds its isolate only while serving a request.
+    released: bool,
     context: v8::Global<v8::Context>,
     filter: Filter,
     // The exception last thrown for a raising callback; mini_racer keeps one
     // per isolate and compares what escapes a dispatch against it.
-    raised: RefCell<Option<v8::Global<v8::Value>>>,
+    raised: Mutex<Option<v8::Global<v8::Value>>>,
 }
 
-pub fn run(block: &Arc<ControlBlock>, snapshot: Option<Vec<u8>>) {
+impl Runtime {
+    fn new(
+        block: &Arc<ControlBlock>,
+        generation: &'static Generation,
+        context: v8::Global<v8::Context>,
+        filter: Filter,
+    ) -> Self {
+        Self {
+            block: Arc::clone(block),
+            generation,
+            released: platform::mode() == Mode::SingleThreaded,
+            context,
+            filter,
+            raised: Mutex::default(),
+        }
+    }
+}
+
+/// How a runner gets its isolate: made fresh, optionally from a snapshot, or
+/// taken over in a forked child from an idle runner of the parent.
+pub enum Start {
+    Fresh(Option<Vec<u8>>),
+    /// The isolate waits in the new control block's custody.
+    Adopted,
+}
+
+pub fn run(block: &Arc<ControlBlock>, generation: &'static Generation, start: Start) {
     let closing = Closing(block);
-    let disposed = catch_unwind(AssertUnwindSafe(|| serve(block, snapshot))).unwrap_or_else(|_| {
+    let disposed = catch_unwind(AssertUnwindSafe(|| match start {
+        Start::Fresh(snapshot) => serve(block, generation, snapshot),
+        Start::Adopted => {
+            let isolate = lock(&block.custody).take();
+            isolate.map_or_else(
+                || refuse(block, "no isolate to take over"),
+                |isolate| adopt(block, generation, isolate),
+            )
+        }
+    }))
+    .unwrap_or_else(|_| {
         if block.channel.ready(Side::V8) {
             let _ = block
                 .channel
@@ -54,10 +94,36 @@ pub fn run(block: &Arc<ControlBlock>, snapshot: Option<Vec<u8>>) {
         let _ = block.channel.respond(Ok(Vec::new()));
     }
     drop(closing);
+    block.phase.set(Phase::Exited);
+}
+
+pub fn park_for_fork(isolate: &v8::Isolate) {
+    if let Some(runtime) = isolate.get_slot::<Arc<Runtime>>() {
+        runtime.generation.pause(&runtime.block);
+    }
+}
+
+fn refuse(block: &ControlBlock, message: &str) -> bool {
+    // Holding no isolate, it never keeps a fork waiting.
+    block.phase.set(Phase::Deposited);
+    if receive(block).is_some() {
+        let _ = block
+            .channel
+            .respond(Err(EngineError::Internal(message.to_owned())));
+    }
+    false
 }
 
 // Returns whether it stopped for an explicit dispose.
-fn serve(block: &Arc<ControlBlock>, snapshot: Option<Vec<u8>>) -> bool {
+fn serve(
+    block: &Arc<ControlBlock>,
+    generation: &'static Generation,
+    snapshot: Option<Vec<u8>>,
+) -> bool {
+    // No isolate is made while a fork waits for every runner to be idle.
+    if platform::mode() == Mode::SingleThreaded {
+        generation.resume(block);
+    }
     let from_snapshot = snapshot.is_some();
     let params = v8::CreateParams::default();
     let params = match snapshot {
@@ -70,71 +136,164 @@ fn serve(block: &Arc<ControlBlock>, snapshot: Option<Vec<u8>>) -> bool {
         serialize::contexts(scope, from_snapshot)
     };
     let Some((context, filter)) = contexts else {
-        if receive(block).is_some() {
-            let _ = block.channel.respond(Err(EngineError::Internal(
-                "context setup failed".to_owned(),
-            )));
-        }
-        return false;
+        drop(isolate);
+        return refuse(block, "context setup failed");
     };
-    let runtime = Rc::new(Runtime {
-        block: Arc::clone(block),
-        context,
-        filter,
-        raised: RefCell::default(),
-    });
-    isolate.set_slot(Rc::clone(&runtime));
+    let runtime = Arc::new(Runtime::new(block, generation, context, filter));
+    isolate.set_slot(Arc::clone(&runtime));
     // Installed only once the context exists, so nothing terminates its setup.
     block
         .term
         .install(IsolateTerminator(isolate.thread_safe_handle()));
-    let disposed = loop {
-        let request = match receive(block) {
-            Some(ToV8::Request(Request::Dispose)) => break true,
-            // The snapshot's own isolate is entered with none of this
-            // runner's scopes open.
-            // A build the caller abandoned before it began is not started; once
-            // begun it runs to the end, as nothing can terminate its isolate.
-            Some(ToV8::Request(Request::Snapshot { code, base, depth })) => {
-                let response = match depth {
-                    Depth::Outermost(dispatch) => {
-                        let built = if block.term.check(DispatchKind::Script).is_some() {
-                            Err(EngineError::Internal("halted without a cause".to_owned()))
-                        } else {
-                            snapshot::create(&code, base)
-                        };
-                        block
-                            .term
-                            .end(dispatch)
-                            .map_or(built, |halt| Err(halted(halt)))
-                    }
-                    Depth::Nested => Err(EngineError::Internal(
-                        "snapshot inside a callback".to_owned(),
-                    )),
-                };
-                if block.channel.respond(response).is_err() {
-                    break false;
-                }
-                continue;
-            }
-            Some(ToV8::Request(request)) => request,
-            // No callback is outstanding here, so there is nothing to reply to.
-            Some(ToV8::Reply(_)) => continue,
-            None => break false,
-        };
-        let response = {
-            v8::scope_with_context!(let scope, &mut isolate, &runtime.context);
-            handle(scope, &runtime, request)
-        };
-        if block.channel.respond(response).is_err() {
-            break false;
-        }
+    let Some(shared) = sys::share(isolate) else {
+        return refuse(block, "isolate could not be shared");
+    };
+    let _ = block.isolate.set(shared.thread_safe_handle());
+    serve_isolate(block, shared, runtime)
+}
+
+// The parent's runtime still names the parent's control block, so the child
+// builds its own around the same contexts.
+fn adopt(
+    block: &Arc<ControlBlock>,
+    generation: &'static Generation,
+    shared: v8::SharedIsolate,
+) -> bool {
+    generation.resume(block);
+    let inherited = shared.lock().get_slot::<Arc<Runtime>>().cloned();
+    let Some(inherited) = inherited else {
+        // Disposed here, before the runner counts as idle to a fork.
+        drop(shared);
+        return refuse(block, "inherited isolate has no context");
+    };
+    let runtime = {
+        let mut locker = shared.lock();
+        let runtime = Arc::new(Runtime::new(
+            block,
+            generation,
+            inherited.context.clone(),
+            inherited.filter.clone(),
+        ));
+        locker.set_slot(Arc::clone(&runtime));
+        runtime
+    };
+    block
+        .term
+        .install(IsolateTerminator(shared.thread_safe_handle()));
+    let _ = block.isolate.set(shared.thread_safe_handle());
+    serve_isolate(block, shared, runtime)
+}
+
+fn serve_isolate(block: &ControlBlock, shared: v8::SharedIsolate, runtime: Arc<Runtime>) -> bool {
+    let (disposed, shared) = if runtime.released {
+        serve_released(block, shared, &runtime)
+    } else {
+        (serve_held(block, &shared, &runtime), Some(shared))
     };
     block.term.uninstall();
-    drop(isolate.remove_slot::<Rc<Runtime>>());
-    drop(runtime);
-    drop(isolate);
+    // Its handles are released under the lock, before the isolate goes.
+    if let Some(shared) = shared {
+        let mut isolate = shared.lock();
+        drop(isolate.remove_slot::<Arc<Runtime>>());
+        drop(runtime);
+        drop(isolate);
+        drop(shared);
+    }
     disposed
+}
+
+enum Served {
+    Next,
+    Stop { disposed: bool },
+}
+
+fn serve_held(block: &ControlBlock, shared: &v8::SharedIsolate, runtime: &Arc<Runtime>) -> bool {
+    let mut isolate = shared.lock();
+    loop {
+        if let Served::Stop { disposed } = serve_one(&mut isolate, block, runtime, receive(block)) {
+            return disposed;
+        }
+    }
+}
+
+// Between requests a single-threaded runner leaves its isolate unlocked in the
+// control block, as mini_racer's holds its isolate only for a request.
+fn serve_released(
+    block: &ControlBlock,
+    shared: v8::SharedIsolate,
+    runtime: &Arc<Runtime>,
+) -> (bool, Option<v8::SharedIsolate>) {
+    let mut held = Some(shared);
+    loop {
+        *lock(&block.custody) = held.take();
+        block.phase.set(Phase::Deposited);
+        let message = receive(block);
+        runtime.generation.resume(block);
+        let Some(shared) = lock(&block.custody).take() else {
+            return (false, None);
+        };
+        let served = serve_one(&mut shared.lock(), block, runtime, message);
+        held = Some(shared);
+        if let Served::Stop { disposed } = served {
+            return (disposed, held);
+        }
+    }
+}
+
+fn serve_one(
+    isolate: &mut v8::Isolate,
+    block: &ControlBlock,
+    runtime: &Arc<Runtime>,
+    message: Option<ToV8<crate::control::Wire>>,
+) -> Served {
+    let request = match message {
+        Some(ToV8::Request(Request::Dispose)) => return Served::Stop { disposed: true },
+        // The snapshot's own isolate is entered with none of this
+        // runner's scopes open.
+        // A build the caller abandoned before it began is not started; once
+        // begun it runs to the end, as nothing can terminate its isolate.
+        Some(ToV8::Request(Request::Snapshot { code, base, depth })) => {
+            let response = match depth {
+                Depth::Outermost(dispatch) => {
+                    let built = if block.term.check(DispatchKind::Script).is_some() {
+                        Err(EngineError::Internal("halted without a cause".to_owned()))
+                    } else {
+                        let built = snapshot::create(&code, base, |isolate| {
+                            isolate.set_slot(Arc::clone(runtime));
+                            *lock(&block.building) = Some(isolate.thread_safe_handle());
+                        });
+                        lock(&block.building).take();
+                        built
+                    };
+                    block
+                        .term
+                        .end(dispatch)
+                        .map_or(built, |halt| Err(halted(halt)))
+                }
+                Depth::Nested => Err(EngineError::Internal(
+                    "snapshot inside a callback".to_owned(),
+                )),
+            };
+            return respond(block, response);
+        }
+        Some(ToV8::Request(request)) => request,
+        // No callback is outstanding here, so there is nothing to reply to.
+        Some(ToV8::Reply(_)) => return Served::Next,
+        None => return Served::Stop { disposed: false },
+    };
+    let response = {
+        v8::scope_with_context!(let scope, isolate, &runtime.context);
+        handle(scope, runtime, request)
+    };
+    respond(block, response)
+}
+
+fn respond(block: &ControlBlock, response: Result<Vec<u8>, EngineError>) -> Served {
+    if block.channel.respond(response).is_ok() {
+        Served::Next
+    } else {
+        Served::Stop { disposed: false }
+    }
 }
 
 fn receive(block: &ControlBlock) -> Option<ToV8<crate::control::Wire>> {
@@ -155,10 +314,7 @@ fn handle(
 ) -> Result<Vec<u8>, EngineError> {
     match request {
         Request::Init { depth } => match depth {
-            Depth::Outermost(dispatch) => match runtime.block.term.end(dispatch) {
-                Some(_) => Err(EngineError::Disposed),
-                None => Ok(Vec::new()),
-            },
+            Depth::Outermost(dispatch) => ended(runtime, dispatch),
             Depth::Nested => Err(EngineError::Internal("setup inside a callback".to_owned())),
         },
         Request::Eval {
@@ -178,6 +334,16 @@ fn handle(
                 attach(tc, &request)
             })
         }
+        // A collection for a context about to be torn down is wasted.
+        Request::LowMemoryNotification { depth } => {
+            if !runtime.block.term.is_disposing() {
+                scope.low_memory_notification();
+            }
+            match depth {
+                Depth::Outermost(dispatch) => ended(runtime, dispatch),
+                Depth::Nested => Ok(Vec::new()),
+            }
+        }
         // The extension refuses a dispose from inside a callback before it
         // gets here.
         Request::Dispose => Err(EngineError::DisposeBusy),
@@ -185,6 +351,14 @@ fn handle(
         Request::Snapshot { .. } => Err(EngineError::Internal(
             "snapshot inside a callback".to_owned(),
         )),
+    }
+}
+
+// A maintenance dispatch reports only whether a dispose caught it.
+fn ended(runtime: &Runtime, dispatch: DispatchId) -> Result<Vec<u8>, EngineError> {
+    match runtime.block.term.end(dispatch) {
+        Some(_) => Err(EngineError::Disposed),
+        None => Ok(Vec::new()),
     }
 }
 
@@ -233,9 +407,7 @@ fn escaped(tc: &Tc<'_, '_, '_, '_>, runtime: &Runtime) -> bool {
     let Some(exception) = tc.exception() else {
         return false;
     };
-    runtime
-        .raised
-        .borrow()
+    lock(&runtime.raised)
         .as_ref()
         .is_some_and(|raised| v8::Local::new(tc, raised).same_value(exception))
 }
@@ -379,7 +551,7 @@ fn trampoline<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     rv: v8::ReturnValue<'s, v8::Value>,
 ) {
-    let Some(runtime) = scope.get_slot::<Rc<Runtime>>().cloned() else {
+    let Some(runtime) = scope.get_slot::<Arc<Runtime>>().cloned() else {
         return;
     };
     let outcome = catch_unwind(AssertUnwindSafe(|| callback(scope, &runtime, &args, rv)));
@@ -422,7 +594,15 @@ fn callback<'s>(
         return;
     }
     loop {
-        let reply = match receive(&runtime.block) {
+        // Waiting for Ruby, V8 is still: a fork need not wait for this.
+        if runtime.released {
+            runtime.block.phase.set(Phase::ParkedInChannel);
+        }
+        let message = receive(&runtime.block);
+        if runtime.released {
+            runtime.generation.resume(&runtime.block);
+        }
+        let reply = match message {
             Some(ToV8::Reply(reply)) => reply,
             Some(ToV8::Request(request)) => {
                 // Each nested request gets its own handle scope, so its values
@@ -472,9 +652,7 @@ fn callback<'s>(
             }
             CallbackReply::Raised(message) => {
                 let exception = error(scope, &message);
-                runtime
-                    .raised
-                    .replace(Some(v8::Global::new(scope, exception)));
+                *lock(&runtime.raised) = Some(v8::Global::new(scope, exception));
                 scope.throw_exception(exception);
             }
         }

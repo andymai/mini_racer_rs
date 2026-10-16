@@ -12,7 +12,7 @@ A release is a merged release-please PR. Merging it tags `vX.Y.Z` and publishes 
 | Task | How |
 |---|---|
 | Dry run of the whole pipeline | `gh workflow run Release --ref main`, then `gh run watch <id>`; gems land on the run as `release-<version>` |
-| Test a pipeline change | its pull request runs `.github/workflows/release.yml` as a dry run when it touches that workflow, the setup action, the gemspec, the loader, packaging, `release/`, the scripts the release runs or `tools/versions.toml` |
+| Test a pipeline change | its pull request runs `.github/workflows/release.yml` as a dry run when it touches that workflow, the setup action, the gemspec, the loader, packaging, `release/`, the scripts the release runs, the V8 archive pins, the export allowlists or `tools/versions.toml` |
 | Gem sizes | the Checksums job's summary, or `scripts/check-gem-sizes.sh <dir>` |
 | Hold releases | any `RELEASE_HOLD` other than `false`, unset included: release-please keeps its PR current but never merges it |
 | Release | `gh variable set RELEASE_HOLD --body false`, then `gh workflow run "Release Please"`; approve the `rubygems` deployment when the publish job waits |

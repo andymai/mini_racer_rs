@@ -13,6 +13,8 @@ on:
     paths:
       - .github/actions/setup/**
       - .github/workflows/release.yml
+      - ext/mini_racer_rs/exports.allow.*
+      - ext/mini_racer_rs/v8-archives.sha256
       - lib/mini_racer_rs.rb
       - mini_racer_rs.gemspec
       - rakelib/package.rake
