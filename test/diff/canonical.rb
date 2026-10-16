@@ -6,19 +6,34 @@
 module DiffCanonical
   module_function
 
-  def encode(value, ids = {}.compare_by_identity)
+  # Containers and errors are numbered for refs; a String or Time met a second
+  # time as the same object is marked again, without a number, so container
+  # numbering stays what DiffGenerate writes.
+  Seen = Struct.new(:ids, :objects)
+
+  def encode(value, seen = Seen.new({}.compare_by_identity, {}.compare_by_identity))
     case value
     when nil then ["nil"]
     when true, false then ["bool", value]
     when Integer then ["int", value.to_s]
     when Float then ["float", value.nan? ? "nan" : [value].pack("G").unpack1("H*")]
-    when String then string(value)
+    when String then again(value, seen) { string(value) }
     when Symbol then ["symbol", string(value.to_s)]
-    when Time then ["time", value.to_i.to_s, value.nsec, value.utc_offset, value.utc?]
-    when Array, Hash then container(value, ids)
-    when Exception then exception(value, ids)
+    when Time then again(value, seen) { ["time", value.to_i.to_s, value.nsec, value.utc_offset, value.utc?] }
+    when Array, Hash then container(value, seen)
+    when Exception then exception(value, seen)
     else other(value)
     end
+  end
+
+  # Frozen strings are skipped: Hash keys are interned and shared by design.
+  def again(value, seen)
+    tagged = yield
+    return tagged if value.frozen?
+    return ["again", tagged] if seen.objects.key?(value)
+
+    seen.objects[value] = true
+    tagged
   end
 
   def failure(error)
@@ -30,25 +45,27 @@ module DiffCanonical
     ["string", value.encoding.name, text ? "text" : "hex", text ? value : value.b.unpack1("H*")]
   end
 
-  def container(value, ids)
+  def container(value, seen)
+    ids = seen.ids
     return ["ref", ids[value]] if ids.key?(value)
 
     ids[value] = ids.size
     if value.is_a?(Array)
-      ["array", value.map { |item| encode(item, ids) }]
+      ["array", value.map { |item| encode(item, seen) }]
     else
-      ["hash", value.map { |key, item| [encode(key, ids), encode(item, ids)] }]
+      ["hash", value.map { |key, item| [encode(key, seen), encode(item, seen)] }]
     end
   end
 
   # A returned JavaScript error, with its JavaScript frames and its cause, which
   # can be the error itself.
-  def exception(value, ids)
+  def exception(value, seen)
+    ids = seen.ids
     return ["ref", ids[value]] if ids.key?(value)
 
     ids[value] = ids.size
     frames = Array(value.backtrace).map { |frame| string(frame) }
-    ["exception", value.class.name, string(value.message), frames, encode(value.cause, ids)]
+    ["exception", value.class.name, string(value.message), frames, encode(value.cause, seen)]
   end
 
   def other(value)

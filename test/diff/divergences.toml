@@ -21,19 +21,25 @@ expected = '^\["crash","signal 6"\]$'
 id = "uncloneable-after-filter"
 
 [[divergences]]
-actual = '\["string","ASCII-8BIT","hex","[0-9a-f]*"\]'
+actual = '^\["string","ASCII-8BIT","hex","0000000000000000"\]$'
 compat = "behavior:typed-array-offsets@ruby"
 expected = '^\["raise","MiniRacer::RuntimeError",\["string","ASCII-8BIT","hex","626164207479706564206172726179"\]\]$'
 id = "view-at-an-offset"
 
 [[divergences]]
-actual = '\["int","-?\d+"\]'
+actual = '^\["array",\[\["int","1"\],\["int","-5"\]\]\]$'
 compat = "behavior:bigint-objects@ruby"
 expected = '^\["raise","MiniRacer::RuntimeError",\["string","ASCII-8BIT","hex","626164207461673a207a"\]\]$'
 id = "bigint-object"
 
 [[divergences]]
-actual = '^\["(?!raise)'
+actual = '^\["array",\[(?:\["int","1"\],)?\["string","UTF-8","text","東"\]\]\]$'
 compat = "behavior:padded-two-byte-text@ruby"
 expected = '^\["raise","MiniRacer::RuntimeError",\["string","ASCII-8BIT","hex","(?:62616420726567657870|62616420737472696e67206f626a656374)"\]\]$'
 id = "padded-two-byte-text"
+
+[[divergences]]
+actual = '^\["array",\[\["int","1"\],\["int","1"\]\]\]$'
+compat = "behavior:object-ids@ruby"
+expected = '^\["array",\[\["int","1"\],\["nil"\]\]\]$'
+id = "reference-to-a-wrapper-object"

@@ -33,25 +33,21 @@ class DiffLedgerTest < Minitest::Test
     refute_equal DiffLedger.signature([%w[int 1]], bad_tag.call("0x41")), DiffLedger.signature(REF, OURS)
   end
 
-  def test_a_lost_reference_is_accepted_only_where_the_candidate_repeats_a_value
+  def test_a_lost_reference_is_accepted_only_where_the_candidate_returns_the_same_object
     lost = { "id" => "lost", "compat" => "behavior:object-ids@ruby", "structure" => "lost-reference" }
     time = ["time", "0", 0, 0, false]
     text = %w[string UTF-8 text a]
-
-    assert_equal "accepted:lost",
-                 DiffLedger.classify([["array", [time, ["nil"], ["hash", []], ["nil"]]]],
-                                     [["array", [time, time, ["hash", []], ["ref", 1]]]], [lost],)
-    assert_equal "accepted:lost",
-                 DiffLedger.classify([["array", [["hash", [[text, time]]], ["nil"]]]],
-                                     [["array", [["hash", [[text, time]]], time]]], [lost],)
-    assert_equal "diverged",
-                 DiffLedger.classify([["array", [["nil"], time, %w[int 5]]]],
-                                     [["array", [["nil"], time, %w[int 6]]]], [lost],)
-    assert_equal "diverged", DiffLedger.classify([["array", [text, ["nil"]]]], [["array", [text, %w[int 1]]]], [lost])
     error = ["exception", "MiniRacer::ScriptError", text, [], ["nil"]]
 
     assert_equal "accepted:lost",
+                 DiffLedger.classify([["array", [time, ["nil"], ["hash", []], ["nil"]]]],
+                                     [["array", [time, ["again", time], ["hash", []], ["ref", 1]]]], [lost],)
+    assert_equal "accepted:lost",
                  DiffLedger.classify([["array", [error, ["array", []]]]], [["array", [error, ["ref", 1]]]], [lost])
+    assert_equal "diverged", DiffLedger.classify([["array", [%w[int 5], ["nil"]]]],
+                                                 [["array", [%w[int 5], %w[int 5]]]], [lost],)
+    assert_equal "diverged", DiffLedger.classify([["array", [["nil"], time, %w[int 5]]]],
+                                                 [["array", [["nil"], time, %w[int 6]]]], [lost],)
   end
 
   def test_an_accepted_divergence_must_cite_a_compat_deviation
