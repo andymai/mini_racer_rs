@@ -65,6 +65,31 @@ class InterruptTest < Minitest::Test
     assert_equal "context dispose: #{Errno::EBUSY.new.message}\n42\n", out
   end
 
+  def test_dispose_from_a_trap_waits_for_an_eval_on_another_thread
+    out, err, status = run_ruby(<<~RUBY)
+      require "mini_racer"
+      context = MiniRacer::Context.new
+      disposed = false
+      Signal.trap("USR1") do
+        context.dispose
+        disposed = true
+      end
+      running = Thread.new do
+        context.eval("while (true) {}")
+      rescue MiniRacer::ScriptTerminatedError
+        puts "eval terminated"
+      end
+      sleep 0.1
+      Process.kill("USR1", Process.pid)
+      running.join(5) or abort "the eval thread did not finish"
+      sleep 0.1 until disposed
+      puts "disposed"
+    RUBY
+
+    assert_predicate status, :success?, err
+    assert_equal "eval terminated\ndisposed\n", out
+  end
+
   def test_forked_child_reports_an_inherited_context
     skip "fork is unavailable" unless Process.respond_to?(:fork)
 

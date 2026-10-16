@@ -19,6 +19,7 @@ use crate::{decode, errors, export, rb_raw};
 // What Ruby's GC is told a live context holds outside its heap: roughly an
 // isolate and its runner thread.
 const ISOLATE_BYTES: usize = 2 << 20;
+const POLL: std::time::Duration = std::time::Duration::from_millis(1);
 
 #[derive(Default, TypedData)]
 #[magnus(class = "MiniRacer::Context", free_immediately, size, mark)]
@@ -179,9 +180,22 @@ impl Context {
         }
         handle.begin_dispose();
         let mut interrupted = None;
+        let mut polling = false;
         while !mutex.trylock() {
+            if polling {
+                // Released between attempts, so the thread holding the lock
+                // can finish its terminated eval and unlock.
+                if rb_raw::nogvl(ruby, || std::thread::sleep(POLL), &|| {}).is_none()
+                    && let Err(error) = rb_raw::check_ints(ruby)
+                {
+                    interrupted.get_or_insert(error);
+                }
+                continue;
+            }
             match rb_raw::mutex_lock(ruby, mutex) {
                 Ok(()) => break,
+                // Mutex#lock refuses to wait inside a signal trap.
+                Err(error) if error.is_kind_of(ruby.exception_thread_error()) => polling = true,
                 Err(error) => {
                     interrupted.get_or_insert(error);
                 }
