@@ -1,0 +1,3 @@
+# The largest gem of release run 38981078177 (x86_64-linux-gnu, 65,608,192
+# bytes) plus 15%, held to the 75 MB ceiling in scripts/check-gem-sizes.sh.
+max_bytes = 75000000
