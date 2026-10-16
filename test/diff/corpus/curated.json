@@ -1,0 +1,173 @@
+[
+  {
+    "id": "curated-deep-nesting",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "(() => { let a = []; for (let i = 0; i < 120; i++) a = [a]; return a; })()"
+      }
+    ]
+  },
+  {
+    "id": "curated-lone-surrogate-key",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "({'\\ud800': 1, '\\udc00x': 2})"
+      }
+    ]
+  },
+  {
+    "id": "curated-invalid-date",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "new Date(NaN)"
+      }
+    ]
+  },
+  {
+    "id": "curated-parse-error",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "1 +"
+      }
+    ]
+  },
+  {
+    "id": "curated-thrown-error",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "throw new Error('boom')"
+      }
+    ]
+  },
+  {
+    "id": "curated-thrown-primitive",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "throw 1"
+      }
+    ]
+  },
+  {
+    "id": "curated-error-with-cause",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "new Error('outer', { cause: new Error('inner') })"
+      }
+    ]
+  },
+  {
+    "id": "curated-shared-across-keys",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "(() => { const s = [1]; return { a: s, b: { c: s } }; })()"
+      }
+    ]
+  },
+  {
+    "id": "curated-cyclic",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "(() => { const a = []; a.push(a); return a; })()"
+      }
+    ]
+  },
+  {
+    "id": "curated-large-array",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "Array.from({ length: 1000 }, (_, i) => i * 1.5)"
+      }
+    ]
+  },
+  {
+    "id": "curated-map-with-object-keys",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "new Map([[{}, 1], [[1], 2]])"
+      }
+    ]
+  },
+  {
+    "id": "curated-proxy",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "new Proxy({ a: 1 }, {})"
+      }
+    ]
+  },
+  {
+    "id": "curated-global-state-across-steps",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "globalThis.counter = 0; globalThis.bump = () => ++counter",
+        "setup": true
+      },
+      {
+        "op": "eval",
+        "source": "bump(); bump()"
+      },
+      {
+        "op": "eval",
+        "source": "counter"
+      }
+    ]
+  },
+  {
+    "id": "curated-call-missing-function",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "call",
+        "path": "nope",
+        "args": []
+      }
+    ]
+  },
+  {
+    "id": "curated-call-nested-path",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "globalThis.a = { b: { c: (x) => x * 2 } }",
+        "setup": true
+      },
+      {
+        "op": "call",
+        "path": "a.b.c",
+        "args": [
+          [
+            "int",
+            "21"
+          ]
+        ]
+      }
+    ]
+  }
+]

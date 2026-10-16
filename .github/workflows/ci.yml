@@ -390,6 +390,10 @@ jobs:
       - name: Compatibility surface against the real mini_racer
         if: matrix.os == 'ubuntu-24.04' && matrix.ruby == '3.4'
         run: bundle exec rake compat:verify
+      # The second copy of the real gem must agree with the first, or the harness itself is unsound.
+      - name: Differential run against the real mini_racer
+        if: matrix.os == 'ubuntu-24.04' && matrix.ruby == '3.4'
+        run: bundle exec ruby test/diff/run.rb --twin --strict
       # mini_racer's own suite, unmodified; every result must match the ledger.
       - name: Upstream suite (strict)
         run: bundle exec ruby test/upstream/run.rb --strict --seed "${{ github.run_number }}"
@@ -401,7 +405,9 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: upstream-${{ matrix.os }}-${{ matrix.ruby }}
-          path: tmp/upstream
+          path: |
+            tmp/upstream
+            tmp/diff
           retention-days: 7
       # S1: the source gem installs into an empty GEM_HOME and loads. The setup
       # action's pre-fetched V8 variables are dropped so extconf's pin is what runs.

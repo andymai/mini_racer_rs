@@ -69,6 +69,8 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | Per-test parity ledger | `test/upstream/mini_racer.status.toml`, `test/upstream/milestones.toml` |
 | Ledger generation | `.github/workflows/ledger-generate.yml`, `rakelib/ledger.rake`, `test/upstream/milestone_rules.rb` |
 | Upstream source (never edited) | `vendor/mini_racer` (v0.22.1), `vendor/execjs` (v2.10.2) |
+| Differential run against the real gem | `test/diff/run.rb`, `test/diff/worker.rb`, `test/diff/canonical.rb`, `test/diff/generate.rb`, `test/diff/shrink.rb`, `test/diff/ledger.rb` |
+| Differential ledgers and corpus | `test/diff/candidate.status.toml`, `test/diff/divergences.toml`, `test/diff/corpus/` |
 | Vendored TruffleRuby backend | `lib/mini_racer/truffleruby.rb`, `lib/mini_racer/shared.rb` |
 | Public surface status per id, deviation reasons | `compat.toml`, `compat/surface.json` |
 | Compat reflection, extraction, check and rendering | `tools/compat/`, `rakelib/compat.rake` |
@@ -94,6 +96,7 @@ bundle exec ruby test/upstream/run.rb --strict   # mini_racer's own suite agains
 bundle exec rake compat:check      # compat.toml against the reference surface and this gem
 bundle exec rake compat:render     # regenerate everything compat.toml generates
 bundle exec rake compat:verify     # compat:check plus a fresh reflection of the real gem (needs tools/reference)
+bundle exec ruby test/diff/run.rb --twin --strict   # the real gem and this one on the same values (needs tools/reference)
 ```
 
 ## Which tests to run
@@ -101,7 +104,7 @@ bundle exec rake compat:verify     # compat:check plus a fresh reflection of the
 - `crates/mini_racer_wire`: `cargo nextest run -p mini_racer_wire`, then `scripts/fuzz-smoke.sh 20`.
 - `crates/mini_racer_sync`: `cargo nextest run -p mini_racer_sync`, then the loom command above.
 - `crates/mini_racer_engine`: `cargo nextest run -p mini_racer_engine`. Flag-dependent assertions live in `crates/mini_racer_engine/tests/flags.rs`, one test per process.
-- `ext/` or `lib/`: `bundle exec rake test`, then `scripts/check-exports.sh`, then `bundle exec ruby test/upstream/run.rb --strict`, then `bundle exec rake compat:check`.
+- `ext/` or `lib/`: `bundle exec rake test`, then `scripts/check-exports.sh`, then `bundle exec ruby test/upstream/run.rb --strict`, then `bundle exec ruby test/diff/run.rb --strict`, then `bundle exec rake compat:check`.
 - `compat.toml`: `bundle exec rake compat:render`, then `bundle exec rake compat:check`.
 - `scripts/`, `layers.toml`, any `Cargo.toml`: `scripts/check-boundaries.sh`, `scripts/test-boundaries.sh` and `scripts/check-deny.sh`.
 - `.github/`: `scripts/check-action-pins.sh`.
@@ -122,3 +125,4 @@ bundle exec rake compat:verify     # compat:check plus a fresh reflection of the
 - In a forked child, contexts inherited from the parent raise `MiniRacer::RuntimeError` (`single-threaded runner: ...`).
 - A `compat.toml` status describes CRuby. Implementing a planned method without marking it `done` fails `compat:check` with `TODO_BUT_IMPLEMENTED`; a planned method that exists before what it calls works (`write_heap_snapshot`) lists that in `depends_on`.
 - `rake` needs the lint group installed; without it (the TruffleRuby CI job), run `tools/compat/reflect.rb` and `tools/compat/check.rb` directly.
+- mini_racer 0.22.1 aborts the whole process (signal 6) on some values, such as a `Map` with a function key; the differential run records that as a `crash` outcome, and worker stderr is in `tmp/diff/<role>-worker.log`.

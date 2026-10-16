@@ -69,4 +69,17 @@ Locally, write runs into a fresh directory with `--out <dir>/<name>.jsonl` (one 
 
 `compat:check` failures: `MISSING` (an id has no entry), `STALE` (an entry for an id that left the surface), `MALFORMED`, `UNKNOWN_MILESTONE`, `CLAIMED_DONE_BUT_ABSENT`, `TODO_BUT_IMPLEMENTED` (mark it done), `DEVIATION_BUT_PRESENT`, `EXTRA_SURFACE` (this gem exposes something mini_racer does not), `UNKNOWN_DEVIATION` (an upstream ledger cites a deviation compat.toml lacks), `SURFACE_DRIFT` (`compat:verify` only: the real gem and compat/surface.json disagree).
 
+## Differential run
+
+`test/diff/run.rb` sends the same cases to the real mini_racer 0.22.1 and to this gem, each in its own worker process, and compares the outcomes in a canonical form that keeps type, encoding, float bits and which containers are the same object. Cases: seeded JS values (`--js`, evaluated), seeded Ruby values (`--ruby`, passed through `Context#call` and returned), and `test/diff/corpus/*.json`.
+
+| Task | Command |
+|---|---|
+| Check this gem against the ledger | `bundle exec ruby test/diff/run.rb --strict` |
+| Also prove the harness is deterministic | add `--twin`: a second copy of the real gem must agree with the first on every case |
+| Record outcomes after a change | `bundle exec ruby test/diff/run.rb --write-ledger` (a new divergence becomes `xfail:S3`; existing milestones stay) |
+| Minimize new divergences | `bundle exec ruby test/diff/run.rb --shrink` (writes `test/diff/corpus/min-<id>.json`) |
+
+Each worker first reports the gem it loaded, so a broken reference bundle aborts the run instead of matching itself. `test/diff/candidate.status.toml` holds `same`, `accepted:<divergence>`, `xfail:<milestone>` (diverges) or `crash:<milestone>` (the candidate crashes or hangs) per case. An accepted divergence lives in `test/diff/divergences.toml`, matches one step, and must name a `compat.toml` deviation. Results and worker logs land in `tmp/diff/`.
+
 Details: [reference.md](reference.md).

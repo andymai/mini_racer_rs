@@ -1,0 +1,9 @@
+# Accepted differences between mini_racer 0.22.1 and mini_racer_rs in the
+# differential run. Each one names the compat.toml deviation it falls under and
+# matches one step's reference and candidate outcomes by regex over their JSON:
+#
+# [[divergences]]
+# id = "kebab-case-name"
+# compat = "behavior:v8-version@ruby"
+# expected = "regex over the reference outcome of the step"
+# actual = "regex over the candidate outcome of the step"
