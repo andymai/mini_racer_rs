@@ -52,6 +52,8 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | Wire decoding and text transcoding | `crates/mini_racer_wire/src/decode.rs`, `crates/mini_racer_wire/src/text.rs` |
 | Wire fuzz targets | `crates/mini_racer_wire/fuzz/fuzz_targets/`, `scripts/fuzz-smoke.sh` |
 | Runner-to-caller result handoff, mutex poison policy | `crates/mini_racer_sync/src/handoff.rs`, `crates/mini_racer_sync/src/lock.rs` |
+| Turn-taking channel between a Ruby thread and a runner, parking | `crates/mini_racer_sync/src/channel.rs`, `crates/mini_racer_sync/src/parker.rs` |
+| Termination causes, stop consumption, timeout scoping | `crates/mini_racer_sync/src/termination.rs` |
 | std or loom primitives for protocol code | `crates/mini_racer_sync/src/primitives.rs` |
 | Loom models | `crates/mini_racer_sync/tests/loom.rs` |
 | `MiniRacer::Context` methods | `ext/mini_racer_rs/src/context.rs` |

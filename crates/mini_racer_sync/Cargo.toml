@@ -8,6 +8,9 @@ repository.workspace = true
 rust-version.workspace = true
 version.workspace = true
 
+[dependencies]
+thiserror.workspace = true
+
 [target.'cfg(loom)'.dependencies]
 loom.workspace = true
 
