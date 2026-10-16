@@ -141,6 +141,30 @@ jobs:
       - run: cargo audit
       - run: cargo audit -f crates/mini_racer_wire/fuzz/Cargo.lock
 
+  # Runs whatever changed: the notices file itself is markdown, which the
+  # changes filter treats as docs.
+  notices:
+    name: Third-Party Notices
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Every target's archive, not just this runner's, so the scan sees what
+      # each native gem links.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/mini_racer_rs/v8
+          key: v8-all-${{ hashFiles('ext/mini_racer_rs/v8-archives.sha256') }}
+      - uses: ./.github/actions/setup
+        with:
+          v8: "false"
+          tools: cargo-about
+      - run: scripts/update-notices.sh --check
+
   boundaries:
     name: Boundaries
     runs-on: ubuntu-24.04
@@ -332,7 +356,8 @@ jobs:
         run: |
           files=$(tar -xOf tmp/mini_racer_rs.gem data.tar.gz | tar -tz)
           for required in Cargo.toml Cargo.lock ext/mini_racer_rs/extconf.rb ext/mini_racer_rs/v8-archives.sha256 \
-            lib/mini_racer.rb lib/mini_racer_rs.rb crates/mini_racer_engine/src/lib.rs LICENSE; do
+            lib/mini_racer.rb lib/mini_racer_rs.rb crates/mini_racer_engine/src/lib.rs LICENSE THIRD_PARTY_NOTICES.md \
+            licenses/mini_racer.txt licenses/v8/SOURCES.tsv licenses/v8/v8/LICENSE; do
             grep -qx "$required" <<<"$files" || { echo "missing $required"; exit 1; }
           done
           forbidden=$(grep -E '^(\.cargo|\.github|target|test|scripts|tools|vendor|bin|node_modules)/|rust-toolchain\.toml|\.(so|bundle)$' <<<"$files" || true)
@@ -485,7 +510,7 @@ jobs:
   ci-pass:
     name: CI Pass
     if: ${{ !cancelled() }}
-    needs: [changes, fmt, taplo, rubocop, machete, deny, audit, boundaries, repo-checks, msrv, rustdoc, clippy, rust-test, loom, fuzz-smoke, gem-verify, ruby, truffleruby]
+    needs: [changes, fmt, taplo, rubocop, machete, deny, audit, notices, boundaries, repo-checks, msrv, rustdoc, clippy, rust-test, loom, fuzz-smoke, gem-verify, ruby, truffleruby]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

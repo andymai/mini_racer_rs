@@ -1,0 +1,2 @@
+# Accepted advisories, each as [[IgnoredVulns]] with id, ignoreUntil and a
+# reason naming the change that removes the dependency.

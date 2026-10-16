@@ -18,6 +18,7 @@ archives=$(sed -nE 's/^[0-9a-f]{64}  librusty_v8_release_(.+)\.a\.gz$/\1/p' ext/
 bindings=$(sed -nE 's/^[0-9a-f]{64}  src_binding_release_(.+)\.rs$/\1/p' ext/mini_racer_rs/v8-archives.sha256 | xargs)
 extconf=$(sed -nE 's/^ *%w\[[a-z0-9_]+ [a-z]+\] => "([^"]+)",$/\1/p' ext/mini_racer_rs/extconf.rb | xargs)
 deny=$(taplo get -f deny.toml -o json | jq -r '.graph.targets[]' | xargs)
+about=$(taplo get -f about.toml -o json | jq -r '.targets[]' | xargs)
 platforms_of() {
   sed -n '/^PLATFORMS$/,/^$/p' "$1" | sed -nE 's/^  (.+)$/\1/p' | xargs
 }
@@ -28,6 +29,7 @@ same "$archives" "$targets" || mismatch "v8-archives.sha256 archives: $archives"
 same "$bindings" "$targets" || mismatch "v8-archives.sha256 bindings: $bindings"
 same "$extconf" "$targets" || mismatch "extconf.rb targets: $extconf"
 same "$deny" "$targets" || mismatch "deny.toml graph targets: $deny"
+same "$about" "$targets" || mismatch "about.toml targets: $about"
 for platform in $gem_platforms; do
   grep -qw -- "$platform" <<<"$lock" || mismatch "Gemfile.lock PLATFORMS lacks $platform"
   grep -qw -- "$platform" <<<"$transitive" || mismatch "test/consumers/transitive/Gemfile.lock PLATFORMS lacks $platform"

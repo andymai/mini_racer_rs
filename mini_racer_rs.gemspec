@@ -30,6 +30,7 @@ Gem::Specification.new do |spec|
     "Cargo.toml",
     "LICENSE",
     "README.md",
+    "THIRD_PARTY_NOTICES.md",
     "crates/*/Cargo.toml",
     "crates/*/build.rs",
     "crates/*/src/**/*.rs",
@@ -39,7 +40,7 @@ Gem::Specification.new do |spec|
     "ext/mini_racer_rs/src/**/*.rs",
     "ext/mini_racer_rs/v8-archives.sha256",
     "lib/**/*.rb",
-    "licenses/*",
+    "licenses/**/*",
   ]
   spec.require_paths = ["lib"]
   spec.extensions = ["ext/mini_racer_rs/extconf.rb"]

@@ -12,7 +12,12 @@ while IFS='=' read -r tool version; do
   installed=$("$tool" --version 2>/dev/null | head -1 || true)
   [ "$tool" = taplo-cli ] && installed=$(taplo --version 2>/dev/null || true)
   case "$installed" in *"$version"*) continue ;; esac
-  cargo install --locked "$tool@$version"
+  # cargo-about builds its binary only with the cli feature.
+  if [ "$tool" = cargo-about ]; then
+    cargo install --locked "$tool@$version" --features cli
+  else
+    cargo install --locked "$tool@$version"
+  fi
 done < <(sed -n '/^\[cargo\]$/,/^\[/p' tools/versions.toml | grep '=')
 
 git submodule update --init

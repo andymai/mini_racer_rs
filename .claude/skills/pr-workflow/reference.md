@@ -13,6 +13,7 @@
 | Unused Dependencies | `cargo machete` |
 | Cargo Deny | `scripts/check-deny.sh`: the supported targets, every target (the only pass that sees `cfg(loom)` crates), and the fuzz crate |
 | Security Audit | `cargo audit` on the root and fuzz lockfiles |
+| Third-Party Notices | `scripts/update-notices.sh --check`, on every PR: `THIRD_PARTY_NOTICES.md` matches `cargo about`, `licenses/rust` and `licenses/v8`, and none of the four V8 archives links source `licenses/v8/components.tsv` misses |
 | Boundaries | `scripts/check-boundaries.sh`, `scripts/test-boundaries.sh`, and the fence, guard, GC root and static checks |
 | Repo Checks | version, action pin, platform, prose, doc path and Claude hook checks |
 | MSRV | `cargo check` on the toolchain in `tools/versions.toml` |
@@ -24,6 +25,8 @@
 | Gem Contents | Builds both gemspecs, checks the file list, resolves the unpacked source gem with `--locked` |
 | Ruby (3.3, 3.4 and 4.0 on ubuntu-24.04 and macos-15; 3.4 on ubuntu-24.04-arm) | `rake compile`, `scripts/check-exports.sh`, `rake test`, the upstream suite in strict mode, upstream's scripts, and a source gem install into an empty `GEM_HOME` |
 | TruffleRuby | the harness guard tests and the upstream suite in strict mode against the vendored backend |
+
+`.github/workflows/osv-scan.yml` scans all seven lockfiles with OSV: report-only on PRs, blocking on `main` and weekly; accepted advisories go in `osv-scanner.toml`. `.github/workflows/dependabot-auto-merge.yml` queues Dependabot's patch and minor updates for auto-merge once the required checks pass, through the release-kun App when its secrets are also set as Dependabot secrets; `.github/dependabot.yml` keeps `v8`, `deno_core_icudata`, `rb-sys`/`rb_sys` and the reference gem's `mini_racer`/`libv8-node` for deliberate bumps.
 
 `.github/workflows/pr-title.yml` lints the PR title with commitlint. It runs from `main` (`pull_request_target`), so a change to it takes effect after merge.
 

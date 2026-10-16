@@ -1,0 +1,14 @@
+# Third-party notices
+
+## Rust crates
+
+{{#each licenses}}
+### {{name}}
+
+{{#each used_by}}- `{{crate.name}}`{{#if crate.authors}}: {{#each crate.authors}}{{{this}}}{{#unless @last}}, {{/unless}}{{/each}}{{/if}}
+{{/each}}
+```text
+{{{text}}}
+```
+
+{{/each}}
