@@ -1,8 +1,10 @@
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::sync::OnceLock;
 
-use magnus::Ruby;
 use magnus::gc::Marker;
+use magnus::typed_data::Obj;
 use magnus::value::{Lazy, Opaque, ReprValue};
+use magnus::{Class, DataTypeFunctions, Error, Module, RModule, Ruby, TypedData, Value};
 
 pub struct StaticRoot<T: ReprValue>(Lazy<T>);
 
@@ -40,4 +42,69 @@ impl<T: ReprValue> OwnedRoot<T> {
             marker.mark(value);
         }
     }
+}
+
+/// A Ruby value found after startup, such as a class defined by a later
+/// require, kept alive for the life of the process once set.
+pub struct OnceRoot<T: ReprValue>(OnceLock<Opaque<T>>);
+
+impl<T: ReprValue> OnceRoot<T> {
+    pub const fn new() -> Self {
+        Self(OnceLock::new())
+    }
+
+    pub fn get(&self, ruby: &Ruby) -> Option<T> {
+        self.0.get().map(|value| ruby.get_inner(*value))
+    }
+
+    pub fn set(&self, ruby: &Ruby, value: T) {
+        if self.0.set(Opaque::from(value)).is_ok() {
+            ruby.gc_register_mark_object(value);
+        }
+    }
+}
+
+/// Ruby values a Rust loop holds while it may call Ruby, which can collect and
+/// compact. The holder's mark pins every value, so each stays alive at the
+/// same address and can serve as an identity key. Only touched under the GVL,
+/// and no borrow spans a Ruby call, so the mark always finds the list free.
+#[derive(Default, TypedData)]
+#[magnus(class = "MiniRacerRs::Pins", free_immediately, mark)]
+pub struct Pins(RefCell<Vec<Opaque<Value>>>);
+
+impl DataTypeFunctions for Pins {
+    fn mark(&self, marker: &Marker) {
+        if let Ok(values) = self.0.try_borrow() {
+            for value in values.iter() {
+                marker.mark(*value);
+            }
+        }
+    }
+}
+
+impl Pins {
+    /// The holder lives on the native stack, where the GC finds it.
+    pub fn new(ruby: &Ruby) -> Obj<Self> {
+        ruby.obj_wrap(Self::default())
+    }
+
+    /// Pins `value` and returns its index.
+    pub fn push(&self, value: Value) -> usize {
+        let mut values = self.0.borrow_mut();
+        values.push(Opaque::from(value));
+        values.len().saturating_sub(1)
+    }
+
+    pub fn get(&self, ruby: &Ruby, index: usize) -> Option<Value> {
+        self.0
+            .borrow()
+            .get(index)
+            .map(|value| ruby.get_inner(*value))
+    }
+}
+
+pub fn init(ruby: &Ruby, rs: RModule) -> Result<(), Error> {
+    let class = rs.define_class("Pins", ruby.class_object())?;
+    class.undef_default_alloc_func();
+    Ok(())
 }

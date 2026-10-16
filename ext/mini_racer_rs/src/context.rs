@@ -7,11 +7,12 @@ use magnus::r_hash::ForEach;
 use magnus::scan_args::scan_args;
 use magnus::value::ReprValue;
 use magnus::{
-    Class, DataTypeFunctions, Error, Fixnum, Module, RHash, RModule, RString, Ruby, Symbol,
+    Class, DataTypeFunctions, Error, Fixnum, Module, RArray, RHash, RModule, RString, Ruby, Symbol,
     TypedData, Value,
 };
 use mini_racer_engine::{ContextConfig, ContextHandle, EngineError, JsText};
 
+use crate::encode::{self, EncodeError};
 use crate::gc_root::OwnedRoot;
 use crate::host::RubyHost;
 use crate::options::{self, OptionError, OptionValue};
@@ -54,6 +55,7 @@ pub fn init(ruby: &Ruby, racer: RModule) -> Result<(), Error> {
     class.define_alloc_func::<Context>();
     class.define_method("initialize", export!(method Context::initialize, -1))?;
     class.define_method("eval", export!(method Context::eval, -1))?;
+    class.define_method("call", export!(method Context::call, -1))?;
     class.define_method("stop", export!(method Context::stop, 0))?;
     class.define_method("dispose", export!(method Context::dispose, 0))?;
     Ok(())
@@ -92,6 +94,18 @@ fn js_text(ruby: &Ruby, string: RString) -> Result<JsText, Error> {
         }
         _ => JsText::Utf8(bytes),
     })
+}
+
+// mini_racer looks for DateTime at each Context.new until it exists.
+fn resolve_date_time(ruby: &Ruby) -> Result<(), Error> {
+    if encode::DATE_TIME.get(ruby).is_none()
+        && ruby
+            .class_object()
+            .funcall::<_, _, bool>("const_defined?", ("DateTime",))?
+    {
+        encode::DATE_TIME.set(ruby, ruby.class_object().const_get("DateTime")?);
+    }
+    Ok(())
 }
 
 fn option_value(ruby: &Ruby, value: Value) -> OptionValue {
@@ -154,6 +168,7 @@ impl Context {
     }
 
     fn initialize(ruby: &Ruby, rb_self: &Self, args: &[Value]) -> Result<(), Error> {
+        resolve_date_time(ruby)?;
         if rb_self.handle.get().is_some() || rb_self.initializing.get() {
             return Err(errors::internal(ruby, "context is already initialized"));
         }
@@ -192,6 +207,29 @@ impl Context {
             let mut host = RubyHost::new(ruby);
             let result = handle
                 .eval(filename, source, &mut host)
+                .map_err(|e| errors::engine(ruby, e));
+            host.finish(result)?
+        };
+        decode::value(ruby, &bytes)
+    }
+
+    fn call(ruby: &Ruby, rb_self: &Self, args: &[Value]) -> Result<Value, Error> {
+        let handle = rb_self.handle(ruby)?;
+        let args = scan_args::<(Value,), (), RArray, (), (), ()>(args)?;
+        let name = rb_raw::expect_string(ruby, args.required.0)?;
+        let request = args.splat;
+        request.unshift(name)?;
+        let request = encode::encode(ruby, request.as_value()).map_err(|error| match error {
+            EncodeError::Unsupported(message) => {
+                errors::runtime(ruby, &format!("Context.call: {message}"))
+            }
+            EncodeError::Raised(error) => error,
+        })?;
+        let bytes = {
+            let _locked = rb_self.acquire(ruby)?;
+            let mut host = RubyHost::new(ruby);
+            let result = handle
+                .call(request, &mut host)
                 .map_err(|e| errors::engine(ruby, e));
             host.finish(result)?
         };

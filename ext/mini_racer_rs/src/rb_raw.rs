@@ -132,6 +132,68 @@ pub fn integer_unpack(_ruby: &Ruby, digits: &[u8], negative: bool) -> Result<Val
     Ok(unsafe { Value::from_raw(raw) })
 }
 
+/// Ruby's builtin type number for `value`, as `TYPE()` gives it.
+pub fn value_type(_ruby: &Ruby, value: Value) -> u32 {
+    // SAFETY: the `&Ruby` argument proves this thread holds the GVL, and
+    // `value` is a live VALUE the caller holds.
+    unsafe { rb_sys::RB_TYPE(value.as_raw()) as u32 }
+}
+
+/// Runs `read` over the string's bytes without copying them; `read` must not
+/// call Ruby, which could change or move the string.
+pub fn with_string_bytes<R>(_ruby: &Ruby, s: RString, read: impl FnOnce(&[u8]) -> R) -> R {
+    // SAFETY: the bytes are only read by `read`, which runs no Ruby code.
+    read(unsafe { s.as_slice() })
+}
+
+/// The magnitude of an Integer as little-endian 64-bit words, and whether it is
+/// negative; `None` past `max_words`.
+pub fn integer_words(
+    _ruby: &Ruby,
+    value: Value,
+    max_words: usize,
+) -> Result<Option<(bool, Vec<u8>)>, Error> {
+    let raw = value.as_raw();
+    let mut count = 0;
+    protect(|| {
+        // SAFETY: the `&Ruby` argument proves this thread holds the GVL, and
+        // `protect` catches what rb_absint_numwords raises for a non-Integer.
+        count = unsafe { rb_sys::rb_absint_numwords(raw, 64, std::ptr::null_mut()) };
+        rb_sys::Qnil as rb_sys::VALUE
+    })?;
+    let Some(words) = usize::try_from(count)
+        .ok()
+        .filter(|&words| words <= max_words)
+    else {
+        return Ok(None);
+    };
+    let mut digits = vec![0u64; words];
+    let flags = c_int::try_from(rb_sys::INTEGER_PACK_LITTLE_ENDIAN).unwrap_or(0);
+    let mut sign = 0;
+    protect(|| {
+        // SAFETY: `digits` holds `words` words, which rb_integer_pack fills.
+        sign =
+            unsafe { rb_sys::rb_integer_pack(raw, digits.as_mut_ptr().cast(), count, 8, 0, flags) };
+        rb_sys::Qnil as rb_sys::VALUE
+    })?;
+    if !(-1..=1).contains(&sign) {
+        return Ok(None);
+    }
+    Ok(Some((
+        sign < 0,
+        digits.iter().flat_map(|word| word.to_le_bytes()).collect(),
+    )))
+}
+
+/// The name `rb_class2name` gives the class of `value`, as `mini_racer` prints it.
+pub fn class_name(_ruby: &Ruby, value: Value) -> String {
+    use magnus::Class as _;
+    use magnus::value::ReprValue as _;
+    let class = value.class();
+    // SAFETY: the name is copied before any Ruby code can run and free it.
+    unsafe { class.name() }.into_owned()
+}
+
 pub fn string_bytes(_ruby: &Ruby, s: RString) -> Vec<u8> {
     // SAFETY: the slice is copied before any Ruby code can run and move or free it.
     unsafe { s.as_slice() }.to_vec()

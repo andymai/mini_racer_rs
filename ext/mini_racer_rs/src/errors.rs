@@ -56,6 +56,7 @@ pub fn engine(ruby: &Ruby, error: EngineError) -> Error {
             let root = match js.kind {
                 JsErrorKind::Parse => &PARSE,
                 JsErrorKind::Runtime => &RUNTIME,
+                JsErrorKind::Internal => &INTERNAL,
                 JsErrorKind::Terminated(
                     TerminationCause::Stop
                     | TerminationCause::Timeout

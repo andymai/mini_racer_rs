@@ -126,6 +126,16 @@ impl ContextHandle {
         )
     }
 
+    /// `request` is the wire form `mini_racer` sends: one array holding the
+    /// function's dotted path, then its arguments.
+    pub fn call(&self, request: Vec<u8>, host: &mut impl Host) -> Result<Vec<u8>, EngineError> {
+        self.dispatch(
+            DispatchKind::Script,
+            |dispatch| Request::Call { request, dispatch },
+            host,
+        )
+    }
+
     /// Terminates the running script, or the next one if none is running.
     pub fn stop(&self) -> Result<(), EngineError> {
         if self.orphaned() {

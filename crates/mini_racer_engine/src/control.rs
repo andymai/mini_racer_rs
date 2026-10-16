@@ -46,6 +46,10 @@ pub enum Request {
         source: JsText,
         dispatch: DispatchId,
     },
+    Call {
+        request: Vec<u8>,
+        dispatch: DispatchId,
+    },
     Dispose,
 }
 
