@@ -12,391 +12,202 @@ legs = [
 ]
 
 [tests."test/test_execjs.rb#TestExecJS#test_additional_options"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_additional_options".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_async_bun"]
 status = "upstream-skip"
 
 [tests."test/test_execjs.rb#TestExecJS#test_babel"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_babel".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_browser_self_is_undefined"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_browser_self_is_undefined".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_call_value_0"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_call_value_0".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_call_value_1"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_call_value_1".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_call_value_10"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_call_value_10".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_call_value_11"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_call_value_11".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_call_value_12"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_call_value_12".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_call_value_13"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_call_value_13".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_call_value_14"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_call_value_14".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_call_value_15"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_call_value_15".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_call_value_16"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_call_value_16".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_call_value_17"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_call_value_17".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_call_value_2"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_call_value_2".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_call_value_3"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_call_value_3".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_call_value_4"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_call_value_4".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_call_value_5"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_call_value_5".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_call_value_6"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_call_value_6".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_call_value_7"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_call_value_7".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_call_value_8"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_call_value_8".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_call_value_9"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_call_value_9".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_call_with_complex_properties"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_call_with_complex_properties".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_call_with_env_file"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_call_with_env_file".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_call_with_this"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_call_with_this".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_coffeescript"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_coffeescript".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_commonjs_vars_are_undefined"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_commonjs_vars_are_undefined".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_anonymous_function"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_anonymous_function".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_call_string_0"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_call_string_0".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_call_string_1"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_call_string_1".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_call_string_10"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_call_string_10".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_call_string_11"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_call_string_11".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_call_string_12"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_call_string_12".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_call_string_13"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_call_string_13".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_call_string_14"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_call_string_14".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_call_string_15"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_call_string_15".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_call_string_16"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_call_string_16".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_call_string_2"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_call_string_2".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_call_string_3"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_call_string_3".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_call_string_4"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_call_string_4".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_call_string_5"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_call_string_5".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_call_string_6"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_call_string_6".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_call_string_7"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_call_string_7".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_call_string_8"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_call_string_8".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_call_string_9"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_call_string_9".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_large_scripts"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_large_scripts".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_named_function"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_named_function".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_return_string_0"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_return_string_0".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_return_string_1"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_return_string_1".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_return_string_10"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_return_string_10".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_return_string_11"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_return_string_11".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_return_string_12"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_return_string_12".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_return_string_13"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_return_string_13".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_return_string_14"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_return_string_14".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_return_string_15"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_return_string_15".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_return_string_16"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_return_string_16".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_return_string_2"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_return_string_2".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_return_string_3"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_return_string_3".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_return_string_4"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_return_string_4".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_return_string_5"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_return_string_5".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_return_string_6"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_return_string_6".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_return_string_7"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_return_string_7".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_return_string_8"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_return_string_8".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_return_string_9"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_compile_return_string_9".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_syntax_error"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_thrown_error"]
-status = "xfail:M8"
+status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_compile_thrown_error".overrides."truffleruby-40.0-linux-x86_64"]
 cause = "mini_racer 0.22.1: fail: Expected /\\(execjs\\):|<eval>/ to match \"(mini_racer):1:in 'Error'\\nJavaScript (mini_racer):1:in ':program'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/mini_racer-0.22.1/lib/mini_racer/truffleruby.rb:260:in 'MiniRacer::Context#translate'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/mini_racer-0.22.1/lib/mini_racer/truffleruby.rb:178:in 'MiniRacer::Context#eval_unsafe'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/mini_racer-0.22.1/lib/mini_racer/shared.rb:167:in 'block (2 levels) in MiniRacer::Context#eval'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/mini_racer-0.22.1/lib/mini_racer/shared.rb:293:in 'MiniRacer::Context#timeout'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/mini_racer-0.22.1/lib/mini_racer/shared.rb:167:in 'block in MiniRacer::Context#eval'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/mini_racer-0.22.1/lib/mini_racer/shared.rb:165:in 'Mutex#synchronize'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/mini_racer-0.22.1/lib/mini_racer/shared.rb:165:in 'MiniRacer::Context#eval'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/vendor/execjs/lib/execjs/mini_racer_runtime.rb:11:in 'block in ExecJS::MiniRacerRuntime::Context#initialize'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/vendor/execjs/lib/execjs/mini_racer_runtime.rb:67:in 'ExecJS::MiniRacerRuntime::Context#translate'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/vendor/execjs/lib/execjs/mini_racer_runtime.rb:10:in 'ExecJS::MiniRacerRuntime::Context#initialize'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/vendor/execjs/lib/execjs/runtime.rb:68:in 'ExecJS::Runtime#compile'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/vendor/execjs/lib/execjs/module.rb:25:in 'ExecJS.compile'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/vendor/execjs/test/test_execjs.rb:383:in 'block in TestExecJS#test_compile_thrown_error'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest/assertions.rb:429:in 'Minitest::Assertions#assert_raises'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/vendor/execjs/test/test_execjs.rb:382:in 'TestExecJS#test_compile_thrown_error'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest/test.rb:95:in 'block (2 levels) in Minitest::Test#run'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest/test.rb:191:in 'Minitest::Test#capture_exceptions'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest/test.rb:90:in 'block in Minitest::Test#run'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:382:in 'Minitest::Runnable#time_it'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest/test.rb:89:in 'Minitest::Test#run'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:1223:in 'Minitest.run_one_method'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:462:in 'Minitest::Runnable.run_one_method'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:449:in 'block (2 levels) in Minitest::Runnable.run'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:445:in 'Array#each'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:445:in 'block in Minitest::Runnable.run'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:487:in 'Minitest::Runnable.on_signal'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:474:in 'Minitest::Runnable.with_info_handler'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:444:in 'Minitest::Runnable.run'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:346:in 'block in Minitest.__run'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:346:in 'Array#map'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:346:in 'Minitest.__run'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:301:in 'Minitest.run'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:85:in 'block in Minitest.autorun'\"."
@@ -406,509 +217,263 @@ status = "upstream-fail"
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_console_is_undefined"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_console_is_undefined".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_context_call"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_context_call".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_context_call_missing_function"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_context_call_missing_function".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_encoding"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_encoding".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_encoding_compile"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_encoding_compile".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_blank"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_blank".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_string_0"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_string_0".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_string_1"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_string_1".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_string_10"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_string_10".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_string_11"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_string_11".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_string_12"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_string_12".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_string_13"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_string_13".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_string_14"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_string_14".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_string_15"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_string_15".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_string_16"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_string_16".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_string_2"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_string_2".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_string_3"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_string_3".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_string_4"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_string_4".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_string_5"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_string_5".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_string_6"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_string_6".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_string_7"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_string_7".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_string_8"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_string_8".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_string_9"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_string_9".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_syntax_error"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_syntax_error".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_thrown_error"]
-status = "xfail:M8"
+status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_thrown_error".overrides."truffleruby-40.0-linux-x86_64"]
 cause = "mini_racer 0.22.1: fail: Expected /\\(execjs\\):|<eval>/ to match \"(mini_racer):1:in 'Error'\\nJavaScript (mini_racer):1:in ':anonymous'\\nJavaScript (mini_racer):1:in ':program'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/mini_racer-0.22.1/lib/mini_racer/truffleruby.rb:260:in 'MiniRacer::Context#translate'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/mini_racer-0.22.1/lib/mini_racer/truffleruby.rb:178:in 'MiniRacer::Context#eval_unsafe'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/mini_racer-0.22.1/lib/mini_racer/shared.rb:167:in 'block (2 levels) in MiniRacer::Context#eval'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/mini_racer-0.22.1/lib/mini_racer/shared.rb:293:in 'MiniRacer::Context#timeout'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/mini_racer-0.22.1/lib/mini_racer/shared.rb:167:in 'block in MiniRacer::Context#eval'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/mini_racer-0.22.1/lib/mini_racer/shared.rb:165:in 'Mutex#synchronize'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/mini_racer-0.22.1/lib/mini_racer/shared.rb:165:in 'MiniRacer::Context#eval'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/vendor/execjs/lib/execjs/mini_racer_runtime.rb:28:in 'block in ExecJS::MiniRacerRuntime::Context#eval'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/vendor/execjs/lib/execjs/mini_racer_runtime.rb:67:in 'ExecJS::MiniRacerRuntime::Context#translate'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/vendor/execjs/lib/execjs/mini_racer_runtime.rb:27:in 'ExecJS::MiniRacerRuntime::Context#eval'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/vendor/execjs/lib/execjs/runtime.rb:60:in 'ExecJS::Runtime#eval'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/vendor/execjs/lib/execjs/module.rb:21:in 'ExecJS.eval'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/vendor/execjs/test/test_execjs.rb:375:in 'block in TestExecJS#test_eval_thrown_error'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest/assertions.rb:429:in 'Minitest::Assertions#assert_raises'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/vendor/execjs/test/test_execjs.rb:374:in 'TestExecJS#test_eval_thrown_error'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest/test.rb:95:in 'block (2 levels) in Minitest::Test#run'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest/test.rb:191:in 'Minitest::Test#capture_exceptions'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest/test.rb:90:in 'block in Minitest::Test#run'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:382:in 'Minitest::Runnable#time_it'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest/test.rb:89:in 'Minitest::Test#run'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:1223:in 'Minitest.run_one_method'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:462:in 'Minitest::Runnable.run_one_method'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:449:in 'block (2 levels) in Minitest::Runnable.run'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:445:in 'Array#each'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:445:in 'block in Minitest::Runnable.run'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:487:in 'Minitest::Runnable.on_signal'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:474:in 'Minitest::Runnable.with_info_handler'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:444:in 'Minitest::Runnable.run'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:346:in 'block in Minitest.__run'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:346:in 'Array#map'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:346:in 'Minitest.__run'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:301:in 'Minitest.run'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:85:in 'block in Minitest.autorun'\"."
 status = "upstream-fail"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_thrown_string"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_thrown_string".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_value_0"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_value_0".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_value_1"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_value_1".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_value_10"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_value_10".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_value_11"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_value_11".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_value_12"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_value_12".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_value_13"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_value_13".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_value_14"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_value_14".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_value_15"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_value_15".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_value_16"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_value_16".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_value_17"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_value_17".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_value_2"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_value_2".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_value_3"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_value_3".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_value_4"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_value_4".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_value_5"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_value_5".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_value_6"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_value_6".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_value_7"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_value_7".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_value_8"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_value_8".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_eval_value_9"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_eval_value_9".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_no_return"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_no_return".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_return"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_return".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_string_0"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_string_0".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_string_1"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_string_1".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_string_10"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_string_10".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_string_11"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_string_11".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_string_12"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_string_12".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_string_13"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_string_13".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_string_14"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_string_14".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_string_15"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_string_15".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_string_16"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_string_16".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_string_2"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_string_2".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_string_3"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_string_3".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_string_4"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_string_4".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_string_5"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_string_5".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_string_6"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_string_6".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_string_7"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_string_7".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_string_8"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_string_8".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_string_9"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_string_9".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_syntax_error"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_syntax_error".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_thrown_error"]
-status = "xfail:M8"
+status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_thrown_error".overrides."truffleruby-40.0-linux-x86_64"]
 cause = "mini_racer 0.22.1: fail: Expected /\\(execjs\\):|<eval>/ to match \"(mini_racer):1:in 'Error'\\nJavaScript (mini_racer):1:in ':anonymous'\\nJavaScript (mini_racer):1:in ':program'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/mini_racer-0.22.1/lib/mini_racer/truffleruby.rb:260:in 'MiniRacer::Context#translate'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/mini_racer-0.22.1/lib/mini_racer/truffleruby.rb:178:in 'MiniRacer::Context#eval_unsafe'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/mini_racer-0.22.1/lib/mini_racer/shared.rb:167:in 'block (2 levels) in MiniRacer::Context#eval'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/mini_racer-0.22.1/lib/mini_racer/shared.rb:293:in 'MiniRacer::Context#timeout'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/mini_racer-0.22.1/lib/mini_racer/shared.rb:167:in 'block in MiniRacer::Context#eval'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/mini_racer-0.22.1/lib/mini_racer/shared.rb:165:in 'Mutex#synchronize'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/mini_racer-0.22.1/lib/mini_racer/shared.rb:165:in 'MiniRacer::Context#eval'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/vendor/execjs/lib/execjs/mini_racer_runtime.rb:28:in 'block in ExecJS::MiniRacerRuntime::Context#eval'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/vendor/execjs/lib/execjs/mini_racer_runtime.rb:67:in 'ExecJS::MiniRacerRuntime::Context#translate'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/vendor/execjs/lib/execjs/mini_racer_runtime.rb:27:in 'ExecJS::MiniRacerRuntime::Context#eval'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/vendor/execjs/lib/execjs/mini_racer_runtime.rb:19:in 'ExecJS::MiniRacerRuntime::Context#exec'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/vendor/execjs/lib/execjs/runtime.rb:50:in 'ExecJS::Runtime#exec'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/vendor/execjs/lib/execjs/module.rb:17:in 'ExecJS.exec'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/vendor/execjs/test/test_execjs.rb:367:in 'block in TestExecJS#test_exec_thrown_error'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest/assertions.rb:429:in 'Minitest::Assertions#assert_raises'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/vendor/execjs/test/test_execjs.rb:366:in 'TestExecJS#test_exec_thrown_error'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest/test.rb:95:in 'block (2 levels) in Minitest::Test#run'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest/test.rb:191:in 'Minitest::Test#capture_exceptions'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest/test.rb:90:in 'block in Minitest::Test#run'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:382:in 'Minitest::Runnable#time_it'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest/test.rb:89:in 'Minitest::Test#run'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:1223:in 'Minitest.run_one_method'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:462:in 'Minitest::Runnable.run_one_method'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:449:in 'block (2 levels) in Minitest::Runnable.run'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:445:in 'Array#each'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:445:in 'block in Minitest::Runnable.run'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:487:in 'Minitest::Runnable.on_signal'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:474:in 'Minitest::Runnable.with_info_handler'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:444:in 'Minitest::Runnable.run'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:346:in 'block in Minitest.__run'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:346:in 'Array#map'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:346:in 'Minitest.__run'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:301:in 'Minitest.run'\\n/home/runner/work/mini_racer_rs/mini_racer_rs/tools/reference/vendor/bundle/truffleruby/40.0.0.1/gems/minitest-5.27.0/lib/minitest.rb:85:in 'block in Minitest.autorun'\"."
 status = "upstream-fail"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_thrown_string"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_thrown_string".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_value_0"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_value_0".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_value_1"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_value_1".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_value_10"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_value_10".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_value_11"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_value_11".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_value_12"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_value_12".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_value_13"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_value_13".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_value_14"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_value_14".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_value_15"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_value_15".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_value_16"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_value_16".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_value_17"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_value_17".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_value_2"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_value_2".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_value_3"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_value_3".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_value_4"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_value_4".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_value_5"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_value_5".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_value_6"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_value_6".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_value_7"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_value_7".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_value_8"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_value_8".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_exec_value_9"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_exec_value_9".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_json_value_0"]
@@ -966,27 +531,15 @@ status = "pass"
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_large_return_value"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_large_return_value".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_nested_context_call"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_nested_context_call".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_node_global_is_undefined"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_node_global_is_undefined".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_node_process_is_undefined"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_node_process_is_undefined".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_runtime_assignment"]
@@ -996,139 +549,70 @@ status = "pass"
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_stringify_value_0"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_stringify_value_0".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_stringify_value_1"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_stringify_value_1".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_stringify_value_10"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_stringify_value_10".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_stringify_value_11"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_stringify_value_11".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_stringify_value_12"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_stringify_value_12".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_stringify_value_13"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_stringify_value_13".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_stringify_value_14"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_stringify_value_14".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_stringify_value_15"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_stringify_value_15".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_stringify_value_16"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_stringify_value_16".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_stringify_value_17"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_stringify_value_17".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_stringify_value_2"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_stringify_value_2".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_stringify_value_3"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_stringify_value_3".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_stringify_value_4"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_stringify_value_4".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_stringify_value_5"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_stringify_value_5".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_stringify_value_6"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_stringify_value_6".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_stringify_value_7"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_stringify_value_7".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_stringify_value_8"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_stringify_value_8".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_stringify_value_9"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_stringify_value_9".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_surrogate_pairs"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_surrogate_pairs".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_symbol"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_symbol".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_this_is_global_scope"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_this_is_global_scope".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_timers_are_undefined"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_timers_are_undefined".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/test_execjs.rb#TestExecJS#test_uglify"]
-status = "xfail:M8"
-
-[tests."test/test_execjs.rb#TestExecJS#test_uglify".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
