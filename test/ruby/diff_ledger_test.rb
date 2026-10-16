@@ -74,10 +74,10 @@ class DiffLedgerTest < Minitest::Test
   end
 
   def test_a_new_divergence_is_recorded_against_the_previous_milestone
-    assert_equal "xfail:S3", DiffLedger.ledger_status(nil, "diverged")
+    assert_equal "xfail:M1", DiffLedger.ledger_status(nil, "diverged")
     assert_equal "xfail:M2", DiffLedger.ledger_status("xfail:M2", "diverged")
     assert_equal "same", DiffLedger.ledger_status("xfail:M2", "same")
-    assert_equal "crash:S3", DiffLedger.ledger_status("xfail:M2", "crashed")
+    assert_equal "crash:M1", DiffLedger.ledger_status("xfail:M2", "crashed")
   end
 
   def test_strict_mode_rejects_ratchets_unlisted_stale_and_undeclared
