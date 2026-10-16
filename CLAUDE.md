@@ -73,6 +73,8 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | Third-party notices: Rust crates, the Rust standard library, and the code in the V8 archives | `THIRD_PARTY_NOTICES.md`, `about.toml`, `about.hbs`, `licenses/v8/`, `licenses/rust/`, `scripts/update-notices.sh` |
 | Dependency updates and advisory scans | `.github/dependabot.yml`, `.github/workflows/dependabot-auto-merge.yml`, `.github/workflows/osv-scan.yml`, `osv-scanner.toml` |
 | CI | `.github/workflows/ci.yml`, `.github/actions/setup/action.yml` |
+| Sanitizer runs (nightly, and on PRs labeled `sanitizers`) | `.github/workflows/nightly.yml`, `scripts/sanitizers.sh`, `.github/sanitizers/lsan.supp` |
+| Engine teardown checked for leaks, in both V8 platform modes | `crates/mini_racer_engine/tests/teardown.rs`, `crates/mini_racer_engine/tests/teardown_single_threaded.rs` |
 | Upstream suite runner, suites, guard, reporter | `test/upstream/run.rb`, `test/upstream/suites.rb`, `test/upstream/preload.rb`, `test/upstream/reporter.rb` |
 | Per-test parity ledgers | `test/upstream/mini_racer.status.toml`, `test/upstream/execjs.status.toml`, `test/upstream/milestones.toml` |
 | Ledger generation | `.github/workflows/ledger-generate.yml`, `rakelib/ledger.rake`, `test/upstream/milestone_rules.rb` |
@@ -106,6 +108,7 @@ scripts/update-v8-archives.sh      # repin every target's V8 archive after bumpi
 scripts/update-notices.sh          # regenerate THIRD_PARTY_NOTICES.md and licenses/v8 (--check to verify)
 RUSTFLAGS="--cfg loom -Dwarnings" cargo test -p mini_racer_sync --test loom --release --locked --target-dir target/loom
 scripts/fuzz-smoke.sh 60           # every wire fuzz target, 60 s each, on the pinned nightly
+scripts/sanitizers.sh              # ASan teardown and memory checks, TSan on sync (Linux x86_64, needs llvm-symbolizer)
 bundle exec ruby test/upstream/run.rb --strict   # mini_racer's own suite against the ledger
 bundle exec ruby test/upstream/run.rb --suite execjs --strict   # ExecJS's suite on its MiniRacer runtime
 bundle exec rake compat:check      # compat.toml against the reference surface and this gem
@@ -123,7 +126,7 @@ bundle exec ruby -Ilib test/stress/churn.rb 8 600   # 8 threads creating, evalua
 
 - `crates/mini_racer_wire`: `cargo nextest run -p mini_racer_wire`, then `scripts/fuzz-smoke.sh 20`.
 - `crates/mini_racer_sync`: `cargo nextest run -p mini_racer_sync`, then the loom command above.
-- `crates/mini_racer_engine`: `cargo nextest run -p mini_racer_engine`. Flag-dependent assertions live in `crates/mini_racer_engine/tests/flags.rs`, one test per process.
+- `crates/mini_racer_engine`: `cargo nextest run -p mini_racer_engine`; for teardown or lifetime changes, `scripts/sanitizers.sh` or the `sanitizers` label. Flag-dependent assertions live in `crates/mini_racer_engine/tests/flags.rs`, one test per process.
 - `ext/` or `lib/`: `cargo test -p mini_racer_rs --lib` (the Ruby-free option rules and number classification), `bundle exec rake test`, then `scripts/check-exports.sh`, then `bundle exec ruby test/upstream/run.rb --strict` with and without `--suite execjs`, then `bundle exec ruby test/diff/run.rb --strict` with and without `--set consumers`, then `bundle exec rake compat:check`.
 - `compat.toml`: `bundle exec rake compat:render`, then `bundle exec rake compat:check`.
 - `scripts/`, `layers.toml`, any `Cargo.toml`: `scripts/check-boundaries.sh`, `scripts/test-boundaries.sh` and `scripts/check-deny.sh`.

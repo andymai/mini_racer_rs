@@ -1,0 +1,4 @@
+# rusty_v8 152.2.0 leaks a 64-byte liveness cell per isolate on purpose
+# (Box::leak in IsolateAnnex::new, inlined here) so late Global drops can see
+# the isolate is gone.
+leak:<v8::isolate::Isolate>::create_annex
