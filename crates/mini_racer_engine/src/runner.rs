@@ -2,11 +2,11 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use mini_racer_sync::{DispatchKind, Halt, Side, TerminationCause, ToV8, lock};
+use mini_racer_sync::{DispatchKind, Halt, Phase, Side, TerminationCause, ToV8, lock};
 use v8::ValueDeserializerHelper;
 
 use crate::control::{CallbackReply, ControlBlock, Depth, IsolateTerminator, JsText, Request};
-use crate::process::fork::{Generation, Phase};
+use crate::process::fork::Generation;
 use crate::process::platform::{self, Mode};
 use crate::serialize::{self, Filter, Tc};
 use crate::spin::spin_until;

@@ -1,10 +1,9 @@
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use mini_racer_sync::{Channel, DispatchId, Protocol, TermCell, Terminator, lock};
+use mini_racer_sync::{Channel, DispatchId, Protocol, RunnerPhase, TermCell, Terminator, lock};
 
 use crate::EngineError;
-use crate::process::fork::RunnerPhase;
 
 pub struct Wire;
 

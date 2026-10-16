@@ -3,11 +3,11 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use mini_racer_sync::{
-    Channel, ChannelError, DispatchKind, Interrupt, Side, TermError, ToRuby, lock,
+    Channel, ChannelError, DispatchKind, Interrupt, Phase, Side, TermError, ToRuby, lock,
 };
 
 use crate::control::{CallbackReply, ContextConfig, ControlBlock, Depth, JsText, Request, Wire};
-use crate::process::fork::{self, Generation, Phase};
+use crate::process::fork::{self, Generation};
 use crate::process::platform::Mode;
 use crate::process::{self, platform, watchdog};
 use crate::runner::Start;

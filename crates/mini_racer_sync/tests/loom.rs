@@ -6,8 +6,8 @@ use loom::sync::Arc;
 use loom::sync::atomic::{AtomicBool, Ordering};
 use loom::thread;
 use mini_racer_sync::{
-    Channel, ChannelError, DispatchKind, Halt, Interrupt, Nesting, Protocol, Side, TermCell,
-    TerminationCause, Terminator, ToRuby, ToV8,
+    Channel, ChannelError, DispatchKind, ForkGate, Halt, Interrupt, Nesting, Phase, Protocol,
+    RunnerPhase, Side, TermCell, TerminationCause, Terminator, ToRuby, ToV8,
 };
 
 struct Numbers;
@@ -232,6 +232,38 @@ fn an_external_wake_ends_a_park() {
         channel.park(Side::Ruby, None);
         interrupter.join().expect("interrupter thread");
         assert!(!channel.ready(Side::Ruby));
+    });
+}
+
+// Model 7: a fork that finds no runner `Running` never overlaps a runner using
+// its isolate, whether the runner wakes just before the fork begins or just
+// after, until the fork ends.
+#[test]
+fn a_quiesced_fork_never_overlaps_a_runner_using_its_isolate() {
+    bounded(3, || {
+        let gate = Arc::new(ForkGate::default());
+        let phase = Arc::new(RunnerPhase::default());
+        let using = Arc::new(AtomicBool::new(false));
+        phase.set(Phase::Deposited);
+        let runner = {
+            let (gate, phase, using) = (Arc::clone(&gate), Arc::clone(&phase), Arc::clone(&using));
+            thread::spawn(move || {
+                gate.resume(&phase);
+                using.store(true, Ordering::SeqCst);
+                using.store(false, Ordering::SeqCst);
+                phase.set(Phase::Deposited);
+            })
+        };
+
+        gate.begin();
+        while phase.get() == Phase::Running {
+            thread::yield_now();
+        }
+        assert!(!using.load(Ordering::SeqCst));
+        thread::yield_now();
+        assert!(!using.load(Ordering::SeqCst));
+        gate.end();
+        runner.join().expect("runner thread");
     });
 }
 
