@@ -6,8 +6,6 @@
 
 require "json"
 
-HARNESS_ERROR = 3
-
 $stdin.set_encoding(Encoding::UTF_8)
 $stdout.set_encoding(Encoding::UTF_8)
 $stdout.sync = true
@@ -31,13 +29,19 @@ def arguments(step)
   step.fetch("args").map { |arg| DiffCanonical.decode(arg) }
 rescue StandardError => e
   warn "diff worker: cannot decode #{JSON.generate(step["args"])}: #{e.message}"
-  exit HARNESS_ERROR
+  exit 1
+end
+
+def execjs(step)
+  require "execjs"
+  ExecJS.compile(step.fetch("source")).call(step.fetch("function"), *arguments(step))
 end
 
 def run(context, step)
   value = case step.fetch("op")
           when "eval" then context.eval(step.fetch("source"))
           when "call" then context.call(step.fetch("path"), *arguments(step))
+          when "execjs" then execjs(step)
           else raise ArgumentError, "unknown step #{step["op"]}"
           end
   step["setup"] ? ["setup"] : DiffCanonical.encode(value)
