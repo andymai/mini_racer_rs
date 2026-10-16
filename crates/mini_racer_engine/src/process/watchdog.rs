@@ -1,10 +1,11 @@
 use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
-use std::sync::{Arc, Condvar, Mutex, Once, OnceLock, Weak};
+use std::sync::{Arc, Condvar, Mutex, Weak};
 use std::time::{Duration, Instant};
 
 use mini_racer_sync::{DispatchId, Interrupt, lock, wait, wait_timeout};
 
+use crate::EngineError;
 use crate::control::ControlBlock;
 
 struct Entry {
@@ -39,14 +40,13 @@ struct Timers {
     seq: u64,
 }
 
-#[derive(Default)]
 struct Watchdog {
+    pid: u32,
     timers: Mutex<Timers>,
     changed: Condvar,
 }
 
-static WATCHDOG: OnceLock<Watchdog> = OnceLock::new();
-static STARTED: Once = Once::new();
+static WATCHDOG: Mutex<Option<Arc<Watchdog>>> = Mutex::new(None);
 
 impl Watchdog {
     fn push(&self, at: Instant, block: Weak<ControlBlock>) {
@@ -59,23 +59,44 @@ impl Watchdog {
     }
 }
 
-// One thread serves every context's timeouts. A context's timer slot holds its
-// current deadline; a heap entry only wakes the watchdog to look at the slot, so
-// a context needs a new entry only when its deadline moves earlier.
-// TODO: spawn per fork generation once the fork protocol lands; a forked child
-// inherits a started flag without the thread, so its timeouts never fire.
-pub fn schedule(after: Duration, block: &Arc<ControlBlock>, dispatch: DispatchId) {
-    let Some(at) = Instant::now().checked_add(after) else {
-        return;
-    };
-    let watchdog = WATCHDOG.get_or_init(Watchdog::default);
-    STARTED.call_once(|| {
-        // Without the thread the dispatch runs unbounded, as mini_racer does when
-        // it cannot start its watchdog.
-        let _ = std::thread::Builder::new()
-            .name("mini_racer_rs watchdog".to_owned())
-            .spawn(|| run(watchdog));
+// One thread per process serves every context's timeouts. A forked child has
+// the parent's watchdog state but not its thread, so it starts its own and
+// leaves the inherited one untouched.
+fn current() -> Result<Arc<Watchdog>, EngineError> {
+    let pid = std::process::id();
+    let mut slot = lock(&WATCHDOG);
+    if let Some(watchdog) = slot.as_ref().filter(|watchdog| watchdog.pid == pid) {
+        return Ok(Arc::clone(watchdog));
+    }
+    let watchdog = Arc::new(Watchdog {
+        pid,
+        timers: Mutex::default(),
+        changed: Condvar::new(),
     });
+    let serving = Arc::clone(&watchdog);
+    std::thread::Builder::new()
+        .name("mini_racer_rs watchdog".to_owned())
+        .spawn(move || run(&serving))
+        .map_err(|e| EngineError::Internal(format!("cannot start the timeout watchdog: {e}")))?;
+    *slot = Some(Arc::clone(&watchdog));
+    drop(slot);
+    Ok(watchdog)
+}
+
+/// Arms `dispatch`'s timeout. Fails rather than let a timed script run
+/// unbounded when the watchdog cannot start.
+// A context's timer slot holds its current deadline; a heap entry only wakes
+// the watchdog to look at the slot, so a context needs a new entry only when
+// its deadline moves earlier.
+pub fn schedule(
+    after: Duration,
+    block: &Arc<ControlBlock>,
+    dispatch: DispatchId,
+) -> Result<(), EngineError> {
+    let watchdog = current()?;
+    let at = Instant::now()
+        .checked_add(after)
+        .ok_or_else(|| EngineError::Internal("timeout out of range".to_owned()))?;
     let mut timer = lock(&block.timer);
     timer.due = Some((at, dispatch));
     let wake = timer.queued.is_none_or(|queued| at < queued);
@@ -87,6 +108,7 @@ pub fn schedule(after: Duration, block: &Arc<ControlBlock>, dispatch: DispatchId
     if wake {
         watchdog.push(at, Arc::downgrade(block));
     }
+    Ok(())
 }
 
 /// Forgets the context's pending timeout once its dispatch is over.

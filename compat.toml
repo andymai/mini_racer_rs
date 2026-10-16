@@ -6,6 +6,10 @@
 reason = "mini_racer_rs supports glibc Linux on x86_64 and aarch64, plus macOS on arm64 and x86_64. Installation stops on musl-based Linux, including Alpine, and on Windows, with a message naming the supported platforms."
 status = "deviation"
 
+[ids."behavior:timeout-watchdog@ruby"]
+reason = "mini_racer_rs raises MiniRacer::InternalError when its single process-wide watchdog thread cannot start, and the timed script does not run. mini_racer 0.22.1 starts a watchdog thread for each eval or call on a context created with timeout:; if creation fails, it prints mini_racer: watchdog: pthread_create: <error> to stderr and runs the script without a time limit. This difference prevents a failed watchdog from silently removing the bound often placed on untrusted JavaScript."
+status = "deviation"
+
 [ids."behavior:v8-version@ruby"]
 reason = "On CRuby, `mini_racer_rs` embeds V8 15.2.124.1 through the `v8` crate 152.2.0, while `mini_racer` 0.22.1 uses V8 13.6.233.17 through `libv8-node` 24.12.0.1. V8-generated text, including parse and runtime error messages and locale formatting, can therefore differ. Affected upstream tests are marked `deviation:behavior:v8-version@ruby` in `test/upstream/mini_racer.status.toml`. This difference does not apply on TruffleRuby, where both gems use upstream's GraalJS backend."
 status = "deviation"
@@ -195,6 +199,7 @@ status = "done"
 status = "todo:M3"
 
 [ids."kwarg:MiniRacer::Context#initialize:snapshot"]
+depends_on = ["class:MiniRacer::Snapshot < Object"]
 status = "todo:S3b"
 
 [ids."kwarg:MiniRacer::Context#initialize:timeout"]

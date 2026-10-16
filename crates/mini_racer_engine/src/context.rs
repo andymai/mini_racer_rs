@@ -188,8 +188,11 @@ impl ContextHandle {
             TermError::AlreadyArmed => EngineError::Busy,
         })?;
         // mini_racer times only scripts, never setup or maintenance.
-        if let (DispatchKind::Script, Some(timeout)) = (kind, block.config.timeout) {
-            watchdog::schedule(timeout, block, dispatch);
+        if let (DispatchKind::Script, Some(timeout)) = (kind, block.config.timeout)
+            && let Err(error) = watchdog::schedule(timeout, block, dispatch)
+        {
+            block.term.end(dispatch);
+            return Err(error);
         }
         if let Err(error) = block.channel.request(request(dispatch)) {
             block.term.end(dispatch);
