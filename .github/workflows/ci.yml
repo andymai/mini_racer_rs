@@ -286,6 +286,15 @@ jobs:
       - run: cargo nextest run --workspace --exclude mini_racer_rs --locked
       # nextest does not run doctests, so they get their own step.
       - run: cargo test --doc --workspace --exclude mini_racer_rs --locked
+      # The wire tests decode these bytes, so they must still be what V8 writes.
+      - name: Wire golden bytes match V8
+        run: |
+          cargo run -q -p mini_racer_engine --example gen_wire_golden --locked
+          drift=$(git status --porcelain -- crates/mini_racer_wire/tests/golden)
+          if [ -n "$drift" ]; then
+            echo "$drift"
+            exit 1
+          fi
 
   loom:
     name: Loom

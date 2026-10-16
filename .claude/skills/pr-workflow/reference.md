@@ -19,7 +19,7 @@
 | MSRV | `cargo check` on the toolchain in `tools/versions.toml` |
 | Rustdoc | `cargo doc` with `-D warnings` |
 | Clippy | `cargo clippy --workspace --all-targets -- -D warnings` |
-| Rust Tests | nextest and doctests, without the extension crate |
+| Rust Tests | nextest and doctests, without the extension crate, then regenerates the wire golden bytes from V8 and fails on any difference |
 | Loom | the loom models in `crates/mini_racer_sync/tests/loom.rs`, under `--cfg loom` |
 | Fuzz Smoke | `scripts/fuzz-smoke.sh 60`: every wire fuzz target for 60 s on the pinned nightly; crash inputs are uploaded on failure |
 | Gem Contents | Builds both gemspecs, checks the file list, resolves the unpacked source gem with `--locked` |

@@ -1,6 +1,8 @@
 use magnus::value::ReprValue;
 use magnus::{Error, IntoValue, Ruby, Value};
-use mini_racer_wire::{DecodeError, Scalar, Visitor, decode_value, text};
+use mini_racer_wire::{
+    Begun, Container, DecodeError, Limits, Scalar, Text, Visitor, decode_value, text,
+};
 
 use crate::{errors, rb_raw};
 
@@ -35,8 +37,15 @@ struct RubyVisitor<'r> {
     ruby: &'r Ruby,
 }
 
+impl RubyVisitor<'_> {
+    fn unsupported<T>(&self) -> Result<T, Error> {
+        Err(errors::runtime(self.ruby, "unsupported value".to_owned()))
+    }
+}
+
 impl Visitor for RubyVisitor<'_> {
     type Value = Value;
+    type Frame = ();
     type Error = Error;
 
     fn scalar(&mut self, scalar: Scalar<'_>) -> Result<Value, Error> {
@@ -51,12 +60,16 @@ impl Visitor for RubyVisitor<'_> {
                 Number::BigInteger => rb_raw::dbl2big(ruby, n),
                 Number::Float => ruby.float_from_f64(n).as_value(),
             },
-            Scalar::Utf8(bytes) => ruby.enc_str_new(bytes, ruby.utf8_encoding()).as_value(),
-            Scalar::Latin1(bytes) if bytes.is_ascii() => {
+            Scalar::Text(Text::Utf8(bytes)) => {
                 ruby.enc_str_new(bytes, ruby.utf8_encoding()).as_value()
             }
-            Scalar::Latin1(bytes) => ruby.str_new(&text::latin1_to_utf8(bytes)).as_value(),
-            Scalar::Utf16Le(bytes) => {
+            Scalar::Text(Text::Latin1(bytes)) if bytes.is_ascii() => {
+                ruby.enc_str_new(bytes, ruby.utf8_encoding()).as_value()
+            }
+            Scalar::Text(Text::Latin1(bytes)) => {
+                ruby.str_new(&text::latin1_to_utf8(bytes)).as_value()
+            }
+            Scalar::Text(Text::Utf16Le(bytes)) => {
                 if let Some(utf8) = text::utf16le_to_utf8(bytes) {
                     ruby.str_new(&utf8).as_value()
                 } else {
@@ -66,12 +79,43 @@ impl Visitor for RubyVisitor<'_> {
                     ruby.enc_str_new(bytes, utf16).as_value()
                 }
             }
+            Scalar::Hole
+            | Scalar::BigInt { .. }
+            | Scalar::Date(_)
+            | Scalar::RegExp { .. }
+            | Scalar::ArrayBuffer(_) => return self.unsupported(),
         })
+    }
+
+    fn begin(&mut self, _container: Container) -> Result<Begun<(), Value>, Error> {
+        self.unsupported()
+    }
+
+    fn push(&mut self, _frame: &mut (), _value: Value) -> Result<(), Error> {
+        self.unsupported()
+    }
+
+    fn insert(&mut self, _frame: &mut (), _key: Value, _value: Value) -> Result<(), Error> {
+        self.unsupported()
+    }
+
+    fn end(&mut self, _frame: ()) -> Result<Value, Error> {
+        self.unsupported()
+    }
+
+    // Only containers and back references need the values kept, and neither
+    // gets this far.
+    fn register(&mut self, _id: u32, _value: Value) -> Result<(), Error> {
+        Ok(())
+    }
+
+    fn back_ref(&mut self, _id: u32) -> Result<Value, Error> {
+        self.unsupported()
     }
 }
 
 pub fn value(ruby: &Ruby, bytes: &[u8]) -> Result<Value, Error> {
-    decode_value(bytes, &mut RubyVisitor { ruby }).map_err(|e| match e {
+    decode_value(bytes, Limits::default(), &mut RubyVisitor { ruby }).map_err(|e| match e {
         DecodeError::Visitor(error) => error,
         other => errors::runtime(ruby, other.to_string()),
     })

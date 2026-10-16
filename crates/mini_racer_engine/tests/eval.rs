@@ -7,7 +7,7 @@ use mini_racer_engine::{
     ContextConfig, ContextHandle, EngineError, Host, JsErrorKind, TerminationCause, WaitHandle,
     WaitOutcome,
 };
-use mini_racer_wire::{Scalar, Visitor, decode_value};
+use mini_racer_wire::{Begun, Container, Limits, Scalar, Visitor, decode_value};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Out {
@@ -22,17 +22,43 @@ struct Shape;
 
 impl Visitor for Shape {
     type Value = Out;
-    type Error = std::convert::Infallible;
+    type Frame = ();
+    type Error = String;
 
-    fn scalar(&mut self, scalar: Scalar<'_>) -> Result<Out, Self::Error> {
+    fn scalar(&mut self, scalar: Scalar<'_>) -> Result<Out, String> {
         Ok(match scalar {
             Scalar::Undefined | Scalar::Null => Out::Nil,
             Scalar::Bool(b) => Out::Bool(b),
             Scalar::Int32(n) => Out::Int(n.into()),
             Scalar::Uint32(n) => Out::Int(n.into()),
             Scalar::Number(n) => Out::Num(n),
-            Scalar::Utf8(_) | Scalar::Latin1(_) | Scalar::Utf16Le(_) => Out::Text,
+            Scalar::Text(_) => Out::Text,
+            other => return Err(format!("unexpected {other:?}")),
         })
+    }
+
+    fn begin(&mut self, container: Container) -> Result<Begun<(), Out>, String> {
+        Err(format!("unexpected {container:?}"))
+    }
+
+    fn push(&mut self, (): &mut (), _value: Out) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn insert(&mut self, (): &mut (), _key: Out, _value: Out) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn end(&mut self, (): ()) -> Result<Out, String> {
+        Err("unexpected container".to_owned())
+    }
+
+    fn register(&mut self, _id: u32, _value: Out) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn back_ref(&mut self, id: u32) -> Result<Out, String> {
+        Err(format!("unexpected reference {id}"))
     }
 }
 
@@ -74,7 +100,7 @@ impl Host for Interruptible<'_> {
 
 fn eval(context: &ContextHandle, source: &str) -> Result<Out, EngineError> {
     let bytes = context.eval(source.to_owned(), &mut Parking)?;
-    Ok(decode_value(&bytes, &mut Shape).expect("V8 output decodes"))
+    Ok(decode_value(&bytes, Limits::default(), &mut Shape).expect("V8 output decodes"))
 }
 
 fn spawn() -> ContextHandle {

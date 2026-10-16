@@ -1,0 +1,1 @@
+error{"message": "東", "stack": "Error: 東\n    at <anonymous>:1:1"}

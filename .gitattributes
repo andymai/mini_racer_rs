@@ -3,3 +3,4 @@
 *.bundle binary
 *.dylib binary
 *.gem binary
+crates/mini_racer_wire/tests/golden/*.bin binary

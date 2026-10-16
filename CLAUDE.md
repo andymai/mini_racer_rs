@@ -51,7 +51,9 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | Timeout watchdog thread | `crates/mini_racer_engine/src/process/watchdog.rs` |
 | Engine errors | `crates/mini_racer_engine/src/error.rs` |
 | `madvise` wrapper (fork safety) | `crates/mini_racer_engine/src/sys.rs`, `crates/mini_racer_engine/build.rs` |
-| Wire decoding and text transcoding | `crates/mini_racer_wire/src/decode.rs`, `crates/mini_racer_wire/src/text.rs` |
+| Wire decoding, writing and text transcoding | `crates/mini_racer_wire/src/decode.rs`, `crates/mini_racer_wire/src/write.rs`, `crates/mini_racer_wire/src/text.rs` |
+| What V8 writes for a corpus of expressions, and its reviewed decoding | `crates/mini_racer_wire/tests/golden/`, `crates/mini_racer_engine/examples/gen_wire_golden.rs` |
+| V8 reading what `Writer` writes | `crates/mini_racer_engine/tests/writer.rs` |
 | Wire fuzz targets | `crates/mini_racer_wire/fuzz/fuzz_targets/`, `scripts/fuzz-smoke.sh` |
 | Mutex poison policy | `crates/mini_racer_sync/src/lock.rs` |
 | Turn-taking channel between a Ruby thread and a runner, parking | `crates/mini_racer_sync/src/channel.rs`, `crates/mini_racer_sync/src/parker.rs` |
@@ -109,6 +111,8 @@ scripts/update-notices.sh          # regenerate THIRD_PARTY_NOTICES.md and licen
 RUSTFLAGS="--cfg loom -Dwarnings" cargo test -p mini_racer_sync --test loom --release --locked --target-dir target/loom
 scripts/fuzz-smoke.sh 60           # every wire fuzz target, 60 s each, on the pinned nightly
 scripts/sanitizers.sh              # ASan teardown and memory checks, TSan on sync (Linux x86_64, needs llvm-symbolizer)
+cargo run -p mini_racer_engine --example gen_wire_golden   # rewrite the golden .bin files from V8
+UPDATE_GOLDEN=1 cargo test -p mini_racer_wire --test golden   # rewrite their .txt renderings, then review the diff
 bundle exec ruby test/upstream/run.rb --strict   # mini_racer's own suite against the ledger
 bundle exec ruby test/upstream/run.rb --suite execjs --strict   # ExecJS's suite on its MiniRacer runtime
 bundle exec rake compat:check      # compat.toml against the reference surface and this gem
@@ -124,7 +128,7 @@ bundle exec ruby -Ilib test/stress/churn.rb 8 600   # 8 threads creating, evalua
 
 ## Which tests to run
 
-- `crates/mini_racer_wire`: `cargo nextest run -p mini_racer_wire`, then `scripts/fuzz-smoke.sh 20`.
+- `crates/mini_racer_wire`: `cargo nextest run -p mini_racer_wire`, then `scripts/fuzz-smoke.sh 20`. A new corpus entry goes in `crates/mini_racer_wire/tests/golden/corpus.tsv`; generate its `.bin`, then its `.txt`, and read the `.txt` before committing.
 - `crates/mini_racer_sync`: `cargo nextest run -p mini_racer_sync`, then the loom command above.
 - `crates/mini_racer_engine`: `cargo nextest run -p mini_racer_engine`; for teardown or lifetime changes, `scripts/sanitizers.sh` or the `sanitizers` label. Flag-dependent assertions live in `crates/mini_racer_engine/tests/flags.rs`, one test per process.
 - `ext/` or `lib/`: `cargo test -p mini_racer_rs --lib` (the Ruby-free option rules and number classification), `bundle exec rake test`, then `scripts/check-exports.sh`, then `bundle exec ruby test/upstream/run.rb --strict` with and without `--suite execjs`, then `bundle exec ruby test/diff/run.rb --strict` with and without `--set consumers`, then `bundle exec rake compat:check`.
