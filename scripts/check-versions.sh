@@ -17,6 +17,15 @@ if [ -f .release-please-manifest.json ]; then
   [ "$manifest" = "$gem" ] || mismatch "release-please manifest $manifest != MiniRacerRs::VERSION $gem"
 fi
 
+for lock in Gemfile.lock test/consumers/transitive/Gemfile.lock; do
+  stale=$(grep -E '^ +mini_racer_rs \((= )?[^)]+\)$' "$lock" | grep -vE "\((= )?${gem//./\\.}\)$" || true)
+  [ -z "$stale" ] || mismatch "$lock locks mini_racer_rs at $(xargs <<<"$stale"); run scripts/sync-release-locks.sh"
+done
+for lock in Cargo.lock crates/mini_racer_wire/fuzz/Cargo.lock; do
+  crates=$(awk '/^name = "mini_racer_(engine|rs|sync|wire)"$/ { getline; gsub(/version = |"/, ""); print }' "$lock" | sort -u | xargs)
+  [ "$crates" = "$workspace" ] || mismatch "$lock has workspace crates at $crates, not $workspace; run scripts/sync-release-locks.sh"
+done
+
 explicit=$(grep -lE '^version = ' crates/*/Cargo.toml ext/*/Cargo.toml || true)
 [ -z "$explicit" ] || mismatch "crates must use version.workspace = true: $explicit"
 

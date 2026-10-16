@@ -25,6 +25,7 @@ Gem::Specification.new do |spec|
 
   spec.files = Dir[
     "AI-DISCLOSURE.md",
+    "CHANGELOG.md",
     "COMPATIBILITY.md",
     "Cargo.lock",
     "Cargo.toml",

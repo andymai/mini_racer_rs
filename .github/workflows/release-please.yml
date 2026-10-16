@@ -1,0 +1,94 @@
+name: Release Please
+
+on:
+  push:
+    branches: [main]
+  # Re-runs release management, as after setting RELEASE_HOLD to false.
+  workflow_dispatch:
+
+permissions: {}
+
+# Never cancel an in-flight run: a half-finished release PR update would leave
+# the manifest, the version files and the lockfiles out of step.
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: Release Please
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      # The release-kun App identity makes release PRs trigger CI (PRs opened
+      # with GITHUB_TOKEN never do) and lets the pipeline merge them; the
+      # main ruleset asks for no approval, and nothing publishes without the
+      # rubygems environment's reviewer. Without the App secrets, the release
+      # PR opens with GITHUB_TOKEN and a human finishes it.
+      HAS_APP: ${{ secrets.RELEASE_KUN_APP_ID != '' && secrets.RELEASE_KUN_APP_PRIVATE_KEY != '' }}
+    steps:
+      - name: Mint release-kun App token
+        id: app-token
+        if: env.HAS_APP == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.RELEASE_KUN_APP_ID }}
+          private-key: ${{ secrets.RELEASE_KUN_APP_PRIVATE_KEY }}
+
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: release
+        with:
+          token: ${{ steps.app-token.outputs.token || github.token }}
+          manifest-file: .release-please-manifest.json
+          config-file: release-please-config.json
+
+      # release-please bumps lib/mini_racer_rs/version.rb and the Cargo
+      # workspace version but runs no resolver, so the release PR also gets
+      # the gem's entries in both Gemfile.locks and the crates in Cargo.lock.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.release.outputs.pr && env.HAS_APP == 'true'
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: ruby/setup-ruby@651ff0d62c5c79bed6d53ec518387aae20e72c1a # v1.329.0
+        if: steps.release.outputs.pr && env.HAS_APP == 'true'
+        with:
+          ruby-version: "3.4"
+      - name: Sync the lockfiles on the release PR
+        if: steps.release.outputs.pr && env.HAS_APP == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          # Env expressions resolve before `if`, so an empty pr output must
+          # short-circuit rather than reach fromJSON.
+          PR_NUMBER: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).number || '' }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          pr_branch=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json headRefName --jq .headRefName)
+          # The checkout keeps no credentials, so fetch through the App token too.
+          git fetch "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "$pr_branch:$pr_branch"
+          git checkout "$pr_branch"
+          rustup toolchain install
+          scripts/sync-release-locks.sh
+          if git diff --quiet; then
+            echo "::notice::The lockfiles are already in sync."
+            exit 0
+          fi
+          git config user.name "release-kun[bot]"
+          git config user.email "release-kun[bot]@users.noreply.github.com"
+          git add Cargo.lock crates/mini_racer_wire/fuzz/Cargo.lock Gemfile.lock test/consumers/transitive/Gemfile.lock
+          git commit -m "chore: sync lockfiles for release"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "HEAD:${pr_branch}"
+
+      # Fails closed: the release PR merges only while RELEASE_HOLD is
+      # exactly "false", once CI passes on it; unset or anything else holds.
+      - name: Auto-merge release PR
+        if: steps.release.outputs.pr && env.HAS_APP == 'true' && vars.RELEASE_HOLD == 'false'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).number || '' }}
+          REPO: ${{ github.repository }}
+        run: gh pr merge "$PR_NUMBER" --auto --squash --repo "$REPO"

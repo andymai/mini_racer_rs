@@ -22,6 +22,10 @@ about=$(taplo get -f about.toml -o json | jq -r '.targets[]' | xargs)
 platforms_of() {
   sed -n '/^PLATFORMS$/,/^$/p' "$1" | sed -nE 's/^  (.+)$/\1/p' | xargs
 }
+release_include=$(sed -nE 's/^ *- platform: ([a-z0-9_-]+)$/\1/p' .github/workflows/release.yml | xargs)
+release_lists=$(sed -nE 's/^ *platform: \[(.+)\]$/\1/p' .github/workflows/release.yml | tr -d ',')
+package=$(sed -nE 's/^ *PLATFORMS = %w\[(.+)\]\.freeze$/\1/p' rakelib/package.rake)
+publish=$(sed -nE 's/^platforms="(.+)"$/\1/p' scripts/publish-gems.sh)
 lock=$(platforms_of Gemfile.lock)
 transitive=$(platforms_of test/consumers/transitive/Gemfile.lock)
 
@@ -30,6 +34,13 @@ same "$bindings" "$targets" || mismatch "v8-archives.sha256 bindings: $bindings"
 same "$extconf" "$targets" || mismatch "extconf.rb targets: $extconf"
 same "$deny" "$targets" || mismatch "deny.toml graph targets: $deny"
 same "$about" "$targets" || mismatch "about.toml targets: $about"
+same "$release_include" "$gem_platforms" || mismatch "release.yml matrix includes: $release_include"
+while read -r list; do
+  same "$(tr ' ' '\n' <<<"$list" | grep -vx ruby | xargs)" "$gem_platforms" || mismatch "release.yml matrix platforms: $list"
+done <<<"$release_lists"
+[ -n "$release_lists" ] || mismatch "release.yml has no platform matrix"
+same "$package" "$gem_platforms" || mismatch "rakelib/package.rake PLATFORMS: $package"
+same "$publish" "$gem_platforms" || mismatch "scripts/publish-gems.sh platforms: $publish"
 for platform in $gem_platforms; do
   grep -qw -- "$platform" <<<"$lock" || mismatch "Gemfile.lock PLATFORMS lacks $platform"
   grep -qw -- "$platform" <<<"$transitive" || mismatch "test/consumers/transitive/Gemfile.lock PLATFORMS lacks $platform"
