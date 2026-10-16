@@ -24,6 +24,9 @@ expect "push protection" "$(jq -r '.security_and_analysis.secret_scanning_push_p
 expect "private vulnerability reporting" "$(gh api "repos/$repo/private-vulnerability-reporting" --jq .enabled)" true
 expect "actions SHA pinning" "$(gh api "repos/$repo/actions/permissions" --jq .sha_pinning_required)" true
 expect "RELEASE_HOLD" "$(gh variable get RELEASE_HOLD -R "$repo")" true
+workflow=$(gh api "repos/$repo/actions/permissions/workflow")
+expect "workflow token permissions" "$(jq -r .default_workflow_permissions <<<"$workflow")" read
+expect "workflows may approve or create pull requests" "$(jq -r .can_approve_pull_request_reviews <<<"$workflow")" false
 expect "Dependabot alerts" "$(gh api "repos/$repo/vulnerability-alerts" --silent 2>/dev/null && echo enabled || echo disabled)" enabled
 expect "Dependabot security updates" "$(gh api "repos/$repo/automated-security-fixes" --jq .enabled)" true
 
