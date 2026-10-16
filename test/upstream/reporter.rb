@@ -54,6 +54,26 @@ module Minitest
 end
 Minitest.extensions << "mini_racer_rs"
 
+# Under --gc-stress every allocation in a test starts a compacting collection,
+# and a compaction check after each test catches a reference to a moved object.
+if ENV["MINI_RACER_RS_GC_STRESS"]
+  module UpstreamGcStress
+    def before_setup
+      super
+      GC.auto_compact = true
+      GC.stress = true
+    end
+
+    def after_teardown
+      GC.stress = false
+      GC.auto_compact = false
+      GC.verify_compaction_references(expand_heap: true, toward: :empty)
+      super
+    end
+  end
+  Minitest::Test.prepend(UpstreamGcStress)
+end
+
 # The runner sends USR2 to a test that overran its timeout before killing it.
 Signal.trap("USR2") do
   dump = Thread.list.map { |t| "#{t.inspect}\n  #{(t.backtrace || []).join("\n  ")}" }.join("\n")

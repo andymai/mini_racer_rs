@@ -1,6 +1,6 @@
 use std::ffi::{c_int, c_void};
 
-use magnus::rb_sys::{FromRawValue, protect};
+use magnus::rb_sys::{AsRawValue, FromRawValue, protect};
 use magnus::{Error, RString, Ruby, Value};
 
 use crate::guard::{Panicked, guard};
@@ -98,6 +98,38 @@ pub fn dbl2big(_ruby: &Ruby, n: f64) -> Value {
     let raw = unsafe { rb_sys::rb_dbl2big(n) };
     // SAFETY: `raw` is the live VALUE rb_dbl2big just returned.
     unsafe { Value::from_raw(raw) }
+}
+
+// mini_racer checks its String arguments with Check_Type, whose TypeError
+// names the argument's type as Ruby itself does.
+pub fn expect_string(ruby: &Ruby, value: Value) -> Result<RString, Error> {
+    let raw = value.as_raw();
+    protect(|| {
+        // SAFETY: the `&Ruby` argument proves this thread holds the GVL, and
+        // `protect` catches the TypeError rb_check_type raises.
+        unsafe { rb_sys::rb_check_type(raw, rb_sys::ruby_value_type::RUBY_T_STRING as c_int) };
+        raw
+    })?;
+    RString::from_value(value)
+        .ok_or_else(|| Error::new(ruby.exception_type_error(), "expected String"))
+}
+
+/// `digits` is a `BigInt` magnitude as little-endian 64-bit words.
+pub fn integer_unpack(_ruby: &Ruby, digits: &[u8], negative: bool) -> Result<Value, Error> {
+    let words = (digits.len() / 8).try_into().unwrap_or_default();
+    let sign = if negative {
+        rb_sys::INTEGER_PACK_NEGATIVE
+    } else {
+        0
+    };
+    let flags = c_int::try_from(rb_sys::INTEGER_PACK_LITTLE_ENDIAN | sign).unwrap_or(0);
+    let raw = protect(|| {
+        // SAFETY: `digits` holds `words` whole 8-byte words and outlives the
+        // call, which copies them; `protect` catches an allocation failure.
+        unsafe { rb_sys::rb_integer_unpack(digits.as_ptr().cast(), words, 8, 0, flags) }
+    })?;
+    // SAFETY: `raw` is the live Integer rb_integer_unpack just returned.
+    Ok(unsafe { Value::from_raw(raw) })
 }
 
 pub fn string_bytes(_ruby: &Ruby, s: RString) -> Vec<u8> {

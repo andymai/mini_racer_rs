@@ -28,7 +28,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     for line in corpus.lines().filter(|line| !line.starts_with('#')) {
         let (name, source) = line.split_once('\t').ok_or("corpus line without a tab")?;
         let bytes = context
-            .eval(source.to_owned(), &mut Parking)
+            .eval("<eval>".to_owned(), source.to_owned(), &mut Parking)
             .map_err(|error| format!("{name}: {error}"))?;
         std::fs::write(golden.join(format!("{name}.bin")), bytes)?;
     }

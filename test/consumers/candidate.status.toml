@@ -22,4 +22,4 @@ status = "xfail:S3"
 status = "same"
 
 [cases."consumer-terser-via-execjs"]
-status = "xfail:S3"
+status = "same"

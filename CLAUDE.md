@@ -45,13 +45,15 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 |---|---|
 | Flag normalization, single-threaded detection, stack size | `crates/mini_racer_engine/src/process/platform.rs` |
 | V8 initialization and version | `crates/mini_racer_engine/src/process.rs` |
-| Runner thread, script evaluation, serialization | `crates/mini_racer_engine/src/runner.rs` |
+| Runner thread, script evaluation, mini_racer's error formats | `crates/mini_racer_engine/src/runner.rs` |
+| Sanitizing results, the filter's safe context, serializing with the filter retry | `crates/mini_racer_engine/src/serialize.rs` |
 | Context handle, dispatch, the `Host` wait contract, stop, dispose, fork guard | `crates/mini_racer_engine/src/context.rs` |
 | Control block shared by a handle and its runner, request types, context config | `crates/mini_racer_engine/src/control.rs` |
 | Timeout watchdog thread | `crates/mini_racer_engine/src/process/watchdog.rs` |
 | Engine errors | `crates/mini_racer_engine/src/error.rs` |
 | `madvise` wrapper (fork safety) | `crates/mini_racer_engine/src/sys.rs`, `crates/mini_racer_engine/build.rs` |
 | Wire decoding, writing and text transcoding | `crates/mini_racer_wire/src/decode.rs`, `crates/mini_racer_wire/src/write.rs`, `crates/mini_racer_wire/src/text.rs` |
+| The string that stands in for a function result | `crates/mini_racer_wire/src/marker.rs` |
 | What V8 writes for a corpus of expressions, and its reviewed decoding | `crates/mini_racer_wire/tests/golden/`, `crates/mini_racer_engine/examples/gen_wire_golden.rs` |
 | V8 reading what `Writer` writes | `crates/mini_racer_engine/tests/writer.rs` |
 | Wire fuzz targets | `crates/mini_racer_wire/fuzz/fuzz_targets/`, `scripts/fuzz-smoke.sh` |
@@ -65,7 +67,8 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | `Context.new` option rules (Ruby-free) | `ext/mini_racer_rs/src/options.rs` |
 | `MiniRacer::Platform.set_flags!` | `ext/mini_racer_rs/src/platform.rs` |
 | JavaScript to Ruby values | `ext/mini_racer_rs/src/decode.rs` |
-| Error class mapping | `ext/mini_racer_rs/src/errors.rs` |
+| Decoding under `GC.stress` with compaction | `test/ruby/decode_gc_test.rb`, `test/upstream/gc_stress.txt`, `test/upstream/run.rb --gc-stress` |
+| Error class mapping, binary messages for errors mini_racer raises from C, `ScriptError#cause` | `ext/mini_racer_rs/src/errors.rs` |
 | GVL release, interrupts, raw rb-sys | `ext/mini_racer_rs/src/rb_raw.rs` |
 | Loader and conflict guard | `lib/mini_racer_rs.rb` |
 | Error hierarchy and Ruby compositions | `lib/mini_racer_rs/vocabulary.rb` |
@@ -115,6 +118,7 @@ cargo run -p mini_racer_engine --example gen_wire_golden   # rewrite the golden 
 UPDATE_GOLDEN=1 cargo test -p mini_racer_wire --test golden   # rewrite their .txt renderings, then review the diff
 bundle exec ruby test/upstream/run.rb --strict   # mini_racer's own suite against the ledger
 bundle exec ruby test/upstream/run.rb --suite execjs --strict   # ExecJS's suite on its MiniRacer runtime
+bundle exec ruby test/upstream/run.rb --gc-stress --strict   # the passing tests in gc_stress.txt under GC.stress with compaction
 bundle exec rake compat:check      # compat.toml against the reference surface and this gem
 bundle exec rake compat:render     # regenerate everything compat.toml generates
 bundle exec rake compat:verify     # compat:check plus a fresh reflection of the real gem (needs tools/reference)

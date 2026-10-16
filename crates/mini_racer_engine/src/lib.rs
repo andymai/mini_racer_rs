@@ -3,6 +3,7 @@ mod control;
 mod error;
 pub mod process;
 mod runner;
+mod serialize;
 mod spin;
 #[allow(
     unsafe_code,

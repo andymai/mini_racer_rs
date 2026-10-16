@@ -108,10 +108,21 @@ impl ContextHandle {
         Ok(handle)
     }
 
-    pub fn eval(&self, source: String, host: &mut impl Host) -> Result<Vec<u8>, EngineError> {
+    /// Runs `source` as a script named `filename` and returns its result
+    /// serialized as `mini_racer` replies.
+    pub fn eval(
+        &self,
+        filename: String,
+        source: String,
+        host: &mut impl Host,
+    ) -> Result<Vec<u8>, EngineError> {
         self.dispatch(
             DispatchKind::Script,
-            |dispatch| Request::Eval { source, dispatch },
+            |dispatch| Request::Eval {
+                filename,
+                source,
+                dispatch,
+            },
             host,
         )
     }

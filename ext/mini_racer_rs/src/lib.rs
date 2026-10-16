@@ -30,6 +30,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     let rs = ruby.define_module("MiniRacerRs")?;
     rs.const_set("NATIVE_VERSION", env!("CARGO_PKG_VERSION"))?;
     rs.const_set("V8_VERSION", mini_racer_engine::process::v8_version())?;
+    racer.define_class("JavaScriptFunction", ruby.class_object())?;
     errors::init(ruby)?;
     platform::init(ruby, racer)?;
     context::init(ruby, racer)?;

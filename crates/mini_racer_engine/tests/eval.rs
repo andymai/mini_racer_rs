@@ -99,7 +99,7 @@ impl Host for Interruptible<'_> {
 }
 
 fn eval(context: &ContextHandle, source: &str) -> Result<Out, EngineError> {
-    let bytes = context.eval(source.to_owned(), &mut Parking)?;
+    let bytes = context.eval("<eval>".to_owned(), source.to_owned(), &mut Parking)?;
     Ok(decode_value(&bytes, Limits::default(), &mut Shape).expect("V8 output decodes"))
 }
 
@@ -133,18 +133,37 @@ fn evaluates_primitives() {
 }
 
 #[test]
-fn reports_parse_and_runtime_errors() {
+fn reports_errors_in_mini_racers_formats() {
     let context = spawn();
-    match eval(&context, "1 +") {
-        Err(EngineError::Js(js)) => assert_eq!(js.kind, JsErrorKind::Parse),
-        other => panic!("expected a parse error, got {other:?}"),
-    }
-    match eval(&context, "throw new Error('boom')") {
-        Err(EngineError::Js(js)) => {
-            assert_eq!(js.kind, JsErrorKind::Runtime);
-            assert_eq!(js.message, "Error: boom");
+    let cases = [
+        (
+            "1 +",
+            JsErrorKind::Parse,
+            "Uncaught SyntaxError: Unexpected end of input at <eval>:1:3",
+        ),
+        (
+            "\n\n  foo bar",
+            JsErrorKind::Parse,
+            "Uncaught SyntaxError: Unexpected identifier 'bar' at <eval>:3:6",
+        ),
+        (
+            "throw new Error('boom')",
+            JsErrorKind::Runtime,
+            "Error: boom\n    at <eval>:1:7",
+        ),
+        ("throw 'str'", JsErrorKind::Runtime, "str"),
+        ("throw {a: 1}", JsErrorKind::Runtime, "[object Object]"),
+        ("throw null", JsErrorKind::Runtime, "null"),
+    ];
+    for (source, kind, message) in cases {
+        match eval(&context, source) {
+            Err(EngineError::Js(js)) => assert_eq!((js.kind, js.message.as_str()), (kind, message)),
+            other => panic!("{source}: expected an error, got {other:?}"),
         }
-        other => panic!("expected a runtime error, got {other:?}"),
+    }
+    match context.eval("f.js".to_owned(), "1 +".to_owned(), &mut Parking) {
+        Err(EngineError::Js(js)) => assert!(js.message.ends_with(" at f.js:1:3"), "{}", js.message),
+        other => panic!("expected a parse error, got {other:?}"),
     }
     assert_eq!(eval(&context, "2 * 21").ok(), Some(Out::Int(42)));
 }
@@ -243,7 +262,7 @@ fn a_cancelled_wait_terminates_the_script_and_leaves_nothing_behind() {
             let mut host = Interruptible {
                 interrupted: &interrupted,
             };
-            context.eval("while (true) {}".to_owned(), &mut host)
+            context.eval("<eval>".to_owned(), "while (true) {}".to_owned(), &mut host)
         });
         std::thread::sleep(Duration::from_millis(50));
         interrupted.store(true, Ordering::SeqCst);

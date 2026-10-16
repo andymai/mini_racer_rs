@@ -25,6 +25,7 @@
 | Gem Contents | Builds both gemspecs, checks the file list, resolves the unpacked source gem with `--locked` |
 | Ruby (3.3, 3.4 and 4.0 on ubuntu-24.04 and macos-15; 3.4 on ubuntu-24.04-arm) | `rake compile`, `scripts/check-exports.sh`, `rake test`, the upstream suite in strict mode, upstream's scripts, and a source gem install into an empty `GEM_HOME` |
 | TruffleRuby | the harness guard tests and the upstream suite in strict mode against the vendored backend |
+| GC Stress (Ruby 3.4, ubuntu-24.04) | the upstream tests in `test/upstream/gc_stress.txt` that pass, each under `GC.stress` with compaction, then `rake test` with `GC.auto_compact` |
 
 `.github/workflows/osv-scan.yml` scans all seven lockfiles with OSV: report-only on PRs, blocking on `main` and weekly; accepted advisories go in `osv-scanner.toml`. `.github/workflows/dependabot-auto-merge.yml` queues Dependabot's patch and minor updates for auto-merge once the required checks pass, through the release-kun App when its secrets are also set as Dependabot secrets; `.github/dependabot.yml` keeps `v8`, `deno_core_icudata`, `rb-sys`/`rb_sys` and the reference gem's `mini_racer`/`libv8-node` for deliberate bumps.
 

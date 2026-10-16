@@ -169,5 +169,65 @@
         ]
       }
     ]
+  },
+  {
+    "id": "curated-uncloneable-after-filter-symbol",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "({a: Symbol(\"s\")})"
+      }
+    ]
+  },
+  {
+    "id": "curated-uncloneable-after-filter-map-key",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "new Map([[() => 1, 2]])"
+      }
+    ]
+  },
+  {
+    "id": "curated-view-at-offset",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "new Uint8Array(new ArrayBuffer(8), 4)"
+      }
+    ]
+  },
+  {
+    "id": "curated-reference-after-date",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "(() => { const d = new Date(0); const o = {}; return [d, d, o, o] })()"
+      }
+    ]
+  },
+  {
+    "id": "curated-error-caused-by-itself",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "(() => { const e = new Error(\"x\"); e.cause = e; return e })()"
+      }
+    ]
+  },
+  {
+    "id": "curated-bigint-objects",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "[Object(1n), Object(-5n)]"
+      }
+    ]
   }
 ]

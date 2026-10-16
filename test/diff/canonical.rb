@@ -16,7 +16,7 @@ module DiffCanonical
     when Symbol then ["symbol", string(value.to_s)]
     when Time then ["time", value.to_i.to_s, value.nsec, value.utc_offset, value.utc?]
     when Array, Hash then container(value, ids)
-    when Exception then ["exception", value.class.name, string(value.message)]
+    when Exception then exception(value, ids)
     else other(value)
     end
   end
@@ -39,6 +39,16 @@ module DiffCanonical
     else
       ["hash", value.map { |key, item| [encode(key, ids), encode(item, ids)] }]
     end
+  end
+
+  # A returned JavaScript error, with its JavaScript frames and its cause, which
+  # can be the error itself.
+  def exception(value, ids)
+    return ["ref", ids[value]] if ids.key?(value)
+
+    ids[value] = ids.size
+    frames = Array(value.backtrace).map { |frame| string(frame) }
+    ["exception", value.class.name, string(value.message), frames, encode(value.cause, ids)]
   end
 
   def other(value)

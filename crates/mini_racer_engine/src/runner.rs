@@ -3,45 +3,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mini_racer_sync::{DispatchId, DispatchKind, Halt, Side, TermCell, TerminationCause, ToV8};
-use v8::ValueSerializerHelper;
 
 use crate::control::{ControlBlock, IsolateTerminator, Request};
+use crate::serialize::{self, Filter, Tc};
 use crate::spin::spin_until;
 use crate::{EngineError, JsError, JsErrorKind};
 
 // Spinning after each response catches a busy caller's next request without a
 // futex wake on either side; an idle context then parks.
 const IDLE_SPIN: Duration = Duration::from_micros(100);
-
-struct Serializer;
-
-impl v8::ValueSerializerImpl for Serializer {
-    fn throw_data_clone_error<'s>(
-        &self,
-        scope: &mut v8::PinScope<'s, '_>,
-        message: v8::Local<'s, v8::String>,
-    ) {
-        let exception = v8::Exception::error(scope, message);
-        scope.throw_exception(exception);
-    }
-}
-
-macro_rules! js_error {
-    ($tc:expr, $kind:expr) => {{
-        if $tc.has_terminated() {
-            EngineError::from(JsError::terminated(TerminationCause::Stop))
-        } else {
-            let message = $tc.exception().map_or_else(
-                || "unknown JavaScript error".to_owned(),
-                |exception| exception.to_rust_string_lossy($tc),
-            );
-            EngineError::from(JsError {
-                kind: $kind,
-                message,
-            })
-        }
-    }};
-}
 
 // Closes the channel however the runner ends, so a waiting Ruby thread never
 // parks on a runner that is gone.
@@ -75,10 +45,17 @@ pub fn run(block: &Arc<ControlBlock>) {
 // Returns whether it stopped for an explicit dispose.
 fn serve(block: &ControlBlock) -> bool {
     let mut isolate = v8::Isolate::new(v8::CreateParams::default());
-    let context = {
+    let contexts = {
         v8::scope!(let scope, &mut isolate);
-        let context = v8::Context::new(scope, v8::ContextOptions::default());
-        v8::Global::new(scope, context)
+        serialize::contexts(scope)
+    };
+    let Some((context, filter)) = contexts else {
+        if next(block).is_some() {
+            let _ = block.channel.respond(Err(EngineError::Internal(
+                "context setup failed".to_owned(),
+            )));
+        }
+        return false;
     };
     // Installed only once the context exists, so nothing terminates its setup.
     block
@@ -93,9 +70,13 @@ fn serve(block: &ControlBlock) -> bool {
                 Some(_) => Err(EngineError::Disposed),
                 None => Ok(Vec::new()),
             },
-            Request::Eval { source, dispatch } => {
+            Request::Eval {
+                filename,
+                source,
+                dispatch,
+            } => {
                 v8::scope_with_context!(let scope, &mut isolate, &context);
-                eval(scope, &block.term, &source, dispatch)
+                eval(scope, &block.term, &filter, &filename, &source, dispatch)
             }
             Request::Dispose => break true,
         };
@@ -104,6 +85,7 @@ fn serve(block: &ControlBlock) -> bool {
         }
     };
     block.term.uninstall();
+    drop(filter);
     drop(context);
     drop(isolate);
     disposed
@@ -132,35 +114,75 @@ fn halted(halt: Halt) -> EngineError {
 fn eval(
     scope: &mut v8::PinScope<'_, '_>,
     term: &TermCell<IsolateTerminator>,
+    filter: &Filter,
+    filename: &str,
     source: &str,
     dispatch: DispatchId,
 ) -> Result<Vec<u8>, EngineError> {
     v8::tc_scope!(let tc, scope);
-    let context = tc.get_current_context();
     let result = if term.check(DispatchKind::Script).is_some() {
         Err(EngineError::Internal("halted without a cause".to_owned()))
     } else {
-        v8::String::new(tc, source)
-            .ok_or_else(|| EngineError::Internal("source too large".to_owned()))
-            .and_then(|source| {
-                v8::Script::compile(tc, source, None)
-                    .ok_or_else(|| js_error!(tc, JsErrorKind::Parse))
-            })
-            .and_then(|script| {
-                script
-                    .run(tc)
-                    .ok_or_else(|| js_error!(tc, JsErrorKind::Runtime))
-            })
-            .and_then(|value| {
-                let serializer = v8::ValueSerializer::new(tc, Box::new(Serializer));
-                serializer.write_header();
-                match serializer.write_value(context, value) {
-                    Some(true) => Ok(serializer.release()),
-                    _ => Err(js_error!(tc, JsErrorKind::Runtime)),
-                }
-            })
+        evaluate(tc, filter, filename, source)
     };
     // Serializing runs getters, so the dispatch stays armed through it; the
     // verdict then replaces whatever the script produced.
     term.end(dispatch).map_or(result, |halt| Err(halted(halt)))
+}
+
+fn evaluate(
+    tc: &mut Tc<'_, '_, '_, '_>,
+    filter: &Filter,
+    filename: &str,
+    source: &str,
+) -> Result<Vec<u8>, EngineError> {
+    let too_large = || EngineError::Internal("source too large".to_owned());
+    let source = v8::String::new(tc, source).ok_or_else(too_large)?;
+    let name = v8::String::new(tc, filename).ok_or_else(too_large)?;
+    let origin = serialize::origin(tc, name.into());
+    let script = v8::Script::compile(tc, source, Some(&origin))
+        .ok_or_else(|| failure(tc, JsErrorKind::Parse))?;
+    let value = script
+        .run(tc)
+        .ok_or_else(|| failure(tc, JsErrorKind::Runtime))?;
+    let value = serialize::sanitize(tc, value);
+    serialize::reply(tc, filter, value).ok_or_else(|| failure(tc, JsErrorKind::Runtime))
+}
+
+// The message mini_racer builds for each kind: a parse error with where it
+// happened, a runtime error with its stack when the exception has one.
+fn failure(tc: &Tc<'_, '_, '_, '_>, kind: JsErrorKind) -> EngineError {
+    if tc.has_terminated() {
+        return EngineError::from(JsError::terminated(TerminationCause::Stop));
+    }
+    let message = match kind {
+        JsErrorKind::Parse => parse_message(tc),
+        JsErrorKind::Runtime | JsErrorKind::Terminated(_) => tc
+            .stack_trace()
+            .and_then(|trace| trace.to_string(tc))
+            .map(|trace| trace.to_rust_string_lossy(tc)),
+    };
+    let message = message.unwrap_or_else(|| {
+        tc.exception()
+            .and_then(|exception| exception.to_string(tc))
+            .map_or_else(
+                || "unexpected failure".to_owned(),
+                |text| text.to_rust_string_lossy(tc),
+            )
+    });
+    EngineError::from(JsError { kind, message })
+}
+
+fn parse_message(tc: &Tc<'_, '_, '_, '_>) -> Option<String> {
+    let message = tc.message()?;
+    let text = message.get(tc).to_rust_string_lossy(tc);
+    let name = message
+        .get_script_resource_name(tc)?
+        .to_string(tc)?
+        .to_rust_string_lossy(tc);
+    let line = message.get_line_number(tc).unwrap_or(0);
+    let column = Some(message.get_start_column())
+        .filter(|&column| i32::try_from(column).is_ok())
+        .unwrap_or(0);
+    Some(format!("{text} at {name}:{line}:{column}"))
 }

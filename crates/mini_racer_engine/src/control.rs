@@ -20,6 +20,7 @@ pub enum Request {
         dispatch: DispatchId,
     },
     Eval {
+        filename: String,
         source: String,
         dispatch: DispatchId,
     },

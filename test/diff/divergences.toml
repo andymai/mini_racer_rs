@@ -7,3 +7,33 @@
 # compat = "behavior:v8-version@ruby"
 # expected = "regex over the reference outcome of the step"
 # actual = "regex over the candidate outcome of the step"
+
+[[divergences]]
+actual = '\["(?:ref|time)",'
+compat = "behavior:object-ids@ruby"
+expected = '\["nil"\]'
+id = "reference-to-a-numbered-object"
+
+[[divergences]]
+actual = '"MiniRacer::ScriptError".*\["ref",\d+\]\]$'
+compat = "behavior:object-ids@ruby"
+expected = '"MiniRacer::ScriptError".*\["array",\[\]\]\]$'
+id = "error-caused-by-itself"
+
+[[divergences]]
+actual = '^\["hash",\[\[\["string","UTF-8","text","error"\],\["string","UTF-8","text","Error: .* could not be cloned\."\]\]\]\]$'
+compat = "behavior:uncloneable-after-filter@ruby"
+expected = '^\["crash","signal 6"\]$'
+id = "uncloneable-after-filter"
+
+[[divergences]]
+actual = '\["string","ASCII-8BIT","hex","[0-9a-f]*"\]'
+compat = "behavior:typed-array-offsets@ruby"
+expected = '^\["raise","MiniRacer::RuntimeError",\["string","ASCII-8BIT","hex","626164207479706564206172726179"\]\]$'
+id = "view-at-an-offset"
+
+[[divergences]]
+actual = '\["int","-?\d+"\]'
+compat = "behavior:bigint-objects@ruby"
+expected = '^\["raise","MiniRacer::RuntimeError",\["string","ASCII-8BIT","hex","626164207461673a207a"\]\]$'
+id = "bigint-object"

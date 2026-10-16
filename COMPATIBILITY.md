@@ -4,7 +4,7 @@
 
 | Engine | Done | Planned | Deviation |
 |---|---|---|---|
-| CRuby | 31 | 23 | 5 |
+| CRuby | 34 | 20 | 9 |
 | TruffleRuby | 58 | 0 | 0 |
 
 ## Surface
@@ -20,7 +20,7 @@
 | `class:MiniRacer::FailedV8Conversion < Object` | n/a | done |
 | `class:MiniRacer::InternalError < MiniRacer::EvalError` | done | n/a |
 | `class:MiniRacer::Isolate < Object` | n/a | done |
-| `class:MiniRacer::JavaScriptFunction < Object` | planned (S3) | done |
+| `class:MiniRacer::JavaScriptFunction < Object` | done | done |
 | `class:MiniRacer::ParseError < MiniRacer::EvalError` | done | done |
 | `class:MiniRacer::Platform < Object` | done | done |
 | `class:MiniRacer::PlatformAlreadyInitialized < MiniRacer::Error` | done | done |
@@ -59,14 +59,14 @@
 | `imethod:MiniRacer::JavaScriptFunction#to_s` | n/a | done |
 | `imethod:MiniRacer::RuntimeError#backtrace` | done | done |
 | `imethod:MiniRacer::ScriptError#backtrace` | done | done |
-| `imethod:MiniRacer::ScriptError#cause` | planned (S3) | n/a |
+| `imethod:MiniRacer::ScriptError#cause` | done | n/a |
 | `imethod:MiniRacer::Snapshot#dump` | planned (M5) | n/a |
 | `imethod:MiniRacer::Snapshot#load` | n/a | done |
 | `imethod:MiniRacer::Snapshot#size` | planned (M5) | n/a |
 | `imethod:MiniRacer::Snapshot#warmup!` | planned (M5) | done |
 | `imethod:MiniRacer::Snapshot#warmup_unsafe!` | n/a | done |
 | `imethod:MiniRacer::SnapshotError#backtrace` | done | done |
-| `kwarg:MiniRacer::Context#eval:filename` | planned (M1) | done |
+| `kwarg:MiniRacer::Context#eval:filename` | done | done |
 | `kwarg:MiniRacer::Context#eval_await:filename` | planned (M4) | n/a |
 | `kwarg:MiniRacer::Context#initialize:ensure_gc_after_idle` | planned (M3) | done |
 | `kwarg:MiniRacer::Context#initialize:isolate` | n/a | done |
@@ -84,6 +84,18 @@
 
 ## Deviations
 
+### `behavior:bigint-objects@ruby`
+
+mini_racer_rs returns a BigInt wrapper object's wrapped value as an Integer: `Object(1n)` returns `1`, and `[Object(-5n)]` returns `[-5]`. mini_racer 0.22.1 instead raises `MiniRacer::RuntimeError` with the message `bad tag: z`. Returning the primitive value makes BigInt wrappers consistent with Boolean, Number, and String wrapper objects, which both gems already return as their primitive values.
+
+Pending review.
+
+### `behavior:object-ids@ruby`
+
+mini_racer_rs preserves repeated object references by numbering every serialized object as V8 does. For `(() => { const d = new Date(0); const o = {}; return [d, d, o, o] })()`, it returns `[Time, Time, {}, {}]`, with identical Ruby objects for each pair. mini_racer 0.22.1 returns `[Time, nil, {}, nil]` because its reference list omits dates, regular expressions, typed arrays, and other objects that V8 numbers. Similarly, a self-referential error cause remains the error itself in mini_racer_rs but becomes an empty Array in mini_racer 0.22.1.
+
+Pending review.
+
 ### `behavior:platforms@ruby`
 
 mini_racer_rs supports glibc Linux on x86_64 and aarch64, plus macOS on arm64 and x86_64. Installation stops on musl-based Linux, including Alpine, and on Windows, with a message naming the supported platforms.
@@ -93,6 +105,18 @@ Pending review.
 ### `behavior:timeout-watchdog@ruby`
 
 mini_racer_rs raises MiniRacer::InternalError when its single process-wide watchdog thread cannot start, and the timed script does not run. mini_racer 0.22.1 starts a watchdog thread for each eval or call on a context created with timeout:; if creation fails, it prints mini_racer: watchdog: pthread_create: <error> to stderr and runs the script without a time limit. This difference prevents a failed watchdog from silently removing the bound often placed on untrusted JavaScript.
+
+Pending review.
+
+### `behavior:typed-array-offsets@ruby`
+
+mini_racer_rs returns a typed array or DataView at any byte offset as a binary (`ASCII-8BIT`) String containing the view's whole ArrayBuffer, consistent with both gems at offset 0. mini_racer 0.22.1 instead raises `MiniRacer::RuntimeError` with `bad typed array` for offsets such as those in `new Uint8Array(new ArrayBuffer(8), 4)` and `new DataView(new ArrayBuffer(4), 1, 2)`. Its decoder checks the byte after the view type, so offsets whose first encoded byte matches a view type letter can pass, including offset 66 for `B`.
+
+Pending review.
+
+### `behavior:uncloneable-after-filter@ruby`
+
+mini_racer_rs returns an error Hash when a result remains uncloneable after both gems copy it through mini_racer's filter function, which keeps enumerable data and drops functions. For example, `({a: Symbol("s")})` returns `{"error" => "Error: Symbol(s) could not be cloned."}`. A Map with a function key is another such case. mini_racer 0.22.1 aborts the Ruby process with signal 6 (SIGABRT), although its code contains the fallback that returns V8's message in a Hash. mini_racer_rs uses that fallback.
 
 Pending review.
 
