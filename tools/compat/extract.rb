@@ -15,14 +15,22 @@ module CompatExtract
 
   module_function
 
-  def required_features
-    features = Dir[File.join(UPSTREAM, "lib", "**", "*.rb")].flat_map do |file|
+  def upstream!
+    return if File.exist?(File.join(UPSTREAM, "lib", "mini_racer.rb"))
+
+    raise "#{UPSTREAM} is empty; run `git submodule update --init`"
+  end
+
+  def required_features(lib = File.join(UPSTREAM, "lib"))
+    upstream!
+    features = Dir[File.join(lib, "**", "*.rb")].flat_map do |file|
       File.read(file).scan(/^\s*require\s+["']([^"']+)["']/).flatten
     end
     features.reject { |feature| feature.start_with?("mini_racer") }.uniq.sort
   end
 
   def c_keywords
+    upstream!
     source = Dir[File.join(UPSTREAM, "ext", "**", "*.c")].map { |file| File.read(file) }.join("\n")
     functions = source.scan(FUNCTION).to_h { |name, _args, body| [name, body] }
     bound = methods(source)
@@ -31,8 +39,8 @@ module CompatExtract
     end.uniq.sort
   end
 
-  # Ruby method ("Context#eval") to the C function that implements it, tracking
-  # which class each C variable holds as the Init function reassigns them.
+  # The Init function reuses one C variable for several classes, so the class
+  # each variable holds is tracked line by line.
   def methods(source)
     classes = {}
     source.each_line.with_object({}) do |line, out|

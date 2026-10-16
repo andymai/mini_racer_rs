@@ -1,6 +1,6 @@
 ---
 name: parity-suite
-description: Use when running mini_racer's own test suite against mini_racer_rs, reading or updating test/upstream/mini_racer.status.toml, regenerating the ledger after a change, debugging an upstream test that fails, hangs or crashes, when the harness guard exits 97, or when changing the public surface, compat.toml, COMPATIBILITY.md or the generated stubs.
+description: Use when running mini_racer's own test suite against mini_racer_rs, reading or updating test/upstream/mini_racer.status.toml, regenerating the ledger after a change, debugging an upstream test that fails, hangs or crashes, when the harness guard exits 97, or when changing the public surface, compat.toml or COMPATIBILITY.md.
 ---
 
 # Parity Suite
@@ -57,15 +57,16 @@ Locally, write runs into a fresh directory with `--out <dir>/<name>.jsonl` (one 
 
 ## Compatibility ledger
 
-`compat/surface.json` lists every public id of mini_racer 0.22.1 (constants, classes with their superclass, instance and singleton methods, keyword arguments, required standard libraries), reflected from the real gem on CRuby and TruffleRuby; an id found on one engine only ends in `@ruby` or `@truffleruby`. `compat.toml` gives each id a status for CRuby: `done`, `todo:<milestone>`, or `deviation` with a `reason` (an `approved` date is the owner's to add). On TruffleRuby mini_racer_rs runs upstream's backend, so its surface must match exactly.
+`compat/surface.json` lists every public id of mini_racer 0.22.1 (constants, classes with their superclass, instance and singleton methods, keyword arguments, required standard libraries), reflected from the real gem on CRuby and TruffleRuby; an id found on one engine only ends in `@ruby` or `@truffleruby`. Keywords that upstream's C parses by hand are found by calling with each one (`KEYWORD_PROBES` in `tools/compat/reflect.rb`). `compat.toml` gives each id a status for CRuby: `done`, `todo:<milestone>`, or `deviation` with a `reason` (an `approved` date is the owner's to add). A surface deviation means the id is absent on purpose; a behavior difference gets its own `behavior:<kebab>` id, optionally engine-scoped. On TruffleRuby mini_racer_rs runs upstream's backend, so its surface must match exactly.
 
 | Task | Command |
 |---|---|
 | Check the ledger against this gem | `bundle exec rake compat:check` |
-| Regenerate COMPATIBILITY.md, the README table and `lib/mini_racer_rs/stubs.rb` | `bundle exec rake compat:render` |
-| Implemented a planned method | set its id to `done`, then `rake compat:render` (its stub disappears) |
-| Re-reflect the reference | `REFERENCE=1 bundle exec rake compat:reflect` on CRuby and on TruffleRuby, then `bundle exec rake compat:surface` |
+| Also re-reflect the real gem | `bundle exec rake compat:verify` (needs the `tools/reference` bundle) |
+| Regenerate COMPATIBILITY.md and the README table | `bundle exec rake compat:render` |
+| Implemented a planned method | set its id to `done`, then `rake compat:render` |
+| Rebuild the surface | `REFERENCE=1 bundle exec rake compat:reflect` on CRuby and on TruffleRuby, then `bundle exec rake compat:surface` |
 
-`compat:check` failures: `MISSING` (an id has no entry), `STALE` (an entry for an id that left the surface), `MALFORMED`, `UNKNOWN_MILESTONE`, `CLAIMED_DONE_BUT_ABSENT` (done, but the method is absent or still a stub), `TODO_BUT_IMPLEMENTED` (mark it done), `EXTRA_SURFACE` (this gem exposes something mini_racer does not). Keyword arguments of native methods cannot be reflected on CRuby; the upstream suite covers them.
+`compat:check` failures: `MISSING` (an id has no entry), `STALE` (an entry for an id that left the surface), `MALFORMED`, `UNKNOWN_MILESTONE`, `CLAIMED_DONE_BUT_ABSENT`, `TODO_BUT_IMPLEMENTED` (mark it done), `DEVIATION_BUT_PRESENT`, `EXTRA_SURFACE` (this gem exposes something mini_racer does not), `UNKNOWN_DEVIATION` (an upstream ledger cites a deviation compat.toml lacks), `SURFACE_DRIFT` (`compat:verify` only: the real gem and compat/surface.json disagree).
 
 Details: [reference.md](reference.md).

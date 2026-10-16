@@ -3,15 +3,12 @@
 require "json"
 require "tomlrb"
 
-# compat/surface.json holds the reference surface of every engine: an id found
-# on all engines is bare, one found on some carries @<engine>.
 module CompatSurface
   ROOT = File.expand_path("../..", __dir__)
   SURFACE = File.join(ROOT, "compat", "surface.json")
   LEDGER = File.join(ROOT, "compat.toml")
   ENGINES = %w[ruby truffleruby].freeze
   KINDS = %w[module class const imethod smethod kwarg feature behavior].freeze
-  STUBBABLE = %w[imethod smethod].freeze
 
   module_function
 

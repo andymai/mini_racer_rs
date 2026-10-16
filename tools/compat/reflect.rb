@@ -1,9 +1,5 @@
 # frozen_string_literal: true
 
-# Prints the public surface of the MiniRacer namespace on this Ruby engine as
-# sorted compat ids. --reference reflects the real mini_racer from
-# tools/reference; otherwise mini_racer_rs.
-
 require "fileutils"
 require "json"
 require "optparse"
@@ -17,9 +13,7 @@ OptionParser.new do |opts|
   opts.on("--out PATH") { |path| options[:out] = path }
 end.parse!
 
-before = $LOADED_FEATURES.dup
 require "mini_racer"
-loaded = $LOADED_FEATURES - before
 
 loaded_gem = defined?(MiniRacerRs) ? "mini_racer_rs" : "mini_racer"
 expected_gem = options[:reference] ? "mini_racer" : "mini_racer_rs"
@@ -27,17 +21,37 @@ abort "reflect: expected #{expected_gem} but #{loaded_gem} loaded" unless loaded
 
 KEYWORD_PARAMETERS = %i[key keyreq].freeze
 
+# Methods written in C or Rust report only a rest parameter, and upstream's
+# TruffleRuby eval takes an options hash, so the keywords upstream's C parses
+# are found by calling with each one and seeing whether it is refused.
+KEYWORD_PROBES = {
+  "MiniRacer::Context#initialize" => ->(options) { MiniRacer::Context.new(**options) },
+  "MiniRacer::Context#eval" => ->(options) { MiniRacer::Context.new.eval("1", **options) },
+  "MiniRacer::Context#eval_await" => ->(options) { MiniRacer::Context.new.eval_await("1", **options) },
+}.freeze
+PROBE_VALUES = {
+  "ensure_gc_after_idle" => 1000, "marshal_stack_depth" => 10, "max_memory" => 100_000_000, "snapshot" => nil,
+  "timeout" => 1000, "verbose_exceptions" => true, "filename" => "probe.js",
+}.freeze
+REFUSED = /bad keyword|unknown keyword|not supported/i
+
 def keywords(method)
   method.parameters.filter_map { |kind, name| name if KEYWORD_PARAMETERS.include?(kind) }
 end
 
+def accepted?(method, key)
+  probe = KEYWORD_PROBES.fetch(method) { abort "reflect: no probe for #{method}" }
+  probe.call(key.to_sym => PROBE_VALUES.fetch(key) { abort "reflect: no probe value for #{key}" })
+  true
+rescue ArgumentError, NoMethodError, NotImplementedError
+  false
+rescue StandardError => e
+  !REFUSED.match?(e.message)
+end
+
 def walk(mod, ids)
   name = mod.name
-  ids << if mod.is_a?(Class)
-           "class:#{name} < #{mod.superclass.name}"
-         else
-           "module:#{name}"
-         end
+  ids << (mod.is_a?(Class) ? "class:#{name} < #{mod.superclass.name}" : "module:#{name}")
   mod.public_instance_methods(false).each do |meth|
     ids << "imethod:#{name}##{meth}"
     keywords(mod.instance_method(meth)).each { |key| ids << "kwarg:#{name}##{meth}:#{key}" }
@@ -51,27 +65,23 @@ def walk(mod, ids)
   end
   mod.constants(false).each do |const|
     value = mod.const_get(const, false)
-    if value.is_a?(Module) && value.name == "#{name}::#{const}"
-      walk(value, ids)
-    else
-      ids << "const:#{name}::#{const}"
-    end
+    value.is_a?(Module) && value.name == "#{name}::#{const}" ? walk(value, ids) : ids << "const:#{name}::#{const}"
   end
 end
 
 ids = []
 walk(MiniRacer, ids)
-CompatExtract.required_features.each do |feature|
-  suffix = %r{/#{Regexp.escape(feature)}\.(?:rb|#{Regexp.escape(RbConfig::CONFIG["DLEXT"])})\z}
-  ids << "feature:#{feature}" if (before + loaded).any? { |path| suffix.match?(path) }
+lib = options[:reference] ? File.join(CompatExtract::UPSTREAM, "lib") : File.expand_path("../../lib", __dir__)
+CompatExtract.required_features(lib).each { |feature| ids << "feature:#{feature}" }
+CompatExtract.c_keywords.each do |id|
+  method, _, key = id.delete_prefix("kwarg:").rpartition(":")
+  ids << id if accepted?(method, key)
 end
-ids.concat(CompatExtract.c_keywords) if options[:reference] && RUBY_ENGINE == "ruby"
 
 report = {
   "engine" => RUBY_ENGINE,
   "gem" => options[:reference] ? "mini_racer #{Gem.loaded_specs.fetch("mini_racer").version}" : "mini_racer_rs",
   "ids" => ids.uniq.sort,
-  "stubs" => defined?(MiniRacerRs::STUBS) ? MiniRacerRs::STUBS.sort : [],
 }
 json = "#{JSON.pretty_generate(report)}\n"
 if options[:out]

@@ -33,6 +33,10 @@ Metrics/AbcSize:
     - "test/**/*"
     - "tools/**/*"
 
+Metrics/ModuleLength:
+  Exclude:
+    - "tools/**/*"
+
 Metrics/BlockLength:
   Exclude:
     - "*.gemspec"

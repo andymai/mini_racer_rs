@@ -4,8 +4,8 @@
 
 | Engine | Done | Planned | Deviation |
 |---|---|---|---|
-| CRuby | 27 | 27 | 2 |
-| TruffleRuby | 57 | 0 | 0 |
+| CRuby | 26 | 28 | 4 |
+| TruffleRuby | 59 | 0 | 0 |
 
 ## Surface
 
@@ -53,7 +53,7 @@
 | `imethod:MiniRacer::Context#perform_microtask_checkpoint` | planned (M4) | n/a |
 | `imethod:MiniRacer::Context#pump_message_loop` | planned (M4) | n/a |
 | `imethod:MiniRacer::Context#stop` | planned (S2) | done |
-| `imethod:MiniRacer::Context#write_heap_snapshot` | done | done |
+| `imethod:MiniRacer::Context#write_heap_snapshot` | planned (M3) | done |
 | `imethod:MiniRacer::FailedV8Conversion#info` | n/a | done |
 | `imethod:MiniRacer::Isolate#init_with_snapshot` | n/a | done |
 | `imethod:MiniRacer::JavaScriptFunction#to_s` | n/a | done |
@@ -66,8 +66,8 @@
 | `imethod:MiniRacer::Snapshot#warmup!` | planned (M5) | done |
 | `imethod:MiniRacer::Snapshot#warmup_unsafe!` | n/a | done |
 | `imethod:MiniRacer::SnapshotError#backtrace` | done | done |
-| `kwarg:MiniRacer::Context#eval:filename` | planned (M1) | n/a |
-| `kwarg:MiniRacer::Context#eval_await:filename` | planned (M4) | n/a |
+| `kwarg:MiniRacer::Context#eval:filename` | planned (M1) | done |
+| `kwarg:MiniRacer::Context#eval_await:filename` | planned (M4) | done |
 | `kwarg:MiniRacer::Context#initialize:ensure_gc_after_idle` | planned (M3) | done |
 | `kwarg:MiniRacer::Context#initialize:isolate` | n/a | done |
 | `kwarg:MiniRacer::Context#initialize:marshal_stack_depth` | planned (S2) | done |
@@ -84,15 +84,15 @@
 
 ## Deviations
 
-### `behavior:platforms`
+### `behavior:platforms@ruby`
 
 mini_racer_rs supports glibc Linux on x86_64 and aarch64, plus macOS on arm64 and x86_64. Installation stops on musl-based Linux, including Alpine, and on Windows, with a message naming the supported platforms.
 
 Pending review.
 
-### `behavior:v8-version`
+### `behavior:v8-version@ruby`
 
-mini_racer_rs embeds V8 15.2 (15.2.124.1, reported by `MiniRacerRs::V8_VERSION`) through the `v8` crate 152.2.0, while mini_racer 0.22.1 uses libv8-node 24.12.0.1 with V8 13.6.233.17. V8-produced text, including parse and runtime error messages and locale formatting, can therefore differ. An upstream test that fails only for this reason is listed with status `deviation:behavior:v8-version`.
+On CRuby, `mini_racer_rs` embeds V8 15.2.124.1 through the `v8` crate 152.2.0, while `mini_racer` 0.22.1 uses V8 13.6.233.17 through `libv8-node` 24.12.0.1. V8-generated text, including parse and runtime error messages and locale formatting, can therefore differ. Affected upstream tests are marked `deviation:behavior:v8-version@ruby` in `test/upstream/mini_racer.status.toml`. This difference does not apply on TruffleRuby, where both gems use upstream's GraalJS backend.
 
 Pending review.
 

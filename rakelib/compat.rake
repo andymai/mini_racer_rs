@@ -3,9 +3,7 @@
 namespace :compat do
   root = File.expand_path("..", __dir__)
 
-  desc "Reflect the MiniRacer surface on this engine into tmp/compat (REFERENCE=1: the real mini_racer)"
-  task :reflect do
-    reference = ENV["REFERENCE"] == "1"
+  reflect = lambda do |reference|
     out = File.join(root, "tmp/compat/#{reference ? "reference" : "candidate"}-#{RUBY_ENGINE}.json")
     mkdir_p File.dirname(out)
     if reference
@@ -17,6 +15,12 @@ namespace :compat do
     else
       ruby "-I#{File.join(root, "lib")}", "tools/compat/reflect.rb", "--out", out
     end
+    out
+  end
+
+  desc "Reflect the MiniRacer surface on this engine into tmp/compat (REFERENCE=1: the real mini_racer)"
+  task :reflect do
+    reflect.call(ENV["REFERENCE"] == "1")
   end
 
   desc "Merge tmp/compat/reference-{ruby,truffleruby}.json into compat/surface.json"
@@ -39,11 +43,16 @@ namespace :compat do
   end
 
   desc "Check compat.toml against compat/surface.json and mini_racer_rs on this engine"
-  task check: [*(RUBY_ENGINE == "ruby" ? [:compile] : []), :reflect] do
-    ruby "tools/compat/check.rb", File.join(root, "tmp/compat/candidate-#{RUBY_ENGINE}.json")
+  task check: RUBY_ENGINE == "ruby" ? [:compile] : [] do
+    ruby "tools/compat/check.rb", reflect.call(false)
   end
 
-  desc "Regenerate COMPATIBILITY.md, the README compat region and lib/mini_racer_rs/stubs.rb (CHECK=1: verify only)"
+  desc "compat:check, plus a fresh reflection of the real mini_racer on this engine against compat/surface.json"
+  task verify: RUBY_ENGINE == "ruby" ? [:compile] : [] do
+    ruby "tools/compat/check.rb", reflect.call(false), reflect.call(true)
+  end
+
+  desc "Regenerate COMPATIBILITY.md and the README compat region (CHECK=1: verify only)"
   task :render do
     ruby "tools/compat/render.rb", *(ENV["CHECK"] == "1" ? ["--check"] : [])
   end

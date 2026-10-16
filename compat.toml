@@ -2,12 +2,12 @@
 # A status describes CRuby; on TruffleRuby mini_racer_rs runs upstream's backend.
 # status = "done" | "todo:<milestone>" | "deviation" (with reason, then approved = "YYYY-MM-DD" once reviewed).
 
-[ids."behavior:platforms"]
+[ids."behavior:platforms@ruby"]
 reason = "mini_racer_rs supports glibc Linux on x86_64 and aarch64, plus macOS on arm64 and x86_64. Installation stops on musl-based Linux, including Alpine, and on Windows, with a message naming the supported platforms."
 status = "deviation"
 
-[ids."behavior:v8-version"]
-reason = "mini_racer_rs embeds V8 15.2 (15.2.124.1, reported by `MiniRacerRs::V8_VERSION`) through the `v8` crate 152.2.0, while mini_racer 0.22.1 uses libv8-node 24.12.0.1 with V8 13.6.233.17. V8-produced text, including parse and runtime error messages and locale formatting, can therefore differ. An upstream test that fails only for this reason is listed with status `deviation:behavior:v8-version`."
+[ids."behavior:v8-version@ruby"]
+reason = "On CRuby, `mini_racer_rs` embeds V8 15.2.124.1 through the `v8` crate 152.2.0, while `mini_racer` 0.22.1 uses V8 13.6.233.17 through `libv8-node` 24.12.0.1. V8-generated text, including parse and runtime error messages and locale formatting, can therefore differ. Affected upstream tests are marked `deviation:behavior:v8-version@ruby` in `test/upstream/mini_racer.status.toml`. This difference does not apply on TruffleRuby, where both gems use upstream's GraalJS backend."
 status = "deviation"
 
 [ids."class:MiniRacer::Binary < Object"]
@@ -137,7 +137,8 @@ status = "todo:M4"
 status = "todo:S2"
 
 [ids."imethod:MiniRacer::Context#write_heap_snapshot"]
-status = "done"
+depends_on = ["imethod:MiniRacer::Context#heap_snapshot@ruby"]
+status = "todo:M3"
 
 [ids."imethod:MiniRacer::FailedV8Conversion#info@truffleruby"]
 status = "done"
@@ -175,10 +176,10 @@ status = "done"
 [ids."imethod:MiniRacer::SnapshotError#backtrace"]
 status = "done"
 
-[ids."kwarg:MiniRacer::Context#eval:filename@ruby"]
+[ids."kwarg:MiniRacer::Context#eval:filename"]
 status = "todo:M1"
 
-[ids."kwarg:MiniRacer::Context#eval_await:filename@ruby"]
+[ids."kwarg:MiniRacer::Context#eval_await:filename"]
 status = "todo:M4"
 
 [ids."kwarg:MiniRacer::Context#initialize:ensure_gc_after_idle"]

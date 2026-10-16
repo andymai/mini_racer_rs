@@ -30,6 +30,4 @@ else
           "mini_racer_rs native extension #{MiniRacerRs::NATIVE_VERSION} does not match " \
           "the gem #{MiniRacerRs::VERSION}; run `rake compile`"
   end
-
-  require_relative "mini_racer_rs/stubs"
 end

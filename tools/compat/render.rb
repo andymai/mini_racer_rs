@@ -2,9 +2,6 @@
 
 require_relative "surface"
 
-# Writes everything compat.toml generates: COMPATIBILITY.md, the README region
-# between the compat-table markers, and lib/mini_racer_rs/stubs.rb. With
-# --check, writes nothing and fails if any of them would change.
 module CompatRender
   ROOT = CompatSurface::ROOT
   ENGINE_NAMES = { "ruby" => "CRuby", "truffleruby" => "TruffleRuby" }.freeze
@@ -20,14 +17,12 @@ module CompatRender
     {
       "COMPATIBILITY.md" => compatibility(entries, surface),
       "README.md" => readme_region(readme, entries, surface),
-      "lib/mini_racer_rs/stubs.rb" => stubs(entries),
     }
   end
 
-  # TruffleRuby runs upstream's backend, so only a deviation differs there.
+  # TruffleRuby runs upstream's backend, so every id it has is done there.
   def status_on(entries, id, engine)
-    status = entries.dig(id, "status")
-    engine == "truffleruby" && status != "deviation" ? "done" : status
+    engine == "truffleruby" ? "done" : entries.dig(id, "status")
   end
 
   def label(status)
@@ -48,9 +43,10 @@ module CompatRender
     CompatSurface::ENGINES.map do |engine|
       statuses = surface.fetch("ids").select { |id| CompatSurface.applies?(id, engine) }
                         .map { |id| status_on(entries, id, engine).to_s.sub(/\Atodo:.*/, "todo") }
+      behaviors = entries.keys.count { |id| CompatSurface.kind(id) == "behavior" && CompatSurface.applies?(id, engine) }
       tally = statuses.tally
       "| #{ENGINE_NAMES.fetch(engine)} | #{tally.fetch("done", 0)} | #{tally.fetch("todo", 0)} | " \
-        "#{tally.fetch("deviation", 0)} |"
+        "#{tally.fetch("deviation", 0) + behaviors} |"
     end
   end
 
@@ -87,42 +83,6 @@ module CompatRender
 
     region = ["## Compatibility", "", *summary(entries, surface), "", "See [COMPATIBILITY.md](COMPATIBILITY.md)."]
     "#{before}#{START}\n#{region.join("\n")}\n#{FINISH}#{after}"
-  end
-
-  # Planned methods on CRuby, so code that probes for them sees mini_racer's
-  # surface and a call raises NotImplementedError instead of NoMethodError.
-  def stubs(entries)
-    planned = entries.filter_map do |id, entry|
-      base, engine = CompatSurface.split(id)
-      kind = CompatSurface.kind(base)
-      next unless CompatSurface::STUBBABLE.include?(kind) && entry["status"].to_s.start_with?("todo:")
-      next unless engine.nil? || engine == "ruby"
-
-      owner, name = base.delete_prefix("#{kind}:").split(kind == "imethod" ? "#" : ".", 2)
-      "    [#{owner.dump}, #{name.to_sym.inspect}, #{kind == "smethod"}],"
-    end.sort
-    <<~RUBY
-      # frozen_string_literal: true
-
-      # #{GENERATED.sub("compat.toml and compat/surface.json", "compat.toml")}
-
-      module MiniRacerRs
-        STUBS = [
-      #{planned.join("\n")}
-        ].filter_map do |owner, name, singleton|
-          next unless Object.const_defined?(owner)
-
-          target = singleton ? Object.const_get(owner).singleton_class : Object.const_get(owner)
-          next if target.method_defined?(name) || target.private_method_defined?(name)
-
-          method = "\#{owner}\#{singleton ? "." : "#"}\#{name}"
-          target.define_method(name) do |*, **|
-            raise NotImplementedError, "\#{method} is not implemented in mini_racer_rs \#{VERSION}"
-          end
-          "\#{singleton ? "smethod" : "imethod"}:\#{method}"
-        end.freeze
-      end
-    RUBY
   end
 end
 
