@@ -153,7 +153,7 @@ bundle exec rake package:source    # the source gem, into pkg/
 
 ## Pitfalls
 
-- `lib/mini_racer_rs/version.rb` holds one version literal; release-please rewrites the first one it finds, and the Cargo workspace version, but no lockfile. `scripts/sync-release-locks.sh` brings the two `Gemfile.lock`s and `Cargo.lock` along, and the release PR workflow runs it.
+- `lib/mini_racer_rs/version.rb` holds one version literal; release-please rewrites the first one it finds, and the Cargo workspace version. `scripts/sync-release-locks.sh`, which the release PR workflow runs, brings both `Gemfile.lock`s, `Cargo.lock` and the fuzz crate's `Cargo.lock` along; `scripts/check-versions.sh` fails until they agree.
 - Loom builds need `--cfg loom` in `RUSTFLAGS` and their own `--target-dir target/loom`; sharing the default target dir rebuilds everything on every switch.
 - The fuzz crate is its own workspace with its own `Cargo.lock` (checked by `cargo fetch --locked`, cargo deny and cargo audit); it builds only on the nightly pinned as `toolchains.fuzz` in `tools/versions.toml`, which `scripts/fuzz-smoke.sh` installs when missing.
 - `rake compile` builds the dev profile locally and release when `CI` is set (`RB_SYS_CARGO_PROFILE`).

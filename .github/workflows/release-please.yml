@@ -3,7 +3,7 @@ name: Release Please
 on:
   push:
     branches: [main]
-  # Re-runs release management, as after clearing RELEASE_HOLD.
+  # Re-runs release management, as after setting RELEASE_HOLD to false.
   workflow_dispatch:
 
 permissions: {}
@@ -24,9 +24,10 @@ jobs:
       pull-requests: write
     env:
       # The release-kun App identity makes release PRs trigger CI (PRs opened
-      # with GITHUB_TOKEN never do) and lets the pipeline approve and merge
-      # them. Without the App secrets, the release PR opens with GITHUB_TOKEN
-      # and a human finishes it.
+      # with GITHUB_TOKEN never do) and lets the pipeline merge them; the
+      # main ruleset asks for no approval, and nothing publishes without the
+      # rubygems environment's reviewer. Without the App secrets, the release
+      # PR opens with GITHUB_TOKEN and a human finishes it.
       HAS_APP: ${{ secrets.RELEASE_KUN_APP_ID != '' && secrets.RELEASE_KUN_APP_PRIVATE_KEY != '' }}
     steps:
       - name: Mint release-kun App token
@@ -78,24 +79,14 @@ jobs:
           fi
           git config user.name "release-kun[bot]"
           git config user.email "release-kun[bot]@users.noreply.github.com"
-          git add Cargo.lock Gemfile.lock test/consumers/transitive/Gemfile.lock
+          git add Cargo.lock crates/mini_racer_wire/fuzz/Cargo.lock Gemfile.lock test/consumers/transitive/Gemfile.lock
           git commit -m "chore: sync lockfiles for release"
           git push "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "HEAD:${pr_branch}"
 
-      # Approval uses GITHUB_TOKEN (github-actions[bot]), a different actor from
-      # the App that authored the PR, because GitHub forbids self-review. The
-      # merge uses the App token so branch protection sees an approved PR.
-      - name: Auto-approve release PR
-        if: steps.release.outputs.pr && env.HAS_APP == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).number || '' }}
-          REPO: ${{ github.repository }}
-        run: gh pr review "$PR_NUMBER" --approve --body "Auto-approved by the release pipeline." --repo "$REPO"
-      # RELEASE_HOLD set to "true" keeps the release PR open; it merges only
-      # once the variable is cleared and this workflow runs again.
+      # Fails closed: the release PR merges only while RELEASE_HOLD is
+      # exactly "false", once CI passes on it; unset or anything else holds.
       - name: Auto-merge release PR
-        if: steps.release.outputs.pr && env.HAS_APP == 'true' && vars.RELEASE_HOLD != 'true'
+        if: steps.release.outputs.pr && env.HAS_APP == 'true' && vars.RELEASE_HOLD == 'false'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PR_NUMBER: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).number || '' }}

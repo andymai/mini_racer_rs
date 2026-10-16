@@ -18,7 +18,7 @@
       "extra-files": [
         { "type": "toml", "path": "Cargo.toml", "jsonpath": "$.workspace.package.version" }
       ],
-      "exclude-paths": [".claude", ".github", "bench", "scripts", "test", "tools"]
+      "exclude-paths": [".claude", ".github", "bench", "scripts", "test", "tools/compat", "tools/reference"]
     }
   }
 }

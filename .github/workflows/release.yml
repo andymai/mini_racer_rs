@@ -11,12 +11,18 @@ on:
     types: [published]
   pull_request:
     paths:
+      - .github/actions/setup/**
       - .github/workflows/release.yml
+      - lib/mini_racer_rs.rb
+      - mini_racer_rs.gemspec
       - rakelib/package.rake
       - release/**
+      - scripts/check-exports.sh
       - scripts/check-gem-sizes.sh
       - scripts/check-glibc-floor.sh
       - scripts/check-macos-minos.sh
+      - scripts/check-platforms.sh
+      - scripts/check-versions.sh
       - scripts/publish-gems.sh
       - tools/versions.toml
   workflow_dispatch:
@@ -101,7 +107,6 @@ jobs:
       CI: "true"
       RB_SYS_CARGO_PROFILE: release
       MACOSX_DEPLOYMENT_TARGET: ${{ needs.verify.outputs.macos }}
-      BUNDLE_WITHOUT: scheduler
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -150,8 +155,6 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
-    env:
-      BUNDLE_WITHOUT: scheduler
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -280,12 +283,13 @@ jobs:
         env:
           EXPECTED_PLATFORM: ruby
         run: |
-          rustc --version
           export GEM_HOME="$RUNNER_TEMP/gems" GEM_PATH="$RUNNER_TEMP/gems"
           rb_sys=$(sed -nE 's/^ *spec\.add_dependency "rb_sys", "= ([^"]+)"$/\1/p' mini_racer_rs.gemspec)
           gem install rb_sys -v "$rb_sys" --no-document
-          gem install --local --no-document pkg/*.gem
+          # Outside the checkout, whose rust-toolchain.toml would pick another.
           cd "$RUNNER_TEMP"
+          rustc --version
+          gem install --local --no-document "$GITHUB_WORKSPACE"/pkg/*.gem
           ruby "$GITHUB_WORKSPACE/release/smoke.rb"
 
   checksums:
