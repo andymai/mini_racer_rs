@@ -91,7 +91,7 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | Differential run against the real gem | `test/diff/run.rb`, `test/diff/workers.rb`, `test/diff/worker.rb`, `test/diff/canonical.rb`, `test/diff/generate.rb`, `test/diff/shrink.rb`, `test/diff/ledger.rb`, `test/diff/shapes.rb` |
 | Consumer workloads (Babel, Terser, Handlebars, React) and their ledger | `test/consumers/workloads.rb`, `test/consumers/js/`, `test/consumers/candidate.status.toml` |
 | rtlcss resolving through the shim to mini_racer_rs | `test/consumers/transitive/` |
-| Benchmarks against the real gem (informational) | `bench/run.rb`, `bench/measure.rb`, `bench/payload.rb` |
+| Benchmarks against the real gem (informational), including mini_racer's own `benchmark/serde` suite | `bench/run.rb`, `bench/measure.rb`, `bench/payload.rb`, `bench/serde.rb` |
 | Memory and lifecycle stress runs | `test/stress/round_trips.rb`, `test/stress/churn.rb` |
 | Differential ledgers and corpus | `test/diff/candidate.status.toml`, `test/diff/divergences.toml`, `test/diff/corpus/` |
 | Vendored TruffleRuby backend | `lib/mini_racer/truffleruby.rb`, `lib/mini_racer/shared.rb` |
