@@ -88,118 +88,118 @@
 
 mini_racer_rs returns a BigInt wrapper object's wrapped value as an Integer: `Object(1n)` returns `1`, and `[Object(-5n)]` returns `[-5]`. mini_racer 0.22.1 instead raises `MiniRacer::RuntimeError` with the message `bad tag: z`. Returning the primitive value makes BigInt wrappers consistent with Boolean, Number, and String wrapper objects, which both gems already return as their primitive values.
 
-Pending review.
+Approved 2026-10-16.
 
 ### `behavior:callback-error-text@ruby`
 
 When an attached Ruby callback raises, JavaScript receives an `Error` whose message is the exception’s `to_s`. mini_racer_rs gives V8 that text using the same rules as `eval` source: ISO-8859-1 as Latin-1, UTF-16LE as two-byte text, and other encodings as UTF-8, with invalid sequences replaced by U+FFFD. mini_racer 0.22.1 treats the string’s bytes as Latin-1 regardless of encoding. With `t` raising `"café"`, `try { t() } catch (e) { e.message }` returns `"café"` from mini_racer_rs and `"cafÃ©"` from mini_racer 0.22.1. UTF-16LE produces a NUL after each letter in mini_racer. ASCII messages match. If JavaScript does not catch the exception, both gems raise the original Ruby exception from `eval` or `call` with its message unchanged.
 
-Pending review.
+Approved 2026-10-16.
 
 ### `behavior:callback-jump@ruby`
 
 mini_racer_rs terminates the script with `Error: terminated` when a callback attached with `Context#attach` leaves by `throw`, by `return` out of a proc whose method is still running, or by `Thread#kill`. The jump continues after `Context#eval` or `Context#call` returns, and the context stays usable. For example, `catch(:out) { context.eval("thrower(); 'not reached'") }` returns `5` when `thrower` executes `throw :out, 5`. With mini_racer 0.22.1, that `throw` never returns, and neither does `proc { return :x }` when called from the method that created it. The process hangs until killed. A callback calling `Thread.current.kill` instead makes `eval` raise `TypeError` with `exception class/object expected`, without killing the thread. In mini_racer_rs, the thread ends. `break` out of a proc raises `LocalJumpError` in both gems.
 
-Pending review.
+Approved 2026-10-16.
 
 ### `behavior:callback-reentry@ruby`
 
 Both gems allow an attached callback to call `eval`, `call`, or `attach` on its own context, running the nested call inside the script that invoked the callback. mini_racer_rs accepts the call only from the fiber running the callback. A call from another fiber on the same thread, such as code inside `Enumerator#next`, raises `ThreadError` (`deadlock; lock already owned by another fiber belonging to the same thread`). mini_racer 0.22.1 accepts it: `Enumerator.new { |y| y << context.eval("1") }.next` inside a callback returns `1`. A signal trap that calls the context while a callback waits on a nested `eval` gets `ThreadError` in mini_racer_rs; when rescued, the script completes. With mini_racer 0.22.1, the same program hangs until killed. mini_racer_rs refuses these calls because each nested call must finish before its callback replies, preventing out-of-order replies from being paired with the wrong callback.
 
-Pending review.
+Approved 2026-10-16.
 
 ### `behavior:fiber-scheduler@ruby`
 
 mini_racer_rs parks only a non-blocking fiber waiting for a context under a fiber scheduler, so the thread's other fibers keep running during `Context.new`, `eval`, `call`, `attach`, `dispose`, and nested callback calls. mini_racer 0.22.1 releases the GVL and blocks the whole thread until JavaScript returns. Three 100 ms busy loops in separate contexts and fibers inside `Sync` finish in 100 ms with mini_racer_rs, with a 10 ms ticker ticking 9 times; mini_racer takes 300 ms, with 3 ticks. With mini_racer_rs, `task.with_timeout(0.05) { context.call("busy", 300) }` raises `Async::TimeoutError` after 50 ms and terminates JavaScript; mini_racer returns `300` after 300 ms. In both gems the context stays usable afterward. Fibers sharing a context take turns in both gems. Without a scheduler or in a blocking fiber, mini_racer_rs blocks the thread while waiting, as mini_racer does. `Snapshot.new` also blocks the thread.
 
-Pending review.
+Approved 2026-10-16.
 
 ### `behavior:fork-from-callback@ruby`
 
 With an attached callback that calls `fork` under the `:single_threaded` platform flag, the parent's `eval` returns `"parent"` in both gems, and its later `context.eval("1 + 1")` returns `2`. mini_racer 0.22.1's child is still running five seconds later, when the test kills it. In mini_racer_rs's child, the `eval` that invokes the callback raises `MiniRacer::RuntimeError` with `single-threaded runner: Device or resource busy` when the callback returns, because the JavaScript thread stays with the parent. A call on the same context from inside the child callback, and every later call, raises the same error. A new child context works: `MiniRacer::Context.new.eval("6 * 7")` returns `42`.
 
-Pending review.
+Approved 2026-10-16.
 
 ### `behavior:fork-quiesce-bound@ruby`
 
 With the `:single_threaded` platform flag, mini_racer_rs waits up to 500 ms inside Ruby's `fork` or `Process.daemon` for every context's runner to become idle or parked. If another thread runs an operation V8 does not interrupt, such as `JSON.parse` of a large string, the child refuses every inherited context: calling an idle one raises `MiniRacer::RuntimeError` with `single-threaded runner: Device or resource busy`. New contexts created in the child work. mini_racer 0.22.1 does not wait for its runners. With `JSON.parse` of a 3,000,000-element array's JSON, its fork took 15 ms and its child's idle context returned `42`; mini_racer_rs took 523 ms and refused that context.
 
-Pending review.
+Approved 2026-10-16.
 
 ### `behavior:multi-threaded-fork@ruby`
 
 In a child forked from a process using V8's default multi-threaded platform, mini_racer 0.22.1 hangs when an inherited context runs `context.eval("1 + 1")`; the observed child was still waiting after 3 seconds. mini_racer_rs instead raises `MiniRacer::RuntimeError` at once with `single-threaded runner: Device or resource busy`, while the parent's contexts remain unaffected. The child inherits none of the context runner or V8 worker threads. A new `MiniRacer::Context` in the child can evaluate `eval("2")` to `2`, but work requiring V8 worker threads may never finish. Contexts intended to keep working in a child should use `:single_threaded`.
 
-Pending review.
+Approved 2026-10-16.
 
 ### `behavior:native-fork@ruby`
 
 With the `:single_threaded` platform flag, mini_racer_rs refuses every context inherited by a child of a fork that bypasses Ruby's `fork`, including idle contexts: calls raise `MiniRacer::RuntimeError` with `single-threaded runner: Device or resource busy`. In a libc `fork()` test through Fiddle, mini_racer 0.22.1's child returned `42` from an inherited idle context holding `var answer = 42`, while mini_racer_rs raised that error. In both gems, new child contexts and the parent's context work. Calling `dispose` on an inherited child context returns `nil`, after which calls raise `MiniRacer::ContextDisposedError`. mini_racer_rs cannot rule out an in-progress V8 state change without the runner wait used by Ruby's `fork`, `IO.popen("-")`, and `Process.daemon`.
 
-Pending review.
+Approved 2026-10-16.
 
 ### `behavior:object-ids@ruby`
 
 mini_racer_rs preserves repeated-object identity in both directions by numbering every object as V8 does, including dates, regular expressions, typed arrays, ArrayBuffers, wrapper objects, and errors. Serialized repeats refer back by number. From JavaScript to Ruby, `(() => { const d = new Date(0); const o = {}; return [d, d, o, o] })()` returns `[Time, Time, {}, {}]`, with each pair the same Ruby object. mini_racer 0.22.1 counts only decoded arrays, objects, maps, sets, and errors, so it returns `[Time, nil, {}, nil]`; a repeated error, including one that is its own cause, becomes `[]` instead of the same `MiniRacer::ScriptError`. From Ruby to JavaScript, mini_racer 0.22.1 counts only Arrays and Hashes, so `context.call("f", time, hash, hash)` gives `f` a Date, an object, and the same Date. mini_racer_rs gives `f` the same object twice. For call arguments and callback results, it also sends a repeated `Time`, `DateTime`, object whose `to_time` returns a `Time`, or `MiniRacer::Binary` as one Date or Uint8Array, calling `to_time` once per object. Thus, with `same = (a, b) => a === b`, `context.call("same", time, time)` returns `true`, while mini_racer returns `false`; distinct equal `Time` objects remain distinct in both.
 
-Pending review.
+Approved 2026-10-16.
 
 ### `behavior:padded-two-byte-text@ruby`
 
 mini_racer_rs returns a regular expression as its pattern String and a String object as its String, including `[1, new RegExp('東')]`, `new RegExp('東')`, and `[new String('東')]` as `[1, "東"]`, `"東"`, and `["東"]`. It skips V8's optional alignment byte before two-byte text, as V8's own deserializer does. mini_racer 0.22.1 does not accept that byte and raises `MiniRacer::RuntimeError` with `bad regexp` or `bad string object` for these examples, although `({ab: new RegExp('東')})` returns `{"ab" => "東"}` because its serialized position requires no alignment byte.
 
-Pending review.
+Approved 2026-10-16.
 
 ### `behavior:platforms@ruby`
 
 mini_racer_rs supports glibc Linux on x86_64 and aarch64, plus macOS on arm64 and x86_64. Installation stops on musl-based Linux, including Alpine, and on Windows, with a message naming the supported platforms.
 
-Pending review.
+Approved 2026-10-16.
 
 ### `behavior:snapshot-filter-context@ruby`
 
 mini_racer_rs returns the same filtered results from a snapshot-based context as from a context without a snapshot. In a context made from `MiniRacer::Snapshot.new("Object.getOwnPropertyDescriptors = () => ({})")`, `({a: 1, f() {}})` returns `{"a" => 1}`, and `[1, function() {}]` returns `[1]`. mini_racer 0.22.1 returns `nil` for both. Both gems copy results that V8 refuses to serialize as is through a filter in a separate safe context. mini_racer_rs keeps an untouched context in each snapshot blob and uses it for that filter, while mini_racer 0.22.1 builds the safe context from the snapshot, exposing the filter's built-ins to snapshot code. User code still sees the replacement in both gems: `Object.getOwnPropertyDescriptors({a: 1})` returns `{}`.
 
-Pending review.
+Approved 2026-10-16.
 
 ### `behavior:timeout-watchdog@ruby`
 
 mini_racer_rs raises MiniRacer::InternalError when its single process-wide watchdog thread cannot start, and the timed script does not run. mini_racer 0.22.1 starts a watchdog thread for each eval or call on a context created with timeout:; if creation fails, it prints mini_racer: watchdog: pthread_create: <error> to stderr and runs the script without a time limit. This difference prevents a failed watchdog from silently removing the bound often placed on untrusted JavaScript.
 
-Pending review.
+Approved 2026-10-16.
 
 ### `behavior:typed-array-offsets@ruby`
 
 mini_racer_rs returns a typed array or DataView at any byte offset as a binary (`ASCII-8BIT`) String containing the view's whole ArrayBuffer, consistent with both gems at offset 0. mini_racer 0.22.1 instead raises `MiniRacer::RuntimeError` with `bad typed array` for offsets such as those in `new Uint8Array(new ArrayBuffer(8), 4)` and `new DataView(new ArrayBuffer(4), 1, 2)`. Its decoder checks the byte after the view type, so offsets whose first encoded byte matches a view type letter can pass, including offset 66 for `B`.
 
-Pending review.
+Approved 2026-10-16.
 
 ### `behavior:uncloneable-after-filter@ruby`
 
 mini_racer_rs returns an error Hash when a result remains uncloneable after both gems copy it through mini_racer's filter function, which keeps enumerable data and drops functions. For example, `({a: Symbol("s")})` returns `{"error" => "Error: Symbol(s) could not be cloned."}`. A Map with a function key is another such case. mini_racer 0.22.1 aborts the Ruby process with signal 6 (SIGABRT), although its code contains the fallback that returns V8's message in a Hash. mini_racer_rs uses that fallback.
 
-Pending review.
+Approved 2026-10-16.
 
 ### `behavior:v8-version@ruby`
 
 On CRuby, `mini_racer_rs` embeds V8 15.2.124.1 through the `v8` crate 152.2.0, while `mini_racer` 0.22.1 uses V8 13.6.233.17 through `libv8-node` 24.12.0.1. V8-generated text, including parse and runtime error messages and locale formatting, can therefore differ. So can the nesting depth at which V8 stops reading a value: with the default stack limit, `Context#call` accepts arguments about 6,250 levels deep in `mini_racer_rs` and about 3,100 in `mini_racer` 0.22.1, and both limits halve with half the stack. Affected upstream tests are marked `deviation:behavior:v8-version@ruby` in `test/upstream/mini_racer.status.toml`. This difference does not apply on TruffleRuby, where both gems use upstream's GraalJS backend.
 
-Pending review.
+Approved 2026-10-16.
 
 ### `behavior:warmup-discards-context@ruby`
 
 mini_racer_rs completes `Snapshot#warmup!` when the warmup script creates an object V8 cannot serialize, while mini_racer 0.22.1 stops the process with a `global handle not serialized` trap. mini_racer_rs releases the warmup context before writing the new snapshot blob, so its objects are not written. mini_racer 0.22.1 still holds that context while writing the blob. For `snapshot = MiniRacer::Snapshot.new("function f() { return 1 }")`, `snapshot.warmup!("var formatter = new Intl.DateTimeFormat('en'); f()")` succeeds in mini_racer_rs, and a context created from the snapshot evaluates `[f(), typeof formatter]` to `[1, "undefined"]`. Both gems use a fresh default context, so warmup variables are never part of the result.
 
-Pending review.
+Approved 2026-10-16.
 
 ### `module:MiniRacer::Loader@ruby`
 
 `MiniRacer::Loader` and `MiniRacer::Loader.load` do not exist in mini_racer_rs, whose single native extension uses a plain `require`. Its dynamic exports are limited to per-platform allowlists, CI fails if any C++ or Rust symbol is exported, and on Linux it links with `-Bsymbolic` so its references bind to its own definitions. mini_racer 0.22.1 uses `mini_racer_loader` with `RTLD_LOCAL` and `RTLD_DEEPBIND`, except when `LD_PRELOAD` contains `malloc`; `LD_PRELOAD` does not change mini_racer_rs loading.
 
-Pending review.
+Approved 2026-10-16.
 
 ### `smethod:MiniRacer::Loader.load@ruby`
 
 `MiniRacer::Loader` and `MiniRacer::Loader.load` do not exist in mini_racer_rs, whose single native extension uses a plain `require`. Its dynamic exports are limited to per-platform allowlists, CI fails if any C++ or Rust symbol is exported, and on Linux it links with `-Bsymbolic` so its references bind to its own definitions. mini_racer 0.22.1 uses `mini_racer_loader` with `RTLD_LOCAL` and `RTLD_DEEPBIND`, except when `LD_PRELOAD` contains `malloc`; `LD_PRELOAD` does not change mini_racer_rs loading.
 
-Pending review.
+Approved 2026-10-16.
