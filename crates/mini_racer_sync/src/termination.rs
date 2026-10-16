@@ -272,6 +272,18 @@ impl<T: Terminator> TermCell<T> {
         true
     }
 
+    /// What a forked child takes over with the context: whether a stop is
+    /// pending, and whether a dispose had begun. `None` while the lock is
+    /// held, which in a child means by a thread that is gone.
+    #[must_use]
+    pub fn inherited(&self) -> Option<(bool, bool)> {
+        let state = self.state.try_lock().ok()?;
+        Some((
+            state.causes.contains(TerminationCause::Stop),
+            state.disposing,
+        ))
+    }
+
     /// Marks the context as disposing: the armed dispatch, if any, is
     /// terminated and halts with `Disposed`, and no new one can begin.
     pub fn dispose(&self) -> bool {

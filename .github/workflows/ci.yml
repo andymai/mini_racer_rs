@@ -414,6 +414,8 @@ jobs:
             exit 1
           fi
       - run: bundle exec rake test
+      - name: Fork stress
+        run: bundle exec ruby -Ilib test/stress/fork_loop.rb
       - name: Extension unit tests
         run: cargo test -p mini_racer_rs --lib --locked
       - name: Compatibility ledger

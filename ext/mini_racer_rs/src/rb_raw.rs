@@ -191,6 +191,21 @@ pub fn identity(value: Value) -> u64 {
     value.as_raw()
 }
 
+/// `super(*values)`, from the method Ruby is running.
+pub fn call_super(_ruby: &Ruby, values: &[Value]) -> Result<Value, Error> {
+    let raw_values: Vec<rb_sys::VALUE> = values.iter().map(|value| value.as_raw()).collect();
+    let count = c_int::try_from(raw_values.len()).unwrap_or(c_int::MAX);
+    let raw = protect(|| {
+        // SAFETY: the `&Ruby` argument proves this thread holds the GVL, the
+        // caller is a method body Ruby called, `raw_values` holds `count`
+        // values the caller keeps alive on its stack, and `protect` catches
+        // anything super raises or throws.
+        unsafe { rb_sys::rb_call_super(count, raw_values.as_ptr()) }
+    })?;
+    // SAFETY: `raw` is the live value super returned.
+    Ok(unsafe { Value::from_raw(raw) })
+}
+
 /// `receiver.call(*args)`, with Ruby reading the arguments from `args`
 /// itself, so they stay where the GC sees them for the whole call.
 pub fn call_with_array(ruby: &Ruby, receiver: Value, args: RArray) -> Result<Value, Error> {

@@ -15,7 +15,7 @@ use mini_racer_engine::{ContextConfig, ContextHandle, EngineError, JsText};
 
 use crate::encode;
 use crate::gc_root::OwnedRoot;
-use crate::host::{Callbacks, RubyHost};
+use crate::host::{Callbacks, RubyHost, Waiter};
 use crate::options::{self, OptionError, OptionValue};
 use crate::{decode, errors, export, rb_raw, snapshot};
 
@@ -45,7 +45,7 @@ pub struct Context {
     callables: OwnedRoot<RArray>,
     raised: OwnedRoot<Value>,
     // The IO a fiber scheduler waits on for this context's runner.
-    waiter: OwnedRoot<Value>,
+    waiter: Waiter,
     accounted: Cell<bool>,
     // Set before the GVL is released to wait for the runner, so a second
     // initialize cannot start while the first waits.

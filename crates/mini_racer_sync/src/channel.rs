@@ -252,6 +252,20 @@ impl<P: Protocol> Channel<P> {
         ready(self.state.load(Ordering::Acquire), side)
     }
 
+    /// Open, Ruby's turn, and no request or callback open. A thread that has
+    /// claimed the context but not sent yet still counts as idle.
+    #[must_use]
+    pub fn idle(&self) -> bool {
+        let state = self.state.load(Ordering::Acquire);
+        holds_turn(state, Side::Ruby)
+            && !closed(state)
+            && nesting(state)
+                == Nesting {
+                    requests: 0,
+                    callbacks: 0,
+                }
+    }
+
     #[must_use]
     pub fn is_closed(&self) -> bool {
         closed(self.state.load(Ordering::Acquire))

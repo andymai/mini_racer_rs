@@ -1,10 +1,13 @@
+use std::cell::Cell;
 use std::os::fd::{AsRawFd, IntoRawFd};
 use std::sync::OnceLock;
 use std::time::Duration;
 
 use magnus::error::ErrorType;
+use magnus::gc::Marker;
 use magnus::value::ReprValue;
 use magnus::{Class, Error, Exception, Integer, RArray, RString, Ruby, Value, kwargs};
+use mini_racer_engine::process::fork;
 use mini_racer_engine::{
     CallbackReply, EngineError, Host, JsError, JsErrorKind, JsText, WaitHandle, WaitOutcome,
 };
@@ -56,7 +59,26 @@ pub struct RubyHost<'r> {
     callbacks: Option<Callbacks<'r>>,
     // The context's IO on a notifier descriptor of its own, which waits under
     // a fiber scheduler need; a host without one blocks the thread.
-    waiter: Option<&'r OwnedRoot<Value>>,
+    waiter: Option<&'r Waiter>,
+}
+
+/// The IO a fiber scheduler waits on for one context's runner, and the fork
+/// epoch it was made in: a forked child that takes the context over gives it
+/// a runner of its own, whose descriptor that IO does not read.
+#[derive(Default)]
+pub struct Waiter {
+    io: OwnedRoot<Value>,
+    epoch: Cell<u64>,
+}
+
+impl Waiter {
+    pub fn mark(&self, marker: &Marker) {
+        self.io.mark(marker);
+    }
+
+    pub fn take(&self, ruby: &Ruby) -> Option<Value> {
+        self.io.take(ruby)
+    }
 }
 
 impl<'r> RubyHost<'r> {
@@ -79,7 +101,7 @@ impl<'r> RubyHost<'r> {
     }
 
     #[must_use]
-    pub const fn waiting_on(mut self, waiter: &'r OwnedRoot<Value>) -> Self {
+    pub const fn waiting_on(mut self, waiter: &'r Waiter) -> Self {
         self.waiter = Some(waiter);
         self
     }
@@ -129,12 +151,15 @@ impl<'r> RubyHost<'r> {
         }
     }
 
-    // Made once per context, and again if Ruby code closed it; the descriptor
-    // is Ruby's own copy, so closing it never touches the engine's.
+    // Made once per context and fork epoch, and again if Ruby code closed it;
+    // the descriptor is Ruby's own copy, so closing it never touches the
+    // engine's.
     fn waiter_io(&self, wait: &WaitHandle<'_>) -> Option<Value> {
         let ruby = self.ruby;
         let waiter = self.waiter?;
-        if let Some(io) = waiter.get(ruby)
+        let epoch = fork::epoch();
+        if let Some(io) = waiter.io.get(ruby)
+            && waiter.epoch.get() == epoch
             && !io.funcall::<_, _, bool>("closed?", ()).unwrap_or(true)
         {
             return Some(io);
@@ -145,7 +170,8 @@ impl<'r> RubyHost<'r> {
             .funcall("for_fd", (fd.as_raw_fd(), kwargs!("autoclose" => true)))
             .ok()?;
         let _owned_by_io = fd.into_raw_fd();
-        waiter.set(ruby, io);
+        waiter.io.set(ruby, io);
+        waiter.epoch.set(epoch);
         Some(io)
     }
 

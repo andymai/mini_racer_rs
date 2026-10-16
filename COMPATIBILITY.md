@@ -4,7 +4,7 @@
 
 | Engine | Done | Planned | Deviation |
 |---|---|---|---|
-| CRuby | 43 | 11 | 16 |
+| CRuby | 43 | 11 | 20 |
 | TruffleRuby | 58 | 0 | 0 |
 
 ## Surface
@@ -111,6 +111,30 @@ Pending review.
 ### `behavior:fiber-scheduler@ruby`
 
 mini_racer_rs parks only a non-blocking fiber waiting for a context under a fiber scheduler, so the thread's other fibers keep running during `Context.new`, `eval`, `call`, `attach`, `dispose`, and nested callback calls. mini_racer 0.22.1 releases the GVL and blocks the whole thread until JavaScript returns. Three 100 ms busy loops in separate contexts and fibers inside `Sync` finish in 100 ms with mini_racer_rs, with a 10 ms ticker ticking 9 times; mini_racer takes 300 ms, with 3 ticks. With mini_racer_rs, `task.with_timeout(0.05) { context.call("busy", 300) }` raises `Async::TimeoutError` after 50 ms and terminates JavaScript; mini_racer returns `300` after 300 ms. In both gems the context stays usable afterward. Fibers sharing a context take turns in both gems. Without a scheduler or in a blocking fiber, mini_racer_rs blocks the thread while waiting, as mini_racer does. `Snapshot.new` also blocks the thread.
+
+Pending review.
+
+### `behavior:fork-from-callback@ruby`
+
+With an attached callback that calls `fork` under the `:single_threaded` platform flag, the parent's `eval` returns `"parent"` in both gems, and its later `context.eval("1 + 1")` returns `2`. mini_racer 0.22.1's child is still running five seconds later, when the test kills it. In mini_racer_rs's child, the `eval` that invokes the callback raises `MiniRacer::RuntimeError` with `single-threaded runner: Device or resource busy` when the callback returns, because the JavaScript thread stays with the parent. A call on the same context from inside the child callback, and every later call, raises the same error. A new child context works: `MiniRacer::Context.new.eval("6 * 7")` returns `42`.
+
+Pending review.
+
+### `behavior:fork-quiesce-bound@ruby`
+
+With the `:single_threaded` platform flag, mini_racer_rs waits up to 500 ms inside Ruby's `fork` or `Process.daemon` for every context's runner to become idle or parked. If another thread runs an operation V8 does not interrupt, such as `JSON.parse` of a large string, the child refuses every inherited context: calling an idle one raises `MiniRacer::RuntimeError` with `single-threaded runner: Device or resource busy`. New contexts created in the child work. mini_racer 0.22.1 does not wait for its runners. With `JSON.parse` of a 3,000,000-element array's JSON, its fork took 15 ms and its child's idle context returned `42`; mini_racer_rs took 523 ms and refused that context.
+
+Pending review.
+
+### `behavior:multi-threaded-fork@ruby`
+
+In a child forked from a process using V8's default multi-threaded platform, mini_racer 0.22.1 hangs when an inherited context runs `context.eval("1 + 1")`; the observed child was still waiting after 3 seconds. mini_racer_rs instead raises `MiniRacer::RuntimeError` at once with `single-threaded runner: Device or resource busy`, while the parent's contexts remain unaffected. The child inherits none of the context runner or V8 worker threads. A new `MiniRacer::Context` in the child can evaluate `eval("2")` to `2`, but work requiring V8 worker threads may never finish. Contexts intended to keep working in a child should use `:single_threaded`.
+
+Pending review.
+
+### `behavior:native-fork@ruby`
+
+With the `:single_threaded` platform flag, mini_racer_rs refuses every context inherited by a child of a fork that bypasses Ruby's `fork`, including idle contexts: calls raise `MiniRacer::RuntimeError` with `single-threaded runner: Device or resource busy`. In a libc `fork()` test through Fiddle, mini_racer 0.22.1's child returned `42` from an inherited idle context holding `var answer = 42`, while mini_racer_rs raised that error. In both gems, new child contexts and the parent's context work. Calling `dispose` on an inherited child context returns `nil`, after which calls raise `MiniRacer::ContextDisposedError`. mini_racer_rs cannot rule out an in-progress V8 state change without the runner wait used by Ruby's `fork`, `IO.popen("-")`, and `Process.daemon`.
 
 Pending review.
 
