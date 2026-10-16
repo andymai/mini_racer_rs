@@ -48,6 +48,23 @@ class InterruptTest < Minitest::Test
     assert_equal "true\n1\n", out
   end
 
+  def test_dispose_from_a_trap_during_eval_is_refused
+    out, err, status = run_ruby(<<~RUBY)
+      require "mini_racer"
+      context = MiniRacer::Context.new
+      Signal.trap("USR1") do
+        context.dispose
+      rescue MiniRacer::RuntimeError => e
+        puts e.message
+      end
+      Thread.new { sleep 0.05; Process.kill("USR1", Process.pid) }
+      p context.eval("const end = Date.now() + 300; while (Date.now() < end); 42")
+    RUBY
+
+    assert_predicate status, :success?, err
+    assert_equal "context dispose: Device or resource busy\n42\n", out
+  end
+
   def test_forked_child_reports_an_inherited_context
     skip "fork is unavailable" unless Process.respond_to?(:fork)
 

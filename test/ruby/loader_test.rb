@@ -22,7 +22,7 @@ class LoaderTest < Minitest::Test
   end
 
   def test_an_allocated_context_needs_initialize
-    assert_raises(MiniRacerRs::InternalError) { MiniRacer::Context.allocate.eval("1") }
+    assert_raises(MiniRacer::InternalError) { MiniRacer::Context.allocate.eval("1") }
   end
 
   def test_context_can_be_subclassed

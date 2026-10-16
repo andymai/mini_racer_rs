@@ -44,6 +44,7 @@ step cargo clippy --workspace --all-targets --locked -- -D warnings
 
 step cargo nextest run --workspace --exclude mini_racer_rs --locked
 step cargo test --doc --workspace --exclude mini_racer_rs --locked
+step cargo test -p mini_racer_rs --lib --locked
 RUSTFLAGS="${RUSTFLAGS:-} --cfg loom -Dwarnings" step cargo test -p mini_racer_sync --test loom --release --locked --target-dir target/loom
 step bundle exec rake compile
 step scripts/check-exports.sh

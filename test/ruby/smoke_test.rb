@@ -34,8 +34,23 @@ class SmokeTest < Minitest::Test
     assert_equal 3, @context.eval("1 + 2")
   end
 
-  def test_context_options_are_rejected_until_supported
-    assert_raises(NotImplementedError) { MiniRacer::Context.new(timeout: 10) }
+  # On CPUs with memory protection keys, V8 threads inherit the key state of the
+  # thread that started them, so a Ruby thread older than V8 must still work.
+  def test_a_thread_started_before_v8_initializes_can_use_it
+    out, err, status = run_ruby(<<~RUBY)
+      require "mini_racer"
+      jobs = Queue.new
+      worker = Thread.new { jobs.pop.call }
+      sleep 0.05
+      context = nil
+      jobs << -> { context = MiniRacer::Context.new; puts context.eval("6 * 7") }
+      worker.join
+      puts MiniRacer::Context.new.eval("1 + 1")
+      puts Thread.new { context.eval("2 * 3") }.value
+    RUBY
+
+    assert_predicate status, :success?, err
+    assert_equal "42\n2\n6\n", out
   end
 
   def test_flag_arguments_are_validated

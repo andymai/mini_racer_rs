@@ -1,3 +1,5 @@
+pub use mini_racer_sync::TerminationCause;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum FlagError {
     #[error("flag contains NUL byte")]
@@ -12,7 +14,7 @@ pub enum FlagError {
 pub enum JsErrorKind {
     Parse,
     Runtime,
-    Terminated,
+    Terminated(TerminationCause),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -20,6 +22,15 @@ pub enum JsErrorKind {
 pub struct JsError {
     pub kind: JsErrorKind,
     pub message: String,
+}
+
+impl JsError {
+    pub(crate) fn terminated(cause: TerminationCause) -> Self {
+        Self {
+            kind: JsErrorKind::Terminated(cause),
+            message: "terminated".to_owned(),
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -30,6 +41,10 @@ pub enum EngineError {
     Disposed,
     #[error("single-threaded runner: {}", ebusy())]
     Orphaned,
+    #[error("context busy: another thread is using it")]
+    Busy,
+    #[error("context dispose: {}", ebusy())]
+    DisposeBusy,
     #[error("internal error: {0}")]
     Internal(String),
 }

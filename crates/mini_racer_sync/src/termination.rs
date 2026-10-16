@@ -310,16 +310,21 @@ impl<T: Terminator> TermCell<T> {
         }
     }
 
+    #[must_use]
+    pub fn is_disposing(&self) -> bool {
+        lock(&self.state).disposing
+    }
+
     /// The armed dispatch, for a cancellation from a nested wait.
     #[must_use]
     pub fn armed(&self) -> Option<DispatchId> {
         lock(&self.state).armed.map(|armed| armed.id)
     }
 
-    /// Disarms `id` and settles its outcome; the runner calls it before
-    /// encoding a result, so nothing can terminate the encoding and a cause
-    /// arriving later waits for the next dispatch. A no-op returning `None`
-    /// when `id` is not armed.
+    /// Disarms `id` and settles its outcome. The runner calls it after the
+    /// dispatch's last V8 work, serializing the result included, and a halt it
+    /// returns replaces that result; a cause arriving later waits for the next
+    /// dispatch. A no-op returning `None` when `id` is not armed.
     pub fn end(&self, id: DispatchId) -> Option<Halt> {
         let mut state = lock(&self.state);
         if state.armed.map(|armed| armed.id) != Some(id) {

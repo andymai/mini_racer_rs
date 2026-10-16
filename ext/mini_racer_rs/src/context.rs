@@ -1,16 +1,47 @@
+use std::cell::Cell;
 use std::sync::OnceLock;
-use std::time::Duration;
 
+use magnus::gc::Marker;
+use magnus::r_hash::ForEach;
 use magnus::scan_args::scan_args;
-use magnus::{Class, Error, Module, RHash, RModule, RString, Ruby, Value};
-use mini_racer_engine::{ContextHandle, Pending, WaitOutcome};
+use magnus::value::ReprValue;
+use magnus::{
+    Class, DataTypeFunctions, Error, Fixnum, Module, RHash, RModule, RString, Ruby, Symbol,
+    TypedData, Value,
+};
+use mini_racer_engine::{ContextConfig, ContextHandle, EngineError};
 
+use crate::gc_root::OwnedRoot;
+use crate::host::RubyHost;
+use crate::options::{self, OptionError, OptionValue};
 use crate::{decode, errors, export, rb_raw};
 
-#[derive(Default)]
-#[magnus::wrap(class = "MiniRacer::Context", free_immediately, size)]
+// What Ruby's GC is told a live context holds outside its heap: roughly an
+// isolate and its runner thread.
+const ISOLATE_BYTES: usize = 2 << 20;
+
+#[derive(Default, TypedData)]
+#[magnus(class = "MiniRacer::Context", free_immediately, size, mark)]
 pub struct Context {
     handle: OnceLock<ContextHandle>,
+    // One dispatch at a time per context, as mini_racer's per-context mutex;
+    // a Ruby Mutex so a waiting thread or fiber stays interruptible.
+    lock: OwnedRoot<magnus::Mutex>,
+    accounted: Cell<bool>,
+}
+
+impl DataTypeFunctions for Context {
+    fn mark(&self, marker: &Marker) {
+        self.lock.mark(marker);
+    }
+}
+
+impl Drop for Context {
+    fn drop(&mut self) {
+        if self.accounted.get() {
+            rb_raw::release_memory(ISOLATE_BYTES);
+        }
+    }
 }
 
 pub fn init(ruby: &Ruby, racer: RModule) -> Result<(), Error> {
@@ -18,25 +49,49 @@ pub fn init(ruby: &Ruby, racer: RModule) -> Result<(), Error> {
     class.define_alloc_func::<Context>();
     class.define_method("initialize", export!(method Context::initialize, -1))?;
     class.define_method("eval", export!(method Context::eval, 1))?;
+    class.define_method("stop", export!(method Context::stop, 0))?;
+    class.define_method("dispose", export!(method Context::dispose, 0))?;
     Ok(())
 }
 
-// After a termination the runner replies within V8's interrupt latency; this
-// wait ignores further Ruby interrupts so the reply is never left behind.
-fn drain(ruby: &Ruby, pending: &Pending) {
-    loop {
-        let done = match rb_raw::nogvl(
-            ruby,
-            || pending.wait_for(Duration::from_millis(100)),
-            &|| {},
-        ) {
-            Some(Ok(done)) => done,
-            Some(Err(_)) | None => pending.wait_for(Duration::from_millis(1)),
-        };
-        if done.is_some() {
-            return;
-        }
+struct Locked(magnus::Mutex);
+
+impl Drop for Locked {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
     }
+}
+
+fn option_value(ruby: &Ruby, value: Value) -> OptionValue {
+    let other = || {
+        if value.is_nil() {
+            OptionValue::Nil
+        } else if value.as_value().equal(ruby.qfalse()).unwrap_or(false) {
+            OptionValue::False
+        } else {
+            OptionValue::Other(match value.class().inspect().as_str() {
+                "TrueClass" => "true".to_owned(),
+                name => name.to_owned(),
+            })
+        }
+    };
+    Fixnum::from_value(value).map_or_else(other, |n| OptionValue::Fixnum(n.to_i64()))
+}
+
+fn config(ruby: &Ruby, keywords: RHash) -> Result<ContextConfig, Error> {
+    let mut pairs = Vec::new();
+    keywords.foreach(|key: Symbol, value: Value| {
+        pairs.push((key.name()?.into_owned(), option_value(ruby, value)));
+        Ok(ForEach::Continue)
+    })?;
+    options::configure(pairs.into_iter()).map_err(|error| match error {
+        OptionError::Type(_) => Error::new(ruby.exception_type_error(), error.to_string()),
+        OptionError::Range(_) => Error::new(ruby.exception_arg_error(), error.to_string()),
+        OptionError::Keyword(_) => errors::runtime(ruby, error.to_string()),
+        OptionError::Unsupported(_) => {
+            Error::new(ruby.exception_not_imp_error(), error.to_string())
+        }
+    })
 }
 
 impl Context {
@@ -46,45 +101,82 @@ impl Context {
             .ok_or_else(|| errors::internal(ruby, "context is not initialized".to_owned()))
     }
 
+    fn mutex(&self, ruby: &Ruby) -> Result<magnus::Mutex, Error> {
+        self.lock
+            .get(ruby)
+            .ok_or_else(|| errors::internal(ruby, "context is not initialized".to_owned()))
+    }
+
+    // trylock first: an uncontended call then works from a signal trap, where
+    // Mutex#lock raises.
+    fn acquire(&self, ruby: &Ruby) -> Result<Locked, Error> {
+        let mutex = self.mutex(ruby)?;
+        if !mutex.trylock() {
+            rb_raw::mutex_lock(ruby, mutex)?;
+        }
+        Ok(Locked(mutex))
+    }
+
     fn initialize(ruby: &Ruby, rb_self: &Self, args: &[Value]) -> Result<(), Error> {
-        let args = scan_args::<(), (), (), (), RHash, ()>(args)?;
-        if !args.keywords.is_empty() {
-            return Err(Error::new(
-                ruby.exception_not_imp_error(),
-                "Context options are not supported yet",
+        if rb_self.handle.get().is_some() {
+            return Err(errors::internal(
+                ruby,
+                "context is already initialized".to_owned(),
             ));
         }
-        let handle = ContextHandle::spawn().map_err(|e| errors::engine(ruby, e))?;
+        let args = scan_args::<(), (), (), (), RHash, ()>(args)?;
+        let config = config(ruby, args.keywords)?;
+        let mut host = RubyHost::new(ruby);
+        let spawned = ContextHandle::spawn(config, &mut host).map_err(|e| errors::engine(ruby, e));
+        let handle = host.finish(spawned)?;
+        rb_self.lock.set(ruby, ruby.mutex_new());
         rb_self
             .handle
             .set(handle)
-            .map_err(|_| errors::internal(ruby, "context is already initialized".to_owned()))
+            .map_err(|_| errors::internal(ruby, "context is already initialized".to_owned()))?;
+        rb_raw::adjust_memory(ruby, ISOLATE_BYTES.cast_signed());
+        rb_self.accounted.set(true);
+        Ok(())
     }
 
     fn eval(ruby: &Ruby, rb_self: &Self, source: RString) -> Result<Value, Error> {
         let handle = rb_self.handle(ruby)?;
-        let pending = handle
-            .eval(source.to_string()?)
-            .map_err(|e| errors::engine(ruby, e))?;
-        loop {
-            match rb_raw::nogvl(ruby, || pending.wait(), &|| pending.interrupt()) {
-                Some(Ok(WaitOutcome::Done(result))) => {
-                    let bytes = result.map_err(|e| errors::engine(ruby, e))?;
-                    return decode::value(ruby, &bytes);
-                }
-                Some(Ok(WaitOutcome::Interrupted)) | None => {
-                    if let Err(error) = rb_raw::check_ints(ruby) {
-                        handle.terminate(&pending);
-                        drain(ruby, &pending);
-                        return Err(error);
-                    }
-                }
-                Some(Err(_)) => {
-                    handle.terminate(&pending);
-                    drain(ruby, &pending);
-                    return Err(errors::internal(ruby, "panic while waiting".to_owned()));
-                }
-            }
+        let source = source.to_string()?;
+        let _locked = rb_self.acquire(ruby)?;
+        let mut host = RubyHost::new(ruby);
+        let result = handle
+            .eval(source, &mut host)
+            .map_err(|e| errors::engine(ruby, e));
+        let bytes = host.finish(result)?;
+        decode::value(ruby, &bytes)
+    }
+
+    fn stop(ruby: &Ruby, rb_self: &Self) -> Result<(), Error> {
+        rb_self
+            .handle(ruby)?
+            .stop()
+            .map_err(|e| errors::engine(ruby, e))
+    }
+
+    // Terminates a dispatch running on another thread first, so waiting for the
+    // context lock then takes only as long as that dispatch needs to unwind.
+    // From the thread that holds the lock (a signal trap during eval) it is
+    // refused, as mini_racer refuses it, and the running eval is left alone.
+    fn dispose(ruby: &Ruby, rb_self: &Self) -> Result<(), Error> {
+        let handle = rb_self.handle(ruby)?;
+        if rb_self.mutex(ruby)?.funcall::<_, _, bool>("owned?", ())? {
+            return Err(errors::engine(ruby, EngineError::DisposeBusy));
         }
+        handle.begin_dispose();
+        let _locked = rb_self.acquire(ruby)?;
+        let mut host = RubyHost::new(ruby);
+        let result = handle
+            .dispose(&mut host)
+            .map_err(|e| errors::engine(ruby, e));
+        host.finish(result)?;
+        if rb_self.accounted.replace(false) {
+            rb_raw::adjust_memory(ruby, -ISOLATE_BYTES.cast_signed());
+        }
+        Ok(())
     }
 }

@@ -32,7 +32,7 @@ status = "done"
 status = "done"
 
 [ids."class:MiniRacer::InternalError < MiniRacer::EvalError@ruby"]
-status = "todo:S2"
+status = "done"
 
 [ids."class:MiniRacer::Isolate < Object@truffleruby"]
 status = "done"
@@ -101,7 +101,7 @@ status = "todo:S3"
 status = "todo:M4"
 
 [ids."imethod:MiniRacer::Context#dispose"]
-status = "todo:S2"
+status = "done"
 
 [ids."imethod:MiniRacer::Context#eval"]
 status = "done"
@@ -134,7 +134,7 @@ status = "todo:M4"
 status = "todo:M4"
 
 [ids."imethod:MiniRacer::Context#stop"]
-status = "todo:S2"
+status = "done"
 
 [ids."imethod:MiniRacer::Context#write_heap_snapshot"]
 depends_on = ["imethod:MiniRacer::Context#heap_snapshot@ruby"]
@@ -189,7 +189,7 @@ status = "todo:M3"
 status = "done"
 
 [ids."kwarg:MiniRacer::Context#initialize:marshal_stack_depth"]
-status = "todo:S2"
+status = "done"
 
 [ids."kwarg:MiniRacer::Context#initialize:max_memory"]
 status = "todo:M3"
@@ -198,7 +198,7 @@ status = "todo:M3"
 status = "todo:S3b"
 
 [ids."kwarg:MiniRacer::Context#initialize:timeout"]
-status = "todo:S2"
+status = "done"
 
 [ids."kwarg:MiniRacer::Context#initialize:verbose_exceptions@ruby"]
 status = "todo:M3"

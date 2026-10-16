@@ -1,8 +1,12 @@
 #![allow(clippy::panic, reason = "test helpers fail the test by panicking")]
 
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
-use mini_racer_engine::{ContextHandle, EngineError, JsErrorKind, WaitOutcome};
+use mini_racer_engine::{
+    ContextConfig, ContextHandle, EngineError, Host, JsErrorKind, TerminationCause, WaitHandle,
+    WaitOutcome,
+};
 use mini_racer_wire::{Scalar, Visitor, decode_value};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -32,17 +36,67 @@ impl Visitor for Shape {
     }
 }
 
+/// Parks until the runner answers; never cancels.
+struct Parking;
+
+impl Host for Parking {
+    fn wait(&mut self, wait: &WaitHandle<'_>) -> WaitOutcome {
+        self.wait_blocking(wait);
+        WaitOutcome::Ready
+    }
+
+    fn wait_blocking(&mut self, wait: &WaitHandle<'_>) {
+        while !wait.ready() {
+            wait.park();
+        }
+    }
+}
+
+/// Cancels once `interrupted` is set, as a Ruby interrupt would.
+struct Interruptible<'a> {
+    interrupted: &'a AtomicBool,
+}
+
+impl Host for Interruptible<'_> {
+    fn wait(&mut self, wait: &WaitHandle<'_>) -> WaitOutcome {
+        while !wait.spin(Duration::from_millis(1)) {
+            if self.interrupted.load(Ordering::SeqCst) {
+                return WaitOutcome::Cancel;
+            }
+        }
+        WaitOutcome::Ready
+    }
+
+    fn wait_blocking(&mut self, wait: &WaitHandle<'_>) {
+        Parking.wait_blocking(wait);
+    }
+}
+
 fn eval(context: &ContextHandle, source: &str) -> Result<Out, EngineError> {
-    let pending = context.eval(source.to_owned())?;
-    let WaitOutcome::Done(result) = pending.wait() else {
-        panic!("nothing interrupts this wait");
-    };
-    Ok(decode_value(&result?, &mut Shape).expect("V8 output decodes"))
+    let bytes = context.eval(source.to_owned(), &mut Parking)?;
+    Ok(decode_value(&bytes, &mut Shape).expect("V8 output decodes"))
+}
+
+fn spawn() -> ContextHandle {
+    ContextHandle::spawn(ContextConfig::default(), &mut Parking).expect("spawn")
+}
+
+fn terminated_by(result: Result<Out, EngineError>) -> TerminationCause {
+    match result {
+        Err(EngineError::Js(js)) => match js.kind {
+            JsErrorKind::Terminated(cause) => {
+                assert_eq!(js.message, "terminated");
+                cause
+            }
+            other => panic!("expected termination, got {other:?}"),
+        },
+        other => panic!("expected termination, got {other:?}"),
+    }
 }
 
 #[test]
 fn evaluates_primitives() {
-    let context = ContextHandle::spawn().expect("spawn");
+    let context = spawn();
     assert_eq!(eval(&context, "1 + 1").ok(), Some(Out::Int(2)));
     assert_eq!(eval(&context, "0.5").ok(), Some(Out::Num(0.5)));
     assert_eq!(eval(&context, "null").ok(), Some(Out::Nil));
@@ -54,7 +108,7 @@ fn evaluates_primitives() {
 
 #[test]
 fn reports_parse_and_runtime_errors() {
-    let context = ContextHandle::spawn().expect("spawn");
+    let context = spawn();
     match eval(&context, "1 +") {
         Err(EngineError::Js(js)) => assert_eq!(js.kind, JsErrorKind::Parse),
         other => panic!("expected a parse error, got {other:?}"),
@@ -71,8 +125,8 @@ fn reports_parse_and_runtime_errors() {
 
 #[test]
 fn contexts_are_isolated() {
-    let a = ContextHandle::spawn().expect("spawn");
-    let b = ContextHandle::spawn().expect("spawn");
+    let a = spawn();
+    let b = spawn();
     assert_eq!(eval(&a, "var shared = 7; shared").ok(), Some(Out::Int(7)));
     assert_eq!(
         eval(&b, "typeof shared === 'undefined'").ok(),
@@ -81,20 +135,136 @@ fn contexts_are_isolated() {
 }
 
 #[test]
-fn terminates_a_running_script() {
-    let context = ContextHandle::spawn().expect("spawn");
-    let pending = context.eval("while (true) {}".to_owned()).expect("post");
+fn stop_terminates_a_running_script() {
+    let context = spawn();
     std::thread::scope(|scope| {
         scope.spawn(|| {
             std::thread::sleep(Duration::from_millis(50));
-            pending.interrupt();
+            context.stop().expect("live context");
         });
-        assert!(matches!(pending.wait(), WaitOutcome::Interrupted));
+        assert_eq!(
+            terminated_by(eval(&context, "while (true) {}")),
+            TerminationCause::Stop
+        );
     });
-    context.terminate(&pending);
-    match pending.wait_for(Duration::from_secs(10)) {
-        Some(Err(EngineError::Js(js))) => assert_eq!(js.kind, JsErrorKind::Terminated),
-        other => panic!("expected termination, got {other:?}"),
-    }
     assert_eq!(eval(&context, "6 * 7").ok(), Some(Out::Int(42)));
+}
+
+#[test]
+fn a_stop_while_idle_terminates_the_next_script_only() {
+    let context = spawn();
+    context.stop().expect("live context");
+    assert_eq!(terminated_by(eval(&context, "1")), TerminationCause::Stop);
+    assert_eq!(eval(&context, "2").ok(), Some(Out::Int(2)));
+}
+
+#[test]
+fn a_timeout_terminates_only_its_own_script() {
+    let context = ContextHandle::spawn(
+        ContextConfig {
+            timeout: Some(Duration::from_millis(50)),
+        },
+        &mut Parking,
+    )
+    .expect("spawn");
+    let started = Instant::now();
+    assert_eq!(
+        terminated_by(eval(&context, "while (true) {}")),
+        TerminationCause::Timeout
+    );
+    assert!(started.elapsed() < Duration::from_secs(10));
+    for n in 0..200 {
+        assert_eq!(eval(&context, &n.to_string()).ok(), Some(Out::Int(n)));
+    }
+}
+
+#[test]
+fn creating_the_isolate_does_not_count_against_a_timeout() {
+    for _ in 0..10 {
+        let context = ContextHandle::spawn(
+            ContextConfig {
+                timeout: Some(Duration::from_millis(5)),
+            },
+            &mut Parking,
+        )
+        .expect("spawn");
+        assert_eq!(eval(&context, "1 + 1").ok(), Some(Out::Int(2)));
+    }
+}
+
+#[test]
+fn a_timeout_reaches_a_getter_run_while_serializing() {
+    let context = ContextHandle::spawn(
+        ContextConfig {
+            timeout: Some(Duration::from_millis(50)),
+        },
+        &mut Parking,
+    )
+    .expect("spawn");
+    assert_eq!(
+        terminated_by(eval(&context, "var a = {get a() { while (true); }}; a")),
+        TerminationCause::Timeout
+    );
+    assert_eq!(eval(&context, "1").ok(), Some(Out::Int(1)));
+}
+
+#[test]
+fn a_cancelled_wait_terminates_the_script_and_leaves_nothing_behind() {
+    let context = spawn();
+    let interrupted = AtomicBool::new(false);
+    std::thread::scope(|scope| {
+        let result = scope.spawn(|| {
+            let mut host = Interruptible {
+                interrupted: &interrupted,
+            };
+            context.eval("while (true) {}".to_owned(), &mut host)
+        });
+        std::thread::sleep(Duration::from_millis(50));
+        interrupted.store(true, Ordering::SeqCst);
+        let result = result.join().expect("waiter thread");
+        assert_eq!(
+            terminated_by(result.map(|_| Out::Nil)),
+            TerminationCause::Cancelled
+        );
+    });
+    assert_eq!(eval(&context, "6 * 7").ok(), Some(Out::Int(42)));
+}
+
+#[test]
+fn dispose_is_final_and_repeatable() {
+    let context = spawn();
+    assert_eq!(eval(&context, "1").ok(), Some(Out::Int(1)));
+    context.begin_dispose();
+    context.dispose(&mut Parking).expect("dispose");
+    assert!(context.is_disposed());
+    assert!(matches!(eval(&context, "1"), Err(EngineError::Disposed)));
+    assert!(matches!(context.stop(), Err(EngineError::Disposed)));
+    context
+        .dispose(&mut Parking)
+        .expect("a second dispose is a no-op");
+}
+
+#[test]
+fn dispose_terminates_a_script_running_on_another_thread() {
+    let context = spawn();
+    std::thread::scope(|scope| {
+        let running = scope.spawn(|| eval(&context, "while (true) {}"));
+        std::thread::sleep(Duration::from_millis(50));
+        context.begin_dispose();
+        assert_eq!(
+            terminated_by(running.join().expect("eval thread")),
+            TerminationCause::Stop
+        );
+    });
+    context.dispose(&mut Parking).expect("dispose");
+    assert!(matches!(eval(&context, "1"), Err(EngineError::Disposed)));
+}
+
+#[test]
+fn dropping_a_handle_shuts_its_runner_down_without_blocking() {
+    for _ in 0..20 {
+        let context = spawn();
+        assert_eq!(eval(&context, "1").ok(), Some(Out::Int(1)));
+        drop(context);
+    }
 }
