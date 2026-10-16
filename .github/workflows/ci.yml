@@ -86,6 +86,9 @@ jobs:
           ruby-version: "3.4"
           bundler-cache: true
       - run: bundle exec rubocop
+      # Here rather than in a build job, which a docs-only PR skips.
+      - name: COMPATIBILITY.md and the README table match compat.toml
+        run: bundle exec ruby tools/compat/render.rb --check
 
   machete:
     name: Unused Dependencies
@@ -377,6 +380,16 @@ jobs:
             exit 1
           fi
       - run: bundle exec rake test
+      - name: Compatibility ledger
+        run: bundle exec rake compat:check
+      - name: Install the real mini_racer 0.22.1
+        if: matrix.os == 'ubuntu-24.04' && matrix.ruby == '3.4'
+        working-directory: tools/reference
+        run: BUNDLE_PATH=vendor/bundle bundle install
+      # compat/surface.json is reflected from the real gem; this re-reflects it.
+      - name: Compatibility surface against the real mini_racer
+        if: matrix.os == 'ubuntu-24.04' && matrix.ruby == '3.4'
+        run: bundle exec rake compat:verify
       # mini_racer's own suite, unmodified; every result must match the ledger.
       - name: Upstream suite (strict)
         run: bundle exec ruby test/upstream/run.rb --strict --seed "${{ github.run_number }}"
@@ -428,6 +441,16 @@ jobs:
           bundler-cache: true
       - run: truffleruby-polyglot-get js
       - run: bundle exec ruby -Itest/ruby -Ilib test/ruby/harness_guard_test.rb
+      - name: Install the real mini_racer 0.22.1
+        working-directory: tools/reference
+        run: BUNDLE_PATH=vendor/bundle bundle install
+      # rake needs the lint group, which this job skips.
+      - name: Compatibility ledger and surface
+        run: |
+          bundle exec ruby -Ilib tools/compat/reflect.rb --out tmp/compat/candidate-truffleruby.json
+          BUNDLE_GEMFILE="$PWD/tools/reference/Gemfile" BUNDLE_PATH="$PWD/tools/reference/vendor/bundle" \
+            bundle exec ruby tools/compat/reflect.rb --reference --out tmp/compat/reference-truffleruby.json
+          bundle exec ruby tools/compat/check.rb tmp/compat/candidate-truffleruby.json tmp/compat/reference-truffleruby.json
       - name: Upstream suite (strict)
         run: bundle exec ruby test/upstream/run.rb --strict --seed "${{ github.run_number }}"
 

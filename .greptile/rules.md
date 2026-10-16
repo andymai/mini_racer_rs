@@ -7,4 +7,5 @@ version pins, action pins and prose (`scripts/check-*.sh`). Review for what they
 - Vendored upstream files and `vendor/` submodules are never edited.
 - Intra-gem loads use `require_relative`.
 - Behavior that differs from mini_racer 0.22.1 carries a `compat.toml` deviation and a failing-first fixture.
+- A `compat.toml` status becomes `done` together with a test that exercises it. An `approved` date on a deviation is set only by the repository owner.
 - Comments explain a non-obvious why and nothing else.
