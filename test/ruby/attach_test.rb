@@ -5,6 +5,8 @@ require "mini_racer"
 require "timeout"
 
 class AttachTest < Minitest::Test
+  include RubyProcess
+
   def setup
     @context = MiniRacer::Context.new
   end
@@ -64,6 +66,26 @@ class AttachTest < Minitest::Test
     @context.attach("guarded", guarded)
 
     assert_equal "ok!", @context.eval("guarded() + '!'")
+  end
+
+  def test_dispose_inside_a_callback_is_refused_on_any_fiber
+    @context.attach("disposes", proc { Enumerator.new { |y| y << @context.dispose }.next })
+
+    error = assert_raises(MiniRacer::RuntimeError) { @context.eval("disposes()") }
+    assert_match(/\Acontext dispose: /, error.message)
+    assert_equal 2, @context.eval("1 + 1")
+  end
+
+  def test_deep_nesting_warns_as_mini_racer_does
+    _, err, status = run_ruby(<<~RUBY)
+      require "mini_racer"
+      context = MiniRacer::Context.new
+      context.attach("down", proc { |n| n.zero? ? 0 : context.eval("down(\#{n - 1}) + 1") })
+      exit(context.eval("down(60)") == 60 ? 0 : 1)
+    RUBY
+
+    assert_predicate status, :success?, err
+    assert_equal "mini_racer: deep js->ruby->js recursion, depth=50\n", err
   end
 
   # mini_racer keeps one raised exception per context and clears it after

@@ -8,7 +8,7 @@ use mini_racer_engine::{
     CallbackReply, EngineError, Host, JsError, JsErrorKind, JsText, WaitHandle, WaitOutcome,
 };
 
-use crate::encode::{self, EncodeError};
+use crate::encode;
 use crate::gc_root::OwnedRoot;
 use crate::{context, decode, errors, rb_raw};
 
@@ -119,10 +119,7 @@ impl<'r> RubyHost<'r> {
         }
         let callable = callables.entry::<Value>(id)?;
         let result = rb_raw::call_with_array(ruby, callable, args)?;
-        encode::encode(ruby, result).map_err(|error| match error {
-            EncodeError::Unsupported(message) => errors::internal(ruby, message),
-            EncodeError::Raised(error) => error,
-        })
+        encode::encode(ruby, result, |message| errors::internal(ruby, message))
     }
 }
 

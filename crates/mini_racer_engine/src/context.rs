@@ -32,8 +32,10 @@ pub trait Host {
     /// Runs the callback `request` names: an array of its arguments with its
     /// id last, in V8's wire format. Dispatches it makes on this context from
     /// this thread run nested inside the current one. `Abort` cancels the
-    /// dispatch.
-    fn callback(&mut self, request: &[u8]) -> CallbackReply;
+    /// dispatch, and is all a host that attaches nothing needs.
+    fn callback(&mut self, _request: &[u8]) -> CallbackReply {
+        CallbackReply::Abort
+    }
 }
 
 pub struct WaitHandle<'a> {
@@ -203,6 +205,16 @@ impl ContextHandle {
         self.session.in_callback(process::thread_token())
     }
 
+    /// Dispatches open on this context, the outermost one included.
+    #[must_use]
+    pub fn depth(&self) -> u32 {
+        if self.session.owner.load(Ordering::Acquire) == 0 {
+            0
+        } else {
+            self.session.waits.load(Ordering::Relaxed).saturating_add(1)
+        }
+    }
+
     /// Terminates the running script, or the next one if none is running.
     pub fn stop(&self) -> Result<(), EngineError> {
         if self.orphaned() {
@@ -309,6 +321,9 @@ impl ContextHandle {
     }
 
     fn nested(&self, request: Request, host: &mut impl Host) -> Result<Vec<u8>, EngineError> {
+        if self.block.term.is_disposing() {
+            return Err(EngineError::Disposed);
+        }
         self.block.channel.request(request).map_err(channel)?;
         let _waiting = Counted::enter(&self.session.waits);
         self.await_response(true, host)
@@ -317,13 +332,16 @@ impl ContextHandle {
     // Once the dispatch is abandoned, callbacks still in flight are answered
     // with `Abort` without running, until the runner responds. Abandoning a
     // nested dispatch stops only its script, as mini_racer cancels only the
-    // nested call: the dispatch it runs in carries on once it has unwound.
+    // nested call: the dispatch it runs in carries on once it has unwound. A
+    // dispose that lands while a callback runs ends the dispatch as disposed,
+    // as mini_racer's callback finds its context gone.
     fn await_response(&self, nested: bool, host: &mut impl Host) -> Result<Vec<u8>, EngineError> {
         let block = &self.block;
         let wait = WaitHandle {
             channel: &block.channel,
         };
         let mut cancelled = false;
+        let mut disposed = false;
         let abandon = |cancelled: &mut bool| {
             *cancelled = true;
             if nested {
@@ -344,14 +362,24 @@ impl ContextHandle {
                     if nested && cancelled {
                         block.term.release();
                     }
-                    return response;
+                    return if disposed {
+                        Err(EngineError::Disposed)
+                    } else {
+                        response
+                    };
                 }
                 Ok(Some(ToRuby::Callback(request))) => {
                     let reply = if cancelled {
                         CallbackReply::Abort
                     } else {
                         let _running = Counted::enter(&self.session.callbacks);
-                        host.callback(&request)
+                        let reply = host.callback(&request);
+                        disposed = block.term.is_disposing();
+                        if disposed {
+                            CallbackReply::Abort
+                        } else {
+                            reply
+                        }
                     };
                     if matches!(reply, CallbackReply::Abort) && !cancelled {
                         abandon(&mut cancelled);

@@ -388,9 +388,10 @@ fn callback<'s>(
         let reply = match receive(&runtime.block) {
             Some(ToV8::Reply(reply)) => reply,
             Some(ToV8::Request(request)) => {
+                // Each nested request gets its own handle scope, so its values
+                // are released when it responds, not when the callback returns.
                 let response = {
-                    let context = v8::Local::new(scope, &runtime.context);
-                    let scope = &mut v8::ContextScope::new(scope, context);
+                    v8::scope_with_context!(let scope, scope, &runtime.context);
                     handle(scope, runtime, request)
                 };
                 if runtime.block.channel.respond(response).is_err() {

@@ -4,8 +4,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use mini_racer_engine::{
-    CallbackReply, ContextConfig, ContextHandle, EngineError, Host, JsErrorKind, TerminationCause,
-    WaitHandle, WaitOutcome,
+    ContextConfig, ContextHandle, EngineError, Host, JsErrorKind, TerminationCause, WaitHandle,
+    WaitOutcome,
 };
 use mini_racer_wire::{Begun, Container, Limits, Scalar, Visitor, decode_value};
 
@@ -76,10 +76,6 @@ impl Host for Parking {
             wait.park();
         }
     }
-
-    fn callback(&mut self, _request: &[u8]) -> CallbackReply {
-        CallbackReply::Abort
-    }
 }
 
 /// Cancels once `interrupted` is set, as a Ruby interrupt would.
@@ -99,10 +95,6 @@ impl Host for Interruptible<'_> {
 
     fn wait_blocking(&mut self, wait: &WaitHandle<'_>) {
         Parking.wait_blocking(wait);
-    }
-
-    fn callback(&mut self, _request: &[u8]) -> CallbackReply {
-        CallbackReply::Abort
     }
 }
 

@@ -3,8 +3,7 @@
 use std::time::Duration;
 
 use mini_racer_engine::{
-    CallbackReply, ContextConfig, ContextHandle, EngineError, Host, JsErrorKind, WaitHandle,
-    WaitOutcome,
+    ContextConfig, ContextHandle, EngineError, Host, JsErrorKind, WaitHandle, WaitOutcome,
 };
 
 pub struct Parking;
@@ -19,10 +18,6 @@ impl Host for Parking {
         while !wait.ready() {
             wait.park();
         }
-    }
-
-    fn callback(&mut self, _request: &[u8]) -> CallbackReply {
-        CallbackReply::Abort
     }
 }
 

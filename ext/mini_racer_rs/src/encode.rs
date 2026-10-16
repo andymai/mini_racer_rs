@@ -28,8 +28,8 @@ static BINARY: StaticRoot<RClass> = StaticRoot::new(|ruby| {
         .expect("the vocabulary defines MiniRacer::Binary")
 });
 
-pub enum EncodeError {
-    /// `mini_racer`'s text for a value it cannot send, cut as it cuts it.
+enum EncodeError {
+    // mini_racer's text for a value it cannot send, cut as it cuts it.
     Unsupported(Vec<u8>),
     Raised(Error),
 }
@@ -71,8 +71,13 @@ struct Encoder<'r, 'o> {
 }
 
 /// Writes `value` as `mini_racer`'s `serialize` does, with the object ids V8
-/// assigns on reading.
-pub fn encode(ruby: &Ruby, value: Value) -> Result<Vec<u8>, EncodeError> {
+/// assigns on reading. Each caller raises `mini_racer`'s text for a value it
+/// cannot send in its own way, through `unsupported`.
+pub fn encode(
+    ruby: &Ruby,
+    value: Value,
+    unsupported: impl FnOnce(Vec<u8>) -> Error,
+) -> Result<Vec<u8>, Error> {
     let mut out = Vec::new();
     let mut encoder = Encoder {
         ruby,
@@ -83,7 +88,10 @@ pub fn encode(ruby: &Ruby, value: Value) -> Result<Vec<u8>, EncodeError> {
     };
     let root = encoder.pins.push(value);
     encoder.work.push(Item::Value(root));
-    encoder.run()?;
+    encoder.run().map_err(|error| match error {
+        EncodeError::Unsupported(message) => unsupported(message),
+        EncodeError::Raised(error) => error,
+    })?;
     Ok(out)
 }
 

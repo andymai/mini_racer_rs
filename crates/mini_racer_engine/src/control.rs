@@ -14,9 +14,7 @@ impl Protocol for Wire {
     type Reply = CallbackReply;
 }
 
-/// Ruby's answer to a callback.
 pub enum CallbackReply {
-    /// The callback's result in V8's wire format.
     Value(Vec<u8>),
     /// The callback raised: V8 throws an `Error` with this message, and an
     /// outermost or nested dispatch it escapes ends with
@@ -27,7 +25,6 @@ pub enum CallbackReply {
     Abort,
 }
 
-/// Whether a request starts a dispatch or runs inside a callback of one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Depth {
     Outermost(DispatchId),

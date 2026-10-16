@@ -1,18 +1,19 @@
 use std::cell::Cell;
+use std::io::Write;
 use std::sync::OnceLock;
 
 use magnus::encoding::{EncodingCapable, RbEncoding};
 use magnus::gc::Marker;
 use magnus::r_hash::ForEach;
 use magnus::scan_args::scan_args;
-use magnus::value::ReprValue;
+use magnus::value::{LazyId, ReprValue};
 use magnus::{
     Class, DataTypeFunctions, Error, Fixnum, Module, RArray, RHash, RModule, RString, Ruby, Symbol,
     TypedData, Value,
 };
 use mini_racer_engine::{ContextConfig, ContextHandle, EngineError, JsText};
 
-use crate::encode::{self, EncodeError};
+use crate::encode;
 use crate::gc_root::OwnedRoot;
 use crate::host::{Callbacks, RubyHost};
 use crate::options::{self, OptionError, OptionValue};
@@ -22,6 +23,10 @@ use crate::{decode, errors, export, rb_raw};
 // isolate and its runner thread.
 const ISOLATE_BYTES: usize = 2 << 20;
 const POLL: std::time::Duration = std::time::Duration::from_millis(1);
+// mini_racer warns of every fiftieth level of js->ruby->js nesting.
+const DEEP_NESTING: u32 = 50;
+
+static OWNED: LazyId = LazyId::new("owned?");
 
 #[derive(Default, TypedData)]
 #[magnus(class = "MiniRacer::Context", free_immediately, size, mark)]
@@ -177,7 +182,7 @@ impl Context {
         if mutex.trylock() {
             return Ok(Some(Locked(mutex)));
         }
-        if self.handle(ruby)?.in_callback() && mutex.funcall::<_, _, bool>("owned?", ())? {
+        if self.handle(ruby)?.in_callback() && mutex.funcall::<_, _, bool>(*OWNED, ())? {
             return Ok(None);
         }
         rb_raw::mutex_lock(ruby, mutex)?;
@@ -229,11 +234,8 @@ impl Context {
         let name = rb_raw::expect_string(ruby, args.required.0)?;
         let request = args.splat;
         request.unshift(name)?;
-        let request = encode::encode(ruby, request.as_value()).map_err(|error| match error {
-            EncodeError::Unsupported(message) => {
-                errors::runtime(ruby, [b"Context.call: ".as_slice(), &message].concat())
-            }
-            EncodeError::Raised(error) => error,
+        let request = encode::encode(ruby, request.as_value(), |message| {
+            errors::runtime(ruby, [b"Context.call: ".as_slice(), &message].concat())
         })?;
         let bytes = rb_self.dispatch(ruby, |host| handle.call(request, host))?;
         decode::value(ruby, &bytes)
@@ -248,9 +250,8 @@ impl Context {
         let request = ruby.ary_new_capa(2);
         request.push(name)?;
         request.push(id)?;
-        let request = encode::encode(ruby, request.as_value()).map_err(|error| match error {
-            EncodeError::Unsupported(message) => errors::runtime(ruby, message),
-            EncodeError::Raised(error) => error,
+        let request = encode::encode(ruby, request.as_value(), |message| {
+            errors::runtime(ruby, message)
         })?;
         callables.push(callable)?;
         rb_self.dispatch(ruby, |host| handle.attach(request, host))?;
@@ -265,6 +266,13 @@ impl Context {
         run: impl FnOnce(&mut RubyHost<'_>) -> Result<T, EngineError>,
     ) -> Result<T, Error> {
         let _locked = self.acquire(ruby)?;
+        let depth = self.handle(ruby)?.depth();
+        if depth > 0 && depth % DEEP_NESTING == 0 {
+            let _ = writeln!(
+                std::io::stderr(),
+                "mini_racer: deep js->ruby->js recursion, depth={depth}"
+            );
+        }
         let callbacks = Callbacks {
             callables: self.callables(ruby)?,
             raised: &self.raised,
@@ -291,7 +299,9 @@ impl Context {
     fn dispose(ruby: &Ruby, rb_self: &Self) -> Result<(), Error> {
         let handle = rb_self.handle(ruby)?;
         let mutex = rb_self.mutex(ruby)?;
-        if mutex.funcall::<_, _, bool>("owned?", ())? {
+        // From inside a callback, on any fiber of its thread, the lock can
+        // never be had, so mini_racer's busy error comes before anything stops.
+        if handle.in_callback() || mutex.funcall::<_, _, bool>(*OWNED, ())? {
             return Err(errors::engine(ruby, EngineError::DisposeBusy));
         }
         handle.begin_dispose();
@@ -311,6 +321,8 @@ impl Context {
             match rb_raw::mutex_lock(ruby, mutex) {
                 Ok(()) => break,
                 Err(error) if refused_in_trap(ruby, &error) => polling = true,
+                // Waiting on a lock another fiber of this thread holds.
+                Err(error) if error.is_kind_of(ruby.exception_thread_error()) => return Err(error),
                 Err(error) => {
                     interrupted.get_or_insert(error);
                 }
