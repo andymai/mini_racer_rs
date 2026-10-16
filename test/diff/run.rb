@@ -6,8 +6,9 @@
 # Terser, Handlebars, React) instead of generated values, against their own
 # ledger. --twin also runs a second copy of the real gem, which must agree with
 # the first, or the harness itself is unsound. --explore runs a fresh seed's
-# cases with no ledger and fails on any divergence the accepted ones miss; its
-# cases share no object, which keeps it clear of behavior:object-ids@ruby.
+# cases with no ledger and fails on any divergence the accepted ones miss. Its
+# cases share no object, so it accepts none under behavior:object-ids@ruby: a
+# repeated object there is one the candidate made up.
 
 require "fileutils"
 require "json"
@@ -27,6 +28,7 @@ DIVERGENCES = File.join(__dir__, "divergences.toml")
 CORPUS = File.join(__dir__, "corpus")
 FAILED = %w[raise crash timeout].freeze
 NEW_OUTCOMES = %w[diverged crashed].freeze
+IDENTITY = "behavior:object-ids@ruby"
 WORK = DiffWorkers::WORK
 
 options = { set: "values", seed: 1, js: 200, ruby: 100, twin: false, strict: false, write_ledger: false, shrink: false }
@@ -75,6 +77,7 @@ FileUtils.mkdir_p(WORK)
 divergences = DiffLedger.load_divergences(DIVERGENCES)
 problems = DiffLedger.divergence_problems(divergences, compat_entries)
 abort problems.join("\n") unless problems.empty?
+divergences = divergences.reject { |divergence| divergence["compat"] == IDENTITY } if options[:explore]
 
 ledger_path = LEDGERS.fetch(options[:set])
 if options[:explore] && (options[:strict] || options[:write_ledger])

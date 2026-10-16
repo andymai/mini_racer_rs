@@ -19,5 +19,3 @@ description: Use when moving the pinned v8 crate (rusty_v8) to a new version, wh
 8. Ruby: `test/ruby/loader_test.rb` checks the V8 major and minor in `MiniRacerRs::V8_VERSION`; update it, then `bundle exec rake test`.
 9. Parity: open the PR with the `ledger-generate` label and merge the ledgers (parity-suite skill). A message that changed only with V8's wording becomes `deviation:behavior:v8-version@ruby`, with its evidence.
 10. `scripts/check-boundaries.sh` still holds: V8's sandbox and pointer compression features stay off.
-
-After the PR merges, a dry run of the Release workflow on `main` proves the new archives build, link and load on every platform and Ruby.

@@ -67,16 +67,19 @@ jobs:
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
           echo "$HOME/.cargo/bin" >>"$GITHUB_PATH"
+      # Every place extconf.rb looks for a system libclang.
       - name: Check that the image has no libclang
         if: matrix.container != ''
+        shell: bash
         run: |
-          if command -v llvm-config || ls /usr/lib/llvm-*/lib/libclang*.so* /usr/lib/*-linux-gnu/libclang*.so* 2>/dev/null; then
-            echo "::error::the image has a system libclang"
+          shopt -s nullglob
+          found=(/usr/lib*/libclang*.so* /usr/lib*/llvm*/lib/libclang*.so* /usr/lib/*-linux-gnu/libclang*.so* /usr/lib/llvm-*/lib/libclang*.so*)
+          if command -v llvm-config || [ "${#found[@]}" -gt 0 ]; then
+            echo "::error::the image has a system libclang: ${found[*]}"
             exit 1
           fi
       - name: Build, install into an empty GEM_HOME and smoke-test
         env:
-          EXPECTED_PLATFORM: ruby
           LIBCLANG_GEM: ${{ matrix.libclang == 'libclang gem' }}
         run: |
           gem build mini_racer_rs.gemspec --output "$RUNNER_TEMP/mini_racer_rs.gem"
@@ -146,7 +149,11 @@ jobs:
           [[ "$newest" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::unexpected version '$newest'"; exit 1; }
           echo "pinned $pinned, newest $newest" | tee -a "$GITHUB_STEP_SUMMARY"
           NEWEST=$newest ruby -i -pe 'sub(/\Av8 = "=[^"]+"/) { %(v8 = "=#{ENV.fetch("NEWEST")}") }' Cargo.toml
+          grep -qx "v8 = \"=$newest\"" Cargo.toml || { echo "::error::the v8 pin was not rewritten"; exit 1; }
           cargo update -p v8
+          # extconf.rb pins the committed archive digest unless the variable
+          # exists; v8's build script treats an empty one as unset.
+          echo "RUSTY_V8_ARCHIVE_SHA256=" >>"$GITHUB_ENV"
       - run: cargo nextest run -p mini_racer_engine
       - run: bundle exec rake compile
       - run: bundle exec rake test
