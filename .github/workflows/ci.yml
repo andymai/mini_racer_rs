@@ -307,6 +307,40 @@ jobs:
           name: fuzz-artifacts
           path: crates/mini_racer_wire/fuzz/artifacts
 
+  diff:
+    name: Differential
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      CI: "true"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          ruby: "3.4"
+      - run: bundle exec rake compile
+      - name: Install the real mini_racer 0.22.1
+        working-directory: tools/reference
+        run: BUNDLE_PATH=vendor/bundle bundle install
+      # Two copies of the real gem must agree, or the harness itself is unsound.
+      - name: The real gem against itself
+        run: bundle exec ruby test/diff/run.rb --pair reference
+      - name: The real gem against mini_racer_rs (strict)
+        run: bundle exec ruby test/diff/run.rb --strict
+      - name: Keep differential results
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: diff-results
+          path: tmp/diff
+          retention-days: 7
+
   gem-verify:
     name: Gem Contents
     needs: changes
@@ -459,7 +493,7 @@ jobs:
   ci-pass:
     name: CI Pass
     if: ${{ !cancelled() }}
-    needs: [changes, fmt, taplo, rubocop, machete, deny, audit, boundaries, repo-checks, msrv, rustdoc, clippy, rust-test, loom, fuzz-smoke, gem-verify, ruby, truffleruby]
+    needs: [changes, fmt, taplo, rubocop, machete, deny, audit, boundaries, repo-checks, msrv, rustdoc, clippy, rust-test, loom, fuzz-smoke, diff, gem-verify, ruby, truffleruby]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

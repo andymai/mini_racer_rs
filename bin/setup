@@ -16,6 +16,7 @@ while IFS='=' read -r tool version; do
 done < <(sed -n '/^\[cargo\]$/,/^\[/p' tools/versions.toml | grep '=')
 
 bundle install
+(cd tools/reference && BUNDLE_PATH=vendor/bundle bundle install)
 npm ci
 # shellcheck source=scripts/fetch-v8-archive.sh
 . scripts/fetch-v8-archive.sh
