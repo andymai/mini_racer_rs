@@ -28,6 +28,9 @@ pub struct Context {
     // a Ruby Mutex so a waiting thread or fiber stays interruptible.
     lock: OwnedRoot<magnus::Mutex>,
     accounted: Cell<bool>,
+    // Set before the GVL is released to wait for the runner, so a second
+    // initialize cannot start while the first waits.
+    initializing: Cell<bool>,
 }
 
 impl DataTypeFunctions for Context {
@@ -118,7 +121,7 @@ impl Context {
     }
 
     fn initialize(ruby: &Ruby, rb_self: &Self, args: &[Value]) -> Result<(), Error> {
-        if rb_self.handle.get().is_some() {
+        if rb_self.handle.get().is_some() || rb_self.initializing.get() {
             return Err(errors::internal(
                 ruby,
                 "context is already initialized".to_owned(),
@@ -126,9 +129,12 @@ impl Context {
         }
         let args = scan_args::<(), (), (), (), RHash, ()>(args)?;
         let config = config(ruby, args.keywords)?;
+        rb_self.initializing.set(true);
         let mut host = RubyHost::new(ruby);
         let spawned = ContextHandle::spawn(config, &mut host).map_err(|e| errors::engine(ruby, e));
-        let handle = host.finish(spawned)?;
+        let handle = host.finish(spawned);
+        rb_self.initializing.set(false);
+        let handle = handle?;
         rb_self.lock.set(ruby, ruby.mutex_new());
         rb_self
             .handle
@@ -162,21 +168,34 @@ impl Context {
     // context lock then takes only as long as that dispatch needs to unwind.
     // From the thread that holds the lock (a signal trap during eval) it is
     // refused, as mini_racer refuses it, and the running eval is left alone.
+    // Once begun, a dispose finishes: an interrupt while it waits for the lock
+    // is kept and raised after the runner is gone, as mini_racer's dispose
+    // ignores interrupts until it is done.
     fn dispose(ruby: &Ruby, rb_self: &Self) -> Result<(), Error> {
         let handle = rb_self.handle(ruby)?;
-        if rb_self.mutex(ruby)?.funcall::<_, _, bool>("owned?", ())? {
+        let mutex = rb_self.mutex(ruby)?;
+        if mutex.funcall::<_, _, bool>("owned?", ())? {
             return Err(errors::engine(ruby, EngineError::DisposeBusy));
         }
         handle.begin_dispose();
-        let _locked = rb_self.acquire(ruby)?;
+        let mut interrupted = None;
+        while !mutex.trylock() {
+            match rb_raw::mutex_lock(ruby, mutex) {
+                Ok(()) => break,
+                Err(error) => {
+                    interrupted.get_or_insert(error);
+                }
+            }
+        }
+        let _locked = Locked(mutex);
         let mut host = RubyHost::new(ruby);
         let result = handle
             .dispose(&mut host)
             .map_err(|e| errors::engine(ruby, e));
-        host.finish(result)?;
-        if rb_self.accounted.replace(false) {
+        let disposed = host.finish(result);
+        if disposed.is_ok() && rb_self.accounted.replace(false) {
             rb_raw::adjust_memory(ruby, -ISOLATE_BYTES.cast_signed());
         }
-        Ok(())
+        interrupted.map_or(disposed, Err)
     }
 }
