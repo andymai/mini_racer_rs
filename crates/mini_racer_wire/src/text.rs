@@ -1,5 +1,5 @@
 // Returned HTML is mostly ASCII, which is copied in spans; only blocks holding
-// another byte are converted a character at a time.
+// another byte are converted a byte at a time.
 const LATIN1_BLOCK: usize = 32;
 // Each block's count of non-ASCII bytes is summed in a u8.
 const _: () = assert!(LATIN1_BLOCK <= u8::MAX as usize);
@@ -13,24 +13,34 @@ pub fn latin1_to_utf8(bytes: &[u8]) -> String {
     if bytes.len() < LATIN1_BLOCK {
         return bytes.iter().copied().map(char::from).collect();
     }
-    let wide: usize = bytes
-        .chunks(LATIN1_BLOCK)
-        .map(|block| {
-            usize::from(
-                block
+    let (wide, mixed) =
+        bytes
+            .chunks(LATIN1_BLOCK)
+            .fold((0_usize, 0_usize), |(wide, mixed), block| {
+                let count = block
                     .iter()
                     .map(|&byte| u8::from(!byte.is_ascii()))
-                    .sum::<u8>(),
-            )
-        })
-        .sum();
+                    .sum::<u8>();
+                (
+                    wide.saturating_add(usize::from(count)),
+                    mixed.saturating_add(usize::from(count > 0)),
+                )
+            });
     let mut out = String::with_capacity(bytes.len().saturating_add(wide));
+    // Text where most blocks need converting anyway, like accented prose, is
+    // faster a byte at a time throughout.
+    if mixed.saturating_mul(LATIN1_BLOCK).saturating_mul(2) > bytes.len() {
+        out.extend(bytes.iter().copied().map(char::from));
+        return out;
+    }
     let mut span = 0;
     let mut at: usize = 0;
     for block in bytes.chunks(LATIN1_BLOCK) {
         let next = at.saturating_add(block.len());
         if !block.is_ascii() {
-            out.push_str(ascii(bytes.get(span..at).unwrap_or_default()));
+            if span < at {
+                out.push_str(ascii(bytes.get(span..at).unwrap_or_default()));
+            }
             for &byte in block {
                 out.push(char::from(byte));
             }
