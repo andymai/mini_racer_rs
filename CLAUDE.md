@@ -65,7 +65,7 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | Export allowlists | `ext/mini_racer_rs/exports.allow.linux`, `ext/mini_racer_rs/exports.allow.macos` |
 | V8 archive pins | `ext/mini_racer_rs/v8-archives.sha256`, `scripts/fetch-v8-archive.sh` |
 | CI | `.github/workflows/ci.yml`, `.github/actions/setup/action.yml` |
-| Upstream suite runner, guard, reporter | `test/upstream/run.rb`, `test/upstream/preload.rb`, `test/upstream/reporter.rb` |
+| Upstream suite runner, suites, guard, reporter | `test/upstream/run.rb`, `test/upstream/suites.rb`, `test/upstream/preload.rb`, `test/upstream/reporter.rb` |
 | Per-test parity ledgers | `test/upstream/mini_racer.status.toml`, `test/upstream/execjs.status.toml`, `test/upstream/milestones.toml` |
 | Ledger generation | `.github/workflows/ledger-generate.yml`, `rakelib/ledger.rake`, `test/upstream/milestone_rules.rb` |
 | Upstream source (never edited) | `vendor/mini_racer` (v0.22.1), `vendor/execjs` (v2.10.2) |
@@ -121,8 +121,8 @@ bundle exec ruby test/diff/run.rb --twin --strict   # the real gem and this one 
 - V8's platform and flags are process-global and freeze at first use, so tests that set flags run in their own process.
 - `mini_racer_rs.gemspec` lists files by explicit globs; a new file outside them is missing from the gem.
 - Source builds need libclang; with the `libclang` gem, `ext/mini_racer_rs/extconf.rb` also passes GCC's include directory to bindgen.
-- Each git worktree needs its own `npm ci` before the commit hooks can run, and `git submodule update --init` before the upstream suite can run.
-- The upstream suite runs from `vendor/mini_racer` with `BUNDLE_GEMFILE`, `RUBYOPT` and `MINI_RACER_RS_UPSTREAM_REPORT` set by `test/upstream/run.rb`; run it through that script, not with `rake test` inside the submodule.
+- Each git worktree needs its own `npm ci` before the commit hooks can run, and `git submodule update --init` before the upstream suites or `rake test` (the ExecJS autodetect test) can run.
+- The upstream suites run from their submodule (`vendor/mini_racer` or `vendor/execjs`) with `BUNDLE_GEMFILE`, `RUBYOPT`, `MINI_RACER_RS_UPSTREAM_REPORT`, `MINI_RACER_RS_UPSTREAM_ROOT` and, for ExecJS, `EXECJS_RUNTIME` set by `test/upstream/run.rb`; run them through that script, not with `rake test` inside the submodule.
 - In a forked child, contexts inherited from the parent raise `MiniRacer::RuntimeError` (`single-threaded runner: ...`).
 - A `compat.toml` status describes CRuby. Implementing a planned method without marking it `done` fails `compat:check` with `TODO_BUT_IMPLEMENTED`; a planned method that exists before what it calls works (`write_heap_snapshot`) lists that in `depends_on`.
 - `rake` needs the lint group installed; without it (the TruffleRuby CI job), run `tools/compat/reflect.rb` and `tools/compat/check.rb` directly.

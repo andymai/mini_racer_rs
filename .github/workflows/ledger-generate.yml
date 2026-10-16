@@ -1,8 +1,9 @@
 name: Ledger generate
 
 # Produces the raw results that `rake ledger:merge` turns into
-# test/upstream/mini_racer.status.toml: one reference run of the real
-# mini_racer 0.22.1 and three candidate seeds, on every leg CI checks.
+# test/upstream/mini_racer.status.toml and, with SUITE=execjs,
+# test/upstream/execjs.status.toml: one reference run of the real mini_racer
+# 0.22.1 and three candidate seeds of each suite, on every leg CI checks.
 # Runs on demand, or on a PR while it carries the ledger-generate label; adding
 # any other label does not restart it.
 on:
@@ -60,7 +61,9 @@ jobs:
               bundle exec ruby test/upstream/run.rb --suite "$suite" --seed "$seed" --out "results/$suite-candidate-$seed.jsonl"
             done
           done
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      # A failed run in one suite still uploads what the others wrote.
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ledger-${{ matrix.os }}-${{ matrix.ruby }}
           path: results
@@ -100,7 +103,9 @@ jobs:
               bundle exec ruby test/upstream/run.rb --suite "$suite" --seed "$seed" --out "results/$suite-candidate-$seed.jsonl"
             done
           done
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      # A failed run in one suite still uploads what the others wrote.
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ledger-truffleruby
           path: results

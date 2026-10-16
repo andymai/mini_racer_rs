@@ -1,6 +1,6 @@
 ---
 name: parity-suite
-description: Use when running mini_racer's own test suite against mini_racer_rs, reading or updating test/upstream/mini_racer.status.toml, regenerating the ledger after a change, debugging an upstream test that fails, hangs or crashes, when the harness guard exits 97, or when changing the public surface, compat.toml or COMPATIBILITY.md.
+description: Use when running mini_racer's or ExecJS's test suite against mini_racer_rs, reading or updating test/upstream/mini_racer.status.toml or test/upstream/execjs.status.toml, regenerating the ledger after a change, debugging an upstream test that fails, hangs or crashes, when the harness guard exits 97, or when changing the public surface, compat.toml or COMPATIBILITY.md.
 ---
 
 # Parity Suite

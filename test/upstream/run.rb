@@ -10,17 +10,7 @@ require "json"
 require "optparse"
 require "rbconfig"
 require_relative "ledger"
-
-SUITES = {
-  "mini_racer" => {
-    root: "vendor/mini_racer", load_path: ["test"], env: {},
-    files: -> { (Dir["test/*_test.rb"] + ["test/test_object_identity_fix.rb"]).sort },
-  },
-  "execjs" => {
-    root: "vendor/execjs", load_path: %w[lib test], env: { "EXECJS_RUNTIME" => "MiniRacer" },
-    files: -> { ["test/test_execjs.rb"] },
-  },
-}.freeze
+require_relative "suites"
 
 options = {
   mode: "candidate",
@@ -34,10 +24,13 @@ options = {
 OptionParser.new do |opts|
   opts.banner = "usage: run.rb [options]"
   opts.on("--reference", "Run the real mini_racer 0.22.1 from tools/reference") { options[:mode] = "reference" }
-  opts.on("--suite NAME", SUITES.keys, "Upstream suite: #{SUITES.keys.join(" or ")}") { |name| options[:suite] = name }
+  opts.on("--suite NAME", UpstreamSuites::ALL.keys,
+          "Upstream suite: #{UpstreamSuites::ALL.keys.join(" or ")}",) do |name|
+    options[:suite] = name
+  end
   opts.on("--seed N", Integer) { |seed| options[:seed] = seed }
   opts.on("-n PATTERN", "Only tests matching PATTERN (minitest -n)") { |pattern| options[:filter] = pattern }
-  opts.on("--files LIST", "Comma-separated test files relative to vendor/mini_racer") do |list|
+  opts.on("--files LIST", "Comma-separated test files relative to the suite's directory") do |list|
     options[:files] = list.split(",")
   end
   opts.on("--out PATH", "Write one JSON result per test") { |path| options[:out] = path }
@@ -48,9 +41,9 @@ OptionParser.new do |opts|
 end.parse!
 
 ROOT = UpstreamLedger::ROOT
-SUITE = SUITES.fetch(options[:suite])
-UPSTREAM = File.join(ROOT, SUITE[:root])
-options[:ledger] ||= File.join(__dir__, "#{options[:suite]}.status.toml")
+SUITE = UpstreamSuites.fetch(options[:suite])
+UPSTREAM = UpstreamSuites.root(options[:suite])
+options[:ledger] ||= UpstreamSuites.ledger(options[:suite])
 LEG = UpstreamLedger.leg
 WORK = File.join(ROOT, "tmp", "upstream")
 CLEAN_EXITS = [0, 1].freeze
@@ -193,7 +186,7 @@ def run_suite(options, ledger)
           overdue = id
         end
       elsif now - quiet_since > SUITE_IDLE_LIMIT
-        status, = kill_overdue(pid, "suite-attempt-#{attempt}", report, "")
+        status, = kill_overdue(pid, "#{options[:suite]}-suite-attempt-#{attempt}", report, "")
         suite << "attempt #{attempt}: no test ran for #{SUITE_IDLE_LIMIT}s and the process did not exit"
       end
       sleep 0.2

@@ -5,10 +5,11 @@ namespace :ledger do
        "PRUNE=1 drops tests and legs with no result, ALLOW_REGRESSIONS=1 records a pass that now fails"
   task :merge do
     require_relative "../test/upstream/milestone_rules"
+    require_relative "../test/upstream/suites"
 
     dir = ENV.fetch("DIR") { abort "usage: rake ledger:merge DIR=<downloaded result files>" }
     suite = ENV.fetch("SUITE", "mini_racer")
-    path = ENV.fetch("LEDGER", "test/upstream/#{suite}.status.toml")
+    path = UpstreamSuites.ledger(suite)
     rows = Dir[File.join(dir, "**", "*.jsonl")].reject { |file| file.end_with?(".events.jsonl") }
                                                .flat_map { |file| File.readlines(file, chomp: true) }
                                                .reject(&:empty?).map { |line| JSON.parse(line) }
