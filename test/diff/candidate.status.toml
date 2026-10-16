@@ -4,10 +4,10 @@
 status = "accepted:bigint-object"
 
 [cases."curated-call-missing-function"]
-status = "xfail:S3"
+status = "same"
 
 [cases."curated-call-nested-path"]
-status = "xfail:S3"
+status = "same"
 
 [cases."curated-cyclic"]
 status = "same"
@@ -688,301 +688,301 @@ status = "same"
 status = "same"
 
 [cases."rb-1-0"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-1"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-10"]
-status = "xfail:S3"
+status = "accepted:reference-to-a-numbered-object"
 
 [cases."rb-1-11"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-12"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-13"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-14"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-15"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-16"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-17"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-18"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-19"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-2"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-20"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-21"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-22"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-23"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-24"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-25"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-26"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-27"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-28"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-29"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-3"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-30"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-31"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-32"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-33"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-34"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-35"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-36"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-37"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-38"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-39"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-4"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-40"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-41"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-42"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-43"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-44"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-45"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-46"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-47"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-48"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-49"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-5"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-50"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-51"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-52"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-53"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-54"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-55"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-56"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-57"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-58"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-59"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-6"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-60"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-61"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-62"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-63"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-64"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-65"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-66"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-67"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-68"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-69"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-7"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-70"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-71"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-72"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-73"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-74"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-75"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-76"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-77"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-78"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-79"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-8"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-80"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-81"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-82"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-83"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-84"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-85"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-86"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-87"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-88"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-89"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-9"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-90"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-91"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-92"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-93"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-94"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-95"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-96"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-97"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-98"]
-status = "xfail:S3"
+status = "same"
 
 [cases."rb-1-99"]
-status = "xfail:S3"
+status = "same"

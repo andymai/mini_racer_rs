@@ -3,10 +3,19 @@
 require_relative "test_helper"
 require "mini_racer"
 
-# Decodes a value full of back references while every allocation starts a
-# compacting collection, so a value the decoder keeps where Ruby's GC cannot
-# see it is freed or moved before it is used.
-class DecodeGcTest < Minitest::Test
+# Converts values full of back references while every allocation starts a
+# compacting collection, so a value the decoder or encoder keeps where Ruby's
+# GC cannot see it is freed or moved before it is used.
+class ConversionGcTest < Minitest::Test
+  # Moves every movable object while the encoder is part way through the
+  # arguments.
+  class Stamp
+    def to_time
+      GC.verify_compaction_references(expand_heap: true, toward: :empty)
+      Time.at(0)
+    end
+  end
+
   SOURCE = <<~JS
     (() => {
       const shared = {name: "shared", list: [1, "two", 3.5]}
@@ -44,7 +53,27 @@ class DecodeGcTest < Minitest::Test
     assert_equal "café 東", value["text"]
   end
 
+  def test_arguments_survive_collections_and_moves_while_encoding
+    @context.eval(<<~JS)
+      globalThis.shape = (...a) => [
+        a.length, a[1] === a[2], a[1].list[1], a[1].more[1].deep, a[3].other[1], a[4],
+        a[0] instanceof Date, a[1].list[0] instanceof Date,
+      ]
+    JS
+    result = stressed { @context.call("shape", *arguments) }
+
+    assert_equal [5, true, [1, "two"], ["x"], [3, "four"], "caf\u00e9", true, true], result
+  end
+
   private
+
+  # Built here so the nested values are reachable only through their parents,
+  # which leaves them free to move; each Stamp moves them before its siblings
+  # are encoded.
+  def arguments
+    shared = { "list" => [Stamp.new, [1, +"two"]], "more" => [Stamp.new, { "deep" => [+"x"] }] }
+    [Stamp.new, shared, shared, { "other" => [Stamp.new, [3, +"four"]] }, +"caf\u00e9"]
+  end
 
   def stressed
     compacting = GC.auto_compact

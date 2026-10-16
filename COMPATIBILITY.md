@@ -4,7 +4,7 @@
 
 | Engine | Done | Planned | Deviation |
 |---|---|---|---|
-| CRuby | 34 | 20 | 10 |
+| CRuby | 35 | 19 | 10 |
 | TruffleRuby | 58 | 0 | 0 |
 
 ## Surface
@@ -39,7 +39,7 @@
 | `feature:pathname` | done | done |
 | `imethod:MiniRacer::Binary#data` | done | done |
 | `imethod:MiniRacer::Context#attach` | planned (S3b) | done |
-| `imethod:MiniRacer::Context#call` | planned (S3) | done |
+| `imethod:MiniRacer::Context#call` | done | done |
 | `imethod:MiniRacer::Context#call_await` | planned (M4) | done |
 | `imethod:MiniRacer::Context#dispose` | done | done |
 | `imethod:MiniRacer::Context#eval` | done | done |
@@ -92,7 +92,7 @@ Pending review.
 
 ### `behavior:object-ids@ruby`
 
-mini_racer_rs preserves repeated object references by numbering every serialized object as V8 does. For `(() => { const d = new Date(0); const o = {}; return [d, d, o, o] })()`, it returns `[Time, Time, {}, {}]`, with identical Ruby objects for each pair. mini_racer 0.22.1 returns `[Time, nil, {}, nil]` because its reference list omits dates, regular expressions, typed arrays, and other objects that V8 numbers. An error reached a second time, including an error that is its own cause, is the same ScriptError in mini_racer_rs but an empty Array in mini_racer 0.22.1.
+mini_racer_rs preserves repeated object identity in both directions by numbering every object as V8 does. The serialized form refers back to repeated objects by number, including dates, regular expressions, typed arrays, ArrayBuffers, wrapper objects, and errors. From JavaScript to Ruby, `(() => { const d = new Date(0); const o = {}; return [d, d, o, o] })()` returns `[Time, Time, {}, {}]`, with each pair the same Ruby object. mini_racer 0.22.1 counts only decoded arrays, objects, maps, sets, and errors, so it returns `[Time, nil, {}, nil]`; a repeated error, including its own cause, becomes an empty `Array` instead of the same `MiniRacer::ScriptError`. For `Context#call` arguments, mini_racer 0.22.1 counts only `Array` and `Hash` values, so `context.call("f", time, hash, hash)` gives `f` a Date, an object, and the same Date. mini_racer_rs gives `f` the same object twice.
 
 Pending review.
 

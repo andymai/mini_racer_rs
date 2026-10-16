@@ -67,7 +67,9 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | `Context.new` option rules (Ruby-free) | `ext/mini_racer_rs/src/options.rs` |
 | `MiniRacer::Platform.set_flags!` | `ext/mini_racer_rs/src/platform.rs` |
 | JavaScript to Ruby values | `ext/mini_racer_rs/src/decode.rs` |
-| Decoding under `GC.stress` with compaction | `test/ruby/decode_gc_test.rb`, `test/upstream/gc_stress.txt`, `test/upstream/run.rb --gc-stress` |
+| Ruby to JavaScript values (`Context#call` arguments) | `ext/mini_racer_rs/src/encode.rs` |
+| Ruby values held by Rust storage: class roots, `DateTime`, values pinned during an encode | `ext/mini_racer_rs/src/gc_root.rs` |
+| Converting values under `GC.stress` with compaction | `test/ruby/conversion_gc_test.rb`, `test/upstream/gc_stress.txt`, `test/upstream/run.rb --gc-stress` |
 | Error class mapping, binary messages for errors mini_racer raises from C, `ScriptError#cause` | `ext/mini_racer_rs/src/errors.rs` |
 | GVL release, interrupts, raw rb-sys | `ext/mini_racer_rs/src/rb_raw.rs` |
 | Loader and conflict guard | `lib/mini_racer_rs.rb` |

@@ -7,7 +7,7 @@ status = "same"
 status = "same"
 
 [cases."consumer-handlebars-call"]
-status = "xfail:S3"
+status = "same"
 
 [cases."consumer-handlebars-render"]
 status = "same"
@@ -16,7 +16,7 @@ status = "same"
 status = "same"
 
 [cases."consumer-react-ssr-call"]
-status = "xfail:S3"
+status = "same"
 
 [cases."consumer-terser-minify"]
 status = "same"
