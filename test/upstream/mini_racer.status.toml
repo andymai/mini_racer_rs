@@ -276,9 +276,6 @@ status = "xfail:M1"
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_bad_params"]
-status = "xfail:M1"
-
-[tests."test/mini_racer_test.rb#MiniRacerTest#test_bad_params".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_bigint_bridge_rejects_values_larger_than_dynamic_limit"]
@@ -321,9 +318,6 @@ status = "pass"
 status = "upstream-skip"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_can_dispose_context"]
-status = "xfail:M3"
-
-[tests."test/mini_racer_test.rb#MiniRacerTest#test_can_dispose_context".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_compile_nil_context"]
@@ -474,20 +468,14 @@ status = "xfail:M5"
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_it_can_automatically_time_out_context"]
-status = "xfail:M1"
-
-[tests."test/mini_racer_test.rb#MiniRacerTest#test_it_can_automatically_time_out_context".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_it_can_stop"]
-status = "crash:S2"
+status = "pass"
 timeout_s = 20
 
-[tests."test/mini_racer_test.rb#MiniRacerTest#test_it_can_stop".overrides."truffleruby-40.0-linux-x86_64"]
-status = "pass"
-
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_it_can_timeout_during_serialization"]
-status = "xfail:M3"
+status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_it_can_timeout_during_serialization".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
@@ -571,9 +559,6 @@ status = "xfail:M3"
 status = "upstream-skip"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_max_memory_bounds"]
-status = "xfail:M3"
-
-[tests."test/mini_racer_test.rb#MiniRacerTest#test_max_memory_bounds".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_max_memory_for_call"]
@@ -607,9 +592,6 @@ status = "xfail:M4"
 status = "upstream-skip"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_pipe_leak"]
-status = "xfail:M1"
-
-[tests."test/mini_racer_test.rb#MiniRacerTest#test_pipe_leak".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_platform_set_flags_raises_an_exception_if_already_initialized"]
@@ -802,9 +784,6 @@ status = "pass"
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_thread_kill_waiting_thread_does_not_terminate_active_eval"]
-status = "xfail:S2"
-
-[tests."test/mini_racer_test.rb#MiniRacerTest#test_thread_kill_waiting_thread_does_not_terminate_active_eval".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_threading_safety"]
@@ -877,7 +856,7 @@ status = "xfail:M6"
 status = "upstream-skip"
 
 [tests."test/single_threaded_test.rb#MiniRacerSingleThreadedTest#test_dispose_after_runner_started"]
-status = "xfail:M6"
+status = "pass"
 
 [tests."test/single_threaded_test.rb#MiniRacerSingleThreadedTest#test_dispose_after_runner_started".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
@@ -889,7 +868,7 @@ status = "xfail:M6"
 status = "upstream-skip"
 
 [tests."test/single_threaded_test.rb#MiniRacerSingleThreadedTest#test_dispose_interrupts_busy_eval_from_another_thread"]
-status = "xfail:M6"
+status = "pass"
 
 [tests."test/single_threaded_test.rb#MiniRacerSingleThreadedTest#test_dispose_interrupts_busy_eval_from_another_thread".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
@@ -925,7 +904,7 @@ status = "xfail:S6"
 status = "upstream-skip"
 
 [tests."test/single_threaded_test.rb#MiniRacerSingleThreadedTest#test_multiple_contexts_and_dispose_one"]
-status = "xfail:M6"
+status = "pass"
 
 [tests."test/single_threaded_test.rb#MiniRacerSingleThreadedTest#test_multiple_contexts_and_dispose_one".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
@@ -961,7 +940,7 @@ status = "pass"
 status = "upstream-skip"
 
 [tests."test/single_threaded_test.rb#MiniRacerSingleThreadedTest#test_thread_kill_waiting_thread_does_not_terminate_active_eval"]
-status = "xfail:M6"
+status = "pass"
 
 [tests."test/single_threaded_test.rb#MiniRacerSingleThreadedTest#test_thread_kill_waiting_thread_does_not_terminate_active_eval".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
