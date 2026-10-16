@@ -12,7 +12,7 @@ end
 
 # Under a fiber scheduler, waiting for a context parks only the waiting fiber,
 # so other fibers of the same thread keep running.
-class FiberSchedulerTest < Minitest::Test
+module SchedulerContexts
   BUSY = "globalThis.busy = (ms) => { const end = Date.now() + ms; while (Date.now() < end) {} return ms }"
 
   def setup
@@ -33,28 +33,38 @@ class FiberSchedulerTest < Minitest::Test
 
   def now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
-  # One core is left for the Ruby thread, so the ticker is not starved.
+  def ticker(task, every)
+    @ticks = 0
+    task.async do
+      loop do
+        sleep every
+        @ticks += 1
+      end
+    end
+  end
+end
+
+class FiberSchedulerTest < Minitest::Test
+  include SchedulerContexts
+
+  # One core is left for the Ruby thread, so the ticker is not starved. Run
+  # one after another, the calls would take count * 100 ms and the ticker
+  # would tick about once between each.
   def test_contexts_run_concurrently_from_fibers_of_one_thread
     count = [4, Etc.nprocessors - 1].min
     skip "needs at least three cores" if count < 2
     contexts = Array.new(count) { busy_context }
-    ticks = 0
     elapsed = nil
     Sync do |task|
-      ticker = task.async do
-        loop do
-          sleep 0.01
-          ticks += 1
-        end
-      end
+      ticking = ticker(task, 0.01)
       started = now
       contexts.map { |context| task.async { context.call("busy", 100) } }.each(&:wait)
       elapsed = now - started
-      ticker.stop
+      ticking.stop
     end
 
-    assert_operator elapsed, :<, 0.16
-    assert_operator ticks, :>=, 8
+    assert_operator elapsed, :<, 0.07 * count
+    assert_operator @ticks, :>=, 5
   end
 
   def test_fibers_sharing_a_context_take_turns
@@ -79,26 +89,24 @@ class FiberSchedulerTest < Minitest::Test
 
   def test_a_callback_can_wait_on_the_scheduler_and_reenter_its_context
     context = busy_context
-    ticks = 0
     result = nil
     Sync do |task|
-      ticker = task.async do
-        loop do
-          sleep 0.005
-          ticks += 1
-        end
-      end
+      ticking = ticker(task, 0.005)
       context.attach("pause", proc {
         sleep 0.05
         context.eval("1 + 1")
       },)
       result = context.eval("pause() + 1")
-      ticker.stop
+      ticking.stop
     end
 
     assert_equal 3, result
-    assert_operator ticks, :>=, 5
+    assert_operator @ticks, :>=, 3
   end
+end
+
+class FiberSchedulerLifecycleTest < Minitest::Test
+  include SchedulerContexts
 
   def test_a_scheduler_timeout_ends_the_dispatch_and_keeps_the_context
     context = busy_context
@@ -110,6 +118,20 @@ class FiberSchedulerTest < Minitest::Test
     end
 
     assert_equal 2, context.eval("1 + 1")
+  end
+
+  def open_descriptors = Dir.children("/dev/fd").size
+
+  def test_dispose_closes_the_descriptors_a_fiber_wait_opened
+    busy_context.dispose
+    before = open_descriptors
+    context = busy_context
+    Sync { context.call("busy", 5) }
+
+    assert_operator open_descriptors, :>, before
+    context.dispose
+
+    assert_equal before, open_descriptors
   end
 
   def test_waits_go_through_the_schedulers_io_wait

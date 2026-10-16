@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::lock::lock;
-use crate::parker::{Notifier, Parker};
+use crate::parker::Parker;
 use crate::primitives::{AtomicU64, Mutex, Ordering};
 
 // One word holds whose turn it is, whether the channel is closed, which sides
@@ -13,6 +13,8 @@ const V8_TURN: u64 = 1;
 const CLOSED: u64 = 1 << 1;
 const RUBY_PARKED: u64 = 1 << 2;
 const V8_PARKED: u64 = 1 << 3;
+const RUBY_NOTIFIED: u64 = 1 << 4;
+const V8_NOTIFIED: u64 = 1 << 5;
 const REQUESTS_SHIFT: u32 = 16;
 const CALLBACKS_SHIFT: u32 = 32;
 const COUNT: u64 = 0xFFFF;
@@ -54,6 +56,13 @@ impl Side {
         match self {
             Self::Ruby => RUBY_PARKED,
             Self::V8 => V8_PARKED,
+        }
+    }
+
+    const fn notified(self) -> u64 {
+        match self {
+            Self::Ruby => RUBY_NOTIFIED,
+            Self::V8 => V8_NOTIFIED,
         }
     }
 
@@ -166,6 +175,14 @@ pub struct Channel<P: Protocol> {
     to_ruby: Mutex<Option<ToRuby<P>>>,
     ruby: Parker,
     v8: Parker,
+    ruby_notifier: Mutex<Option<Box<dyn Notifier>>>,
+    v8_notifier: Mutex<Option<Box<dyn Notifier>>>,
+}
+
+/// Rung for a side that waits with `park_notified`, such as a fiber waiting
+/// for a file descriptor to become readable.
+pub trait Notifier: Send + Sync {
+    fn notify(&self);
 }
 
 impl<P: Protocol> Default for Channel<P> {
@@ -176,6 +193,8 @@ impl<P: Protocol> Default for Channel<P> {
             to_ruby: Mutex::new(None),
             ruby: Parker::default(),
             v8: Parker::default(),
+            ruby_notifier: Mutex::new(None),
+            v8_notifier: Mutex::new(None),
         }
     }
 }
@@ -247,35 +266,57 @@ impl<P: Protocol> Channel<P> {
     /// `wake(side)` is called, or the timeout passes. May return early;
     /// callers recheck `ready`.
     pub fn park(&self, side: Side, timeout: Option<Duration>) {
-        self.park_with(side, || self.parker(side).park(timeout));
+        if self.mark(side, side.parked()) {
+            self.parker(side).park(timeout);
+            self.state.fetch_and(!side.parked(), Ordering::AcqRel);
+        }
     }
 
     /// `park` for a waiter that sleeps elsewhere: unless `side` has the turn,
-    /// marks it parked and runs `wait`, which should return once the side's
-    /// notifier fires and may return earlier.
-    pub fn park_with(&self, side: Side, wait: impl FnOnce()) {
+    /// runs `wait`, which should return once the side's notifier rings, the
+    /// channel closes or `wake(side)` is called, and may return earlier.
+    pub fn park_notified(&self, side: Side, wait: impl FnOnce()) {
+        if self.mark(side, side.notified()) {
+            wait();
+            self.state.fetch_and(!side.notified(), Ordering::AcqRel);
+        }
+    }
+
+    /// What `park_notified` on `side` waits for; `None` removes it.
+    pub fn set_notifier(&self, side: Side, notifier: Option<Box<dyn Notifier>>) {
+        *lock(self.notifier(side)) = notifier;
+    }
+
+    // Sets `flag` unless `side` has the turn; returns whether it did.
+    fn mark(&self, side: Side, flag: u64) -> bool {
         let mut state = self.state.load(Ordering::Acquire);
         loop {
             if ready(state, side) {
-                return;
+                return false;
             }
             match self.state.compare_exchange_weak(
                 state,
-                state | side.parked(),
+                state | flag,
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
-                Ok(_) => break,
+                Ok(_) => return true,
                 Err(actual) => state = actual,
             }
         }
-        wait();
-        self.state.fetch_and(!side.parked(), Ordering::AcqRel);
     }
 
-    /// Tells `notifier` of every wake of `side`, as well as its parker.
-    pub fn set_notifier(&self, side: Side, notifier: Box<dyn Notifier>) {
-        self.parker(side).set_notifier(notifier);
+    fn ring(&self, side: Side) {
+        if let Some(notifier) = lock(self.notifier(side)).as_ref() {
+            notifier.notify();
+        }
+    }
+
+    const fn notifier(&self, side: Side) -> &Mutex<Option<Box<dyn Notifier>>> {
+        match side {
+            Side::Ruby => &self.ruby_notifier,
+            Side::V8 => &self.v8_notifier,
+        }
     }
 
     /// Waits for `wake(side)`, `close`, or the timeout whoever holds the turn,
@@ -290,6 +331,7 @@ impl<P: Protocol> Channel<P> {
     /// Wakes `side` from `park` or `sleep` without handing it the turn.
     pub fn wake(&self, side: Side) {
         self.parker(side).unpark();
+        self.ring(side);
     }
 
     /// Closes the channel and wakes both sides. A message already sent is
@@ -298,6 +340,8 @@ impl<P: Protocol> Channel<P> {
         self.state.fetch_or(CLOSED, Ordering::AcqRel);
         self.ruby.unpark();
         self.v8.unpark();
+        self.ring(Side::Ruby);
+        self.ring(Side::V8);
     }
 
     fn publish<M>(
@@ -329,7 +373,10 @@ impl<P: Protocol> Channel<P> {
                 slot.take();
                 return Err(ChannelError::Closed);
             }
-            let next = with_nesting((state & !V8_TURN & !to.parked()) | to.turn(), open);
+            let next = with_nesting(
+                (state & !V8_TURN & !to.parked() & !to.notified()) | to.turn(),
+                open,
+            );
             match self
                 .state
                 .compare_exchange_weak(state, next, Ordering::AcqRel, Ordering::Acquire)
@@ -341,6 +388,9 @@ impl<P: Protocol> Channel<P> {
         drop(slot);
         if state & to.parked() != 0 {
             self.parker(to).unpark();
+        }
+        if state & to.notified() != 0 {
+            self.ring(to);
         }
         Ok(())
     }

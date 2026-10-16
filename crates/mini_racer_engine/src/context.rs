@@ -1,5 +1,5 @@
 use std::io;
-use std::os::fd::RawFd;
+use std::os::fd::OwnedFd;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -47,6 +47,13 @@ pub struct WaitHandle<'a> {
 }
 
 impl<'a> WaitHandle<'a> {
+    const fn new(block: &'a ControlBlock) -> Self {
+        Self {
+            channel: &block.channel,
+            notify: &block.notify,
+        }
+    }
+
     #[must_use]
     pub fn ready(&self) -> bool {
         self.channel.ready(Side::Ruby)
@@ -64,12 +71,20 @@ impl<'a> WaitHandle<'a> {
     }
 
     /// `park` for a host that sleeps on a file descriptor instead, such as a
-    /// fiber scheduler: `wait` gets one that becomes readable once the runner
-    /// answers, and should return then or earlier.
-    pub fn park_on_fd(&self, wait: impl FnOnce(RawFd)) -> io::Result<()> {
-        let fd = self.notify.drained(self.channel)?;
-        self.channel.park_with(Side::Ruby, || wait(fd));
+    /// fiber scheduler: `wait` should return once a `notifier` descriptor is
+    /// readable, which it becomes when the runner answers, and may return
+    /// earlier.
+    pub fn park_notified(&self, wait: impl FnOnce()) -> io::Result<()> {
+        // Drained before the channel is marked, so a ring for this handover
+        // always comes after the drain.
+        self.notify.drain(self.channel)?;
+        self.channel.park_notified(Side::Ruby, wait);
         Ok(())
+    }
+
+    /// A descriptor the host owns that `park_notified` waits are rung on.
+    pub fn notifier(&self) -> io::Result<OwnedFd> {
+        self.notify.duplicate(self.channel)
     }
 
     #[must_use]
@@ -291,15 +306,18 @@ impl ContextHandle {
             return Err(EngineError::DisposeBusy);
         }
         self.block.term.dispose();
+        let result = self.shut_down(host);
+        self.block.notify.release(&self.block.channel);
+        result
+    }
+
+    fn shut_down(&self, host: &mut impl Host) -> Result<(), EngineError> {
         match self.block.channel.request(Request::Dispose) {
             Ok(()) => {}
             Err(ChannelError::Closed) => return Ok(()),
             Err(error) => return Err(protocol(error)),
         }
-        let wait = WaitHandle {
-            channel: &self.block.channel,
-            notify: &self.block.notify,
-        };
+        let wait = WaitHandle::new(&self.block);
         loop {
             host.wait_blocking(&wait);
             match self.block.channel.recv_ruby() {
@@ -383,10 +401,7 @@ impl ContextHandle {
     // as mini_racer's callback finds its context gone.
     fn await_response(&self, nested: bool, host: &mut impl Host) -> Result<Vec<u8>, EngineError> {
         let block = &self.block;
-        let wait = WaitHandle {
-            channel: &block.channel,
-            notify: &block.notify,
-        };
+        let wait = WaitHandle::new(block);
         let mut cancelled = false;
         let mut disposed = false;
         let abandon = |cancelled: &mut bool| {

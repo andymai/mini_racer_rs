@@ -1,4 +1,4 @@
-use std::os::fd::RawFd;
+use std::os::fd::{AsRawFd, IntoRawFd};
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -54,6 +54,9 @@ pub struct RubyHost<'r> {
     ruby: &'r Ruby,
     pending: Option<Error>,
     callbacks: Option<Callbacks<'r>>,
+    // The context's IO on a notifier descriptor of its own, which waits under
+    // a fiber scheduler need; a host without one blocks the thread.
+    waiter: Option<&'r OwnedRoot<Value>>,
 }
 
 impl<'r> RubyHost<'r> {
@@ -62,6 +65,7 @@ impl<'r> RubyHost<'r> {
             ruby,
             pending: None,
             callbacks: None,
+            waiter: None,
         }
     }
 
@@ -70,7 +74,14 @@ impl<'r> RubyHost<'r> {
             ruby,
             pending: None,
             callbacks: Some(callbacks),
+            waiter: None,
         }
+    }
+
+    #[must_use]
+    pub const fn waiting_on(mut self, waiter: &'r OwnedRoot<Value>) -> Self {
+        self.waiter = Some(waiter);
+        self
     }
 
     /// The Ruby exception that cancelled the dispatch outranks whatever the
@@ -100,23 +111,62 @@ impl<'r> RubyHost<'r> {
     // Under a fiber scheduler only this fiber waits: the runner's answer makes
     // the context's notifier readable and the scheduler resumes the fiber,
     // while whatever the scheduler raises into it (a timeout, a stop) cancels
-    // the dispatch. None means no notifier could be made.
+    // the dispatch, even when the answer came in meanwhile. None means no
+    // notifier is to be had, so the thread waits instead.
     fn wait_in_fiber(&mut self, wait: &WaitHandle<'_>) -> Option<WaitOutcome> {
-        let ruby = self.ruby;
+        let io = self.waiter_io(wait)?;
         loop {
             let mut raised = None;
-            if wait
-                .park_on_fd(|fd| raised = wait_readable(ruby, fd).err())
-                .is_err()
-            {
-                return None;
+            wait.park_notified(|| raised = wait_readable(io).err())
+                .ok()?;
+            if let Some(error) = raised {
+                self.pending = Some(error);
+                return Some(WaitOutcome::Cancel);
             }
             if wait.ready() {
                 return Some(WaitOutcome::Ready);
             }
+        }
+    }
+
+    // Made once per context, and again if Ruby code closed it; the descriptor
+    // is Ruby's own copy, so closing it never touches the engine's.
+    fn waiter_io(&self, wait: &WaitHandle<'_>) -> Option<Value> {
+        let ruby = self.ruby;
+        let waiter = self.waiter?;
+        if let Some(io) = waiter.get(ruby)
+            && !io.funcall::<_, _, bool>("closed?", ()).unwrap_or(true)
+        {
+            return Some(io);
+        }
+        let fd = wait.notifier().ok()?;
+        let io: Value = ruby
+            .class_io()
+            .funcall("for_fd", (fd.as_raw_fd(), kwargs!("autoclose" => true)))
+            .ok()?;
+        let _owned_by_io = fd.into_raw_fd();
+        waiter.set(ruby, io);
+        Some(io)
+    }
+
+    // Keeps the first exception the scheduler raises for after the dispatch,
+    // then leaves the rest of the wait to the thread, so a scheduler that
+    // keeps raising cannot spin here.
+    fn wait_blocking_in_fiber(&mut self, wait: &WaitHandle<'_>) {
+        let Some(io) = self.waiter_io(wait) else {
+            return;
+        };
+        while !wait.ready() {
+            let mut raised = None;
+            if wait
+                .park_notified(|| raised = wait_readable(io).err())
+                .is_err()
+            {
+                return;
+            }
             if let Some(error) = raised {
-                self.pending = Some(error);
-                return Some(WaitOutcome::Cancel);
+                self.pending.get_or_insert(error);
+                return;
             }
         }
     }
@@ -151,11 +201,7 @@ impl<'r> RubyHost<'r> {
     }
 }
 
-// The engine owns the descriptor, so Ruby must never close it.
-fn wait_readable(ruby: &Ruby, fd: RawFd) -> Result<(), Error> {
-    let io: Value = ruby
-        .class_io()
-        .funcall("for_fd", (fd, kwargs!("autoclose" => false)))?;
+fn wait_readable(io: Value) -> Result<(), Error> {
     let _: Value = io.funcall("wait_readable", ())?;
     Ok(())
 }
@@ -220,6 +266,9 @@ impl Host for RubyHost<'_> {
     // otherwise make every rb_nogvl return at once and keep the GVL held. An
     // exception they raise is kept and raised once the dispatch is over.
     fn wait_blocking(&mut self, wait: &WaitHandle<'_>) {
+        if !self.jumping() && rb_raw::fiber_scheduler(self.ruby) {
+            self.wait_blocking_in_fiber(wait);
+        }
         if self.jumping() {
             while !wait.ready() {
                 wait.park();

@@ -44,6 +44,8 @@ pub struct Context {
     // What each attached name calls, indexed by the id V8 sends back.
     callables: OwnedRoot<RArray>,
     raised: OwnedRoot<Value>,
+    // The IO a fiber scheduler waits on for this context's runner.
+    waiter: OwnedRoot<Value>,
     accounted: Cell<bool>,
     // Set before the GVL is released to wait for the runner, so a second
     // initialize cannot start while the first waits.
@@ -55,6 +57,7 @@ impl DataTypeFunctions for Context {
         self.lock.mark(marker);
         self.callables.mark(marker);
         self.raised.mark(marker);
+        self.waiter.mark(marker);
     }
 }
 
@@ -225,7 +228,7 @@ impl Context {
         let args = scan_args::<(), (), (), (), RHash, ()>(args)?;
         let config = config(ruby, args.keywords)?;
         rb_self.initializing.set(true);
-        let mut host = RubyHost::new(ruby);
+        let mut host = RubyHost::new(ruby).waiting_on(&rb_self.waiter);
         let spawned = ContextHandle::spawn(config, &mut host);
         let handle = host.finish(spawned);
         rb_self.initializing.set(false);
@@ -313,7 +316,7 @@ impl Context {
             callables: self.callables(ruby)?,
             raised: &self.raised,
         };
-        let mut host = RubyHost::with_callbacks(ruby, callbacks);
+        let mut host = RubyHost::with_callbacks(ruby, callbacks).waiting_on(&self.waiter);
         let result = run(&mut host);
         host.finish(result)
     }
@@ -335,7 +338,7 @@ impl Context {
         let handle = rb_self.handle(ruby)?;
         let _locked = rb_self.acquire(ruby)?;
         rb_self.warn_if_deep(ruby)?;
-        let mut host = RubyHost::new(ruby);
+        let mut host = RubyHost::new(ruby).waiting_on(&rb_self.waiter);
         let result = handle.low_memory_notification(&mut host);
         host.finish(result)
     }
@@ -387,11 +390,16 @@ impl Context {
             }
         }
         let _locked = Locked(mutex);
-        let mut host = RubyHost::new(ruby);
+        let mut host = RubyHost::new(ruby).waiting_on(&rb_self.waiter);
         let result = handle.dispose(&mut host);
         let disposed = host.finish(result);
-        if disposed.is_ok() && rb_self.accounted.replace(false) {
-            rb_raw::adjust_memory(ruby, -ISOLATE_BYTES.cast_signed());
+        if disposed.is_ok() {
+            if rb_self.accounted.replace(false) {
+                rb_raw::adjust_memory(ruby, -ISOLATE_BYTES.cast_signed());
+            }
+            if let Some(io) = rb_self.waiter.take(ruby) {
+                let _: Value = io.funcall("close", ())?;
+            }
         }
         interrupted.map_or(disposed, Err)
     }

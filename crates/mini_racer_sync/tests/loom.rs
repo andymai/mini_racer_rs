@@ -236,8 +236,8 @@ fn an_external_wake_ends_a_park() {
     });
 }
 
-// Stands in for a fiber waiting on a file descriptor: it sleeps on its own
-// doorbell, which only the channel's notifier rings.
+// Stands in for the descriptor a fiber waits on: level-triggered, it stays
+// rung until drained, and only the channel's notifier rings it.
 #[derive(Default)]
 struct Doorbell {
     rung: Mutex<bool>,
@@ -245,12 +245,15 @@ struct Doorbell {
 }
 
 impl Doorbell {
+    fn drain(&self) {
+        *lock(&self.rung) = false;
+    }
+
     fn wait(&self) {
         let mut rung = lock(&self.rung);
         while !*rung {
             rung = wait(&self.ring, rung);
         }
-        *rung = false;
     }
 }
 
@@ -263,14 +266,14 @@ impl Notifier for Ring {
     }
 }
 
-// Model 6: a waiter that sleeps elsewhere, woken only through the notifier,
-// never sleeps through the response or a callback.
+// Model 6: a waiter that drains its descriptor, then waits on it with
+// `park_notified`, never sleeps through the response or a callback.
 #[test]
 fn a_waiter_woken_by_the_notifier_never_misses_its_turn() {
     loom::model(|| {
         let channel = Arc::new(Channel::<Numbers>::default());
         let bell = Arc::new(Doorbell::default());
-        channel.set_notifier(Side::Ruby, Box::new(Ring(Arc::clone(&bell))));
+        channel.set_notifier(Side::Ruby, Some(Box::new(Ring(Arc::clone(&bell)))));
         let runner = Arc::clone(&channel);
         let v8 = thread::spawn(move || {
             let value = request(next_for_v8(&runner)).expect("a request");
@@ -284,7 +287,8 @@ fn a_waiter_woken_by_the_notifier_never_misses_its_turn() {
             if let Some(message) = channel.recv_ruby().expect("open") {
                 return message;
             }
-            channel.park_with(Side::Ruby, || bell.wait());
+            bell.drain();
+            channel.park_notified(Side::Ruby, || bell.wait());
         };
         assert_eq!(callback(Ok(next())), Some(2));
         channel.reply(3).expect("open");
