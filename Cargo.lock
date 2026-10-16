@@ -445,6 +445,7 @@ name = "mini_racer_sync"
 version = "0.0.0"
 dependencies = [
  "loom",
+ "thiserror",
 ]
 
 [[package]]

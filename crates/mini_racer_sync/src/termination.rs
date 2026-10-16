@@ -1,0 +1,588 @@
+use crate::lock::lock;
+use crate::primitives::Mutex;
+
+/// Why V8 stopped running a dispatch's JavaScript.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerminationCause {
+    Stop,
+    Timeout,
+    Cancelled,
+    MaxMemory,
+    HeapExhausted,
+}
+
+impl TerminationCause {
+    // Most important first: the memory causes raise a different Ruby error
+    // than the rest, so they win when several land on one dispatch.
+    const BY_PRIORITY: [Self; 5] = [
+        Self::HeapExhausted,
+        Self::MaxMemory,
+        Self::Cancelled,
+        Self::Timeout,
+        Self::Stop,
+    ];
+
+    const fn bit(self) -> u8 {
+        match self {
+            Self::Stop => 1,
+            Self::Timeout => 1 << 1,
+            Self::Cancelled => 1 << 2,
+            Self::MaxMemory => 1 << 3,
+            Self::HeapExhausted => 1 << 4,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct CauseSet(u8);
+
+impl CauseSet {
+    // The causes that outlive the dispatch they arrived in, as upstream's
+    // non-watchdog termination bit does.
+    const PENDING: Self = Self(
+        TerminationCause::Stop.bit()
+            | TerminationCause::MaxMemory.bit()
+            | TerminationCause::HeapExhausted.bit(),
+    );
+
+    const fn with(self, cause: TerminationCause) -> Self {
+        Self(self.0 | cause.bit())
+    }
+
+    const fn contains(self, cause: TerminationCause) -> bool {
+        self.0 & cause.bit() != 0
+    }
+
+    const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+
+    const fn intersect(self, other: Self) -> Self {
+        Self(self.0 & other.0)
+    }
+
+    fn first(self) -> Option<TerminationCause> {
+        TerminationCause::BY_PRIORITY
+            .into_iter()
+            .find(|cause| self.contains(*cause))
+    }
+}
+
+/// Identifies one outermost dispatch, so a late timeout cannot hit the next one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DispatchId(u64);
+
+/// How a dispatch treats pending causes, following `mini_racer` 0.22.1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DispatchKind {
+    /// `eval`, `call` and their await forms, snapshot creation and warmup:
+    /// report the cause; outermost, consume it.
+    Script,
+    /// `pump_message_loop`: never report; outermost, consume silently.
+    Pump,
+    /// Isolate setup, `attach`, heap statistics, heap snapshots, the low
+    /// memory notification and the microtask checkpoint: never report; leave
+    /// a stop or memory cause for the next script.
+    Maintenance,
+}
+
+impl DispatchKind {
+    fn report(self, causes: CauseSet) -> Option<TerminationCause> {
+        match self {
+            Self::Script => causes.first(),
+            Self::Pump | Self::Maintenance => None,
+        }
+    }
+
+    // A cancelled dispatch clears everything, as upstream's cancel path
+    // stores zero, so an abandoned wait leaves no stale termination behind.
+    fn remaining(self, causes: CauseSet) -> CauseSet {
+        if causes.contains(TerminationCause::Cancelled) {
+            return CauseSet::default();
+        }
+        match self {
+            Self::Script | Self::Pump => CauseSet::default(),
+            Self::Maintenance => causes.intersect(CauseSet::PENDING),
+        }
+    }
+}
+
+/// A request to terminate. Timeouts and cancellations name the dispatch they
+/// belong to and are dropped if it has already ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Interrupt {
+    Stop,
+    Timeout(DispatchId),
+    Cancel(DispatchId),
+    MaxMemory,
+    HeapExhausted,
+}
+
+impl Interrupt {
+    const fn cause(self) -> TerminationCause {
+        match self {
+            Self::Stop => TerminationCause::Stop,
+            Self::Timeout(_) => TerminationCause::Timeout,
+            Self::Cancel(_) => TerminationCause::Cancelled,
+            Self::MaxMemory => TerminationCause::MaxMemory,
+            Self::HeapExhausted => TerminationCause::HeapExhausted,
+        }
+    }
+
+    const fn dispatch(self) -> Option<DispatchId> {
+        match self {
+            Self::Timeout(id) | Self::Cancel(id) => Some(id),
+            Self::Stop | Self::MaxMemory | Self::HeapExhausted => None,
+        }
+    }
+}
+
+/// Why a dispatch must not report its own result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Halt {
+    Terminated(TerminationCause),
+    Disposed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum TermError {
+    #[error("the context is being disposed")]
+    Disposing,
+    #[error("a dispatch is already armed")]
+    AlreadyArmed,
+}
+
+/// Stops and resumes the isolate's JavaScript from any thread. `terminate`
+/// must also wake the runner if it sleeps waiting for tasks, or a stop during
+/// an await would wait for the next task to be noticed.
+pub trait Terminator {
+    fn terminate(&self);
+    fn cancel(&self);
+}
+
+#[derive(Clone, Copy)]
+struct Armed {
+    id: DispatchId,
+    kind: DispatchKind,
+    terminated: bool,
+}
+
+struct State<T> {
+    handle: Option<T>,
+    armed: Option<Armed>,
+    causes: CauseSet,
+    disposing: bool,
+    suspended: bool,
+    next: u64,
+}
+
+impl<T: Terminator> State<T> {
+    fn terminate_armed(&mut self) {
+        if self.suspended {
+            return;
+        }
+        if let (Some(armed), Some(handle)) = (&mut self.armed, &self.handle) {
+            handle.terminate();
+            armed.terminated = true;
+        }
+    }
+
+    fn cancel_armed(&mut self) {
+        if let (Some(armed), Some(handle)) = (&mut self.armed, &self.handle)
+            && armed.terminated
+        {
+            handle.cancel();
+            armed.terminated = false;
+        }
+    }
+}
+
+/// A context's termination state.
+///
+/// V8 is told to terminate only while an outermost dispatch is armed, and
+/// `end` cancels that under the same lock, so a cause that arrives late is
+/// either recorded for later or dropped, never left behind to kill the next
+/// dispatch.
+pub struct TermCell<T> {
+    state: Mutex<State<T>>,
+}
+
+impl<T> Default for TermCell<T> {
+    fn default() -> Self {
+        Self {
+            state: Mutex::new(State {
+                handle: None,
+                armed: None,
+                causes: CauseSet::default(),
+                disposing: false,
+                suspended: false,
+                next: 0,
+            }),
+        }
+    }
+}
+
+impl<T: Terminator> TermCell<T> {
+    pub fn install(&self, handle: T) {
+        lock(&self.state).handle = Some(handle);
+    }
+
+    /// Taken back before the isolate is dropped, so no later request reaches
+    /// a dead isolate.
+    pub fn uninstall(&self) -> Option<T> {
+        lock(&self.state).handle.take()
+    }
+
+    /// Arms an outermost dispatch; nested dispatches run inside it. A cause
+    /// still pending terminates it at once, as upstream's queued termination
+    /// kills the next entry into JavaScript of any kind.
+    pub fn begin(&self, kind: DispatchKind) -> Result<DispatchId, TermError> {
+        let mut state = lock(&self.state);
+        if state.disposing {
+            return Err(TermError::Disposing);
+        }
+        if state.armed.is_some() {
+            return Err(TermError::AlreadyArmed);
+        }
+        let id = DispatchId(state.next);
+        state.next = state.next.wrapping_add(1);
+        state.armed = Some(Armed {
+            id,
+            kind,
+            terminated: false,
+        });
+        if !state.causes.is_empty() {
+            state.terminate_armed();
+        }
+        drop(state);
+        Ok(id)
+    }
+
+    /// Records `interrupt` and terminates the armed dispatch. Returns false
+    /// when the interrupt names a dispatch that is no longer armed.
+    pub fn request(&self, interrupt: Interrupt) -> bool {
+        let mut state = lock(&self.state);
+        if let Some(id) = interrupt.dispatch()
+            && state.armed.map(|armed| armed.id) != Some(id)
+        {
+            return false;
+        }
+        state.causes = state.causes.with(interrupt.cause());
+        state.terminate_armed();
+        true
+    }
+
+    /// Marks the context as disposing: the armed dispatch, if any, is
+    /// terminated and halts with `Disposed`, and no new one can begin.
+    pub fn dispose(&self) -> bool {
+        let mut state = lock(&self.state);
+        state.disposing = true;
+        state.terminate_armed();
+        state.armed.is_some()
+    }
+
+    /// What a dispatch of `kind` must report instead of its result, without
+    /// consuming anything: runners ask before running script, and a nested
+    /// dispatch asks before replying, leaving the cause to its enclosing one.
+    #[must_use]
+    pub fn check(&self, kind: DispatchKind) -> Option<Halt> {
+        let state = lock(&self.state);
+        if state.disposing {
+            return Some(Halt::Disposed);
+        }
+        kind.report(state.causes).map(Halt::Terminated)
+    }
+
+    /// Lifts the armed dispatch's termination so a nested dispatch can encode
+    /// its reply. Causes that arrive meanwhile are recorded, and `resume`
+    /// terminates again if any are pending.
+    pub fn suspend(&self) {
+        let mut state = lock(&self.state);
+        state.suspended = true;
+        state.cancel_armed();
+    }
+
+    pub fn resume(&self) {
+        let mut state = lock(&self.state);
+        state.suspended = false;
+        if !state.causes.is_empty() || state.disposing {
+            state.terminate_armed();
+        }
+    }
+
+    /// The armed dispatch, for a cancellation from a nested wait.
+    #[must_use]
+    pub fn armed(&self) -> Option<DispatchId> {
+        lock(&self.state).armed.map(|armed| armed.id)
+    }
+
+    /// Disarms `id` and settles its outcome; the runner calls it before
+    /// encoding a result, so nothing can terminate the encoding and a cause
+    /// arriving later waits for the next dispatch. A no-op returning `None`
+    /// when `id` is not armed.
+    pub fn end(&self, id: DispatchId) -> Option<Halt> {
+        let mut state = lock(&self.state);
+        if state.armed.map(|armed| armed.id) != Some(id) {
+            return None;
+        }
+        state.cancel_armed();
+        state.suspended = false;
+        let armed = state.armed.take()?;
+        if state.disposing {
+            return Some(Halt::Disposed);
+        }
+        let causes = state.causes;
+        state.causes = armed.kind.remaining(causes);
+        drop(state);
+        armed.kind.report(causes).map(Halt::Terminated)
+    }
+}
+
+#[cfg(all(test, not(loom)))]
+mod tests {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use super::*;
+
+    #[derive(Default)]
+    struct Calls {
+        terminate: Cell<u32>,
+        cancel: Cell<u32>,
+    }
+
+    struct Probe(Rc<Calls>);
+
+    impl Terminator for Probe {
+        fn terminate(&self) {
+            self.0.terminate.set(self.0.terminate.get() + 1);
+        }
+
+        fn cancel(&self) {
+            self.0.cancel.set(self.0.cancel.get() + 1);
+        }
+    }
+
+    fn cell() -> (TermCell<Probe>, Rc<Calls>) {
+        let calls = Rc::new(Calls::default());
+        let cell = TermCell::default();
+        cell.install(Probe(Rc::clone(&calls)));
+        (cell, calls)
+    }
+
+    fn run(cell: &TermCell<Probe>, kind: DispatchKind) -> Option<Halt> {
+        let id = cell.begin(kind).expect("nothing armed");
+        cell.end(id)
+    }
+
+    const STOPPED: Option<Halt> = Some(Halt::Terminated(TerminationCause::Stop));
+
+    #[test]
+    fn a_stop_while_idle_is_reported_by_the_next_script_only() {
+        let (cell, calls) = cell();
+        assert!(cell.request(Interrupt::Stop));
+        assert_eq!(calls.terminate.get(), 0);
+
+        assert_eq!(run(&cell, DispatchKind::Script), STOPPED);
+        assert_eq!(run(&cell, DispatchKind::Script), None);
+    }
+
+    #[test]
+    fn a_pending_stop_terminates_the_next_dispatch_of_any_kind() {
+        let (cell, calls) = cell();
+        cell.request(Interrupt::Stop);
+        let id = cell
+            .begin(DispatchKind::Maintenance)
+            .expect("nothing armed");
+        assert_eq!(calls.terminate.get(), 1);
+
+        assert_eq!(cell.end(id), None);
+        assert_eq!(calls.cancel.get(), 1);
+        assert_eq!(run(&cell, DispatchKind::Script), STOPPED);
+    }
+
+    #[test]
+    fn a_stop_during_a_script_terminates_it_and_is_cancelled_at_end() {
+        let (cell, calls) = cell();
+        let id = cell.begin(DispatchKind::Script).expect("nothing armed");
+        cell.request(Interrupt::Stop);
+        assert_eq!(calls.terminate.get(), 1);
+
+        assert_eq!(cell.end(id), STOPPED);
+        assert_eq!(calls.cancel.get(), 1);
+        assert_eq!(cell.check(DispatchKind::Script), None);
+    }
+
+    #[test]
+    fn a_nested_script_reports_a_stop_and_leaves_it_pending() {
+        let (cell, _) = cell();
+        let id = cell.begin(DispatchKind::Script).expect("nothing armed");
+        cell.request(Interrupt::Stop);
+
+        assert_eq!(cell.check(DispatchKind::Script), STOPPED);
+        assert_eq!(cell.check(DispatchKind::Pump), None);
+        assert_eq!(cell.check(DispatchKind::Maintenance), None);
+        assert_eq!(cell.end(id), STOPPED);
+    }
+
+    #[test]
+    fn a_pump_consumes_a_stop_silently() {
+        let (cell, _) = cell();
+        cell.request(Interrupt::Stop);
+
+        assert_eq!(run(&cell, DispatchKind::Pump), None);
+        assert_eq!(run(&cell, DispatchKind::Script), None);
+    }
+
+    #[test]
+    fn maintenance_leaves_a_stop_pending() {
+        let (cell, _) = cell();
+        let id = cell
+            .begin(DispatchKind::Maintenance)
+            .expect("nothing armed");
+        cell.request(Interrupt::Stop);
+        assert_eq!(cell.check(DispatchKind::Maintenance), None);
+        assert_eq!(cell.end(id), None);
+
+        assert_eq!(run(&cell, DispatchKind::Script), STOPPED);
+    }
+
+    #[test]
+    fn a_timeout_after_its_dispatch_ended_is_dropped() {
+        let (cell, calls) = cell();
+        let first = cell.begin(DispatchKind::Script).expect("nothing armed");
+        cell.end(first);
+        let second = cell.begin(DispatchKind::Script).expect("nothing armed");
+
+        assert!(!cell.request(Interrupt::Timeout(first)));
+        assert_eq!(calls.terminate.get(), 0);
+        assert_eq!(cell.end(second), None);
+    }
+
+    #[test]
+    fn a_timeout_does_not_outlive_its_dispatch() {
+        let (cell, _) = cell();
+        let id = cell
+            .begin(DispatchKind::Maintenance)
+            .expect("nothing armed");
+        assert!(cell.request(Interrupt::Timeout(id)));
+        assert_eq!(cell.end(id), None);
+
+        assert_eq!(run(&cell, DispatchKind::Script), None);
+    }
+
+    #[test]
+    fn a_cancel_clears_every_cause() {
+        let (cell, _) = cell();
+        cell.request(Interrupt::Stop);
+        let id = cell.begin(DispatchKind::Script).expect("nothing armed");
+        cell.request(Interrupt::Cancel(id));
+
+        assert_eq!(
+            cell.end(id),
+            Some(Halt::Terminated(TerminationCause::Cancelled))
+        );
+        assert_eq!(run(&cell, DispatchKind::Script), None);
+    }
+
+    #[test]
+    fn check_and_end_agree_on_the_cause() {
+        let (cell, _) = cell();
+        let id = cell.begin(DispatchKind::Script).expect("nothing armed");
+        cell.request(Interrupt::Cancel(id));
+        cell.request(Interrupt::MaxMemory);
+        let memory = Some(Halt::Terminated(TerminationCause::MaxMemory));
+
+        assert_eq!(cell.check(DispatchKind::Script), memory);
+        assert_eq!(cell.end(id), memory);
+        assert_eq!(run(&cell, DispatchKind::Script), None);
+    }
+
+    #[test]
+    fn memory_causes_outrank_a_stop() {
+        let (cell, _) = cell();
+        cell.request(Interrupt::Stop);
+        cell.request(Interrupt::MaxMemory);
+
+        assert_eq!(
+            run(&cell, DispatchKind::Script),
+            Some(Halt::Terminated(TerminationCause::MaxMemory))
+        );
+    }
+
+    #[test]
+    fn a_suspended_dispatch_is_terminated_again_on_resume() {
+        let (cell, calls) = cell();
+        let id = cell.begin(DispatchKind::Script).expect("nothing armed");
+        cell.request(Interrupt::Stop);
+        cell.suspend();
+        assert_eq!(calls.cancel.get(), 1);
+
+        cell.request(Interrupt::Stop);
+        assert_eq!(calls.terminate.get(), 1);
+        cell.resume();
+        assert_eq!(calls.terminate.get(), 2);
+        assert_eq!(cell.end(id), STOPPED);
+        assert_eq!(calls.cancel.get(), 2);
+    }
+
+    #[test]
+    fn resume_without_causes_leaves_the_dispatch_running() {
+        let (cell, calls) = cell();
+        let id = cell.begin(DispatchKind::Script).expect("nothing armed");
+        cell.suspend();
+        cell.resume();
+
+        assert_eq!(calls.terminate.get(), 0);
+        assert_eq!(cell.end(id), None);
+    }
+
+    #[test]
+    fn disposing_halts_the_armed_dispatch_and_refuses_new_ones() {
+        let (cell, calls) = cell();
+        let id = cell
+            .begin(DispatchKind::Maintenance)
+            .expect("nothing armed");
+        assert!(cell.dispose());
+        assert_eq!(calls.terminate.get(), 1);
+        assert_eq!(cell.check(DispatchKind::Maintenance), Some(Halt::Disposed));
+
+        assert_eq!(cell.end(id), Some(Halt::Disposed));
+        assert_eq!(calls.cancel.get(), 1);
+        assert_eq!(cell.begin(DispatchKind::Script), Err(TermError::Disposing));
+    }
+
+    #[test]
+    fn one_outermost_dispatch_at_a_time() {
+        let (cell, _) = cell();
+        let id = cell.begin(DispatchKind::Script).expect("nothing armed");
+
+        assert_eq!(
+            cell.begin(DispatchKind::Script),
+            Err(TermError::AlreadyArmed)
+        );
+        assert_eq!(cell.armed(), Some(id));
+        cell.end(id);
+        assert_eq!(cell.end(id), None);
+        assert_eq!(cell.armed(), None);
+    }
+
+    #[test]
+    fn nothing_is_cancelled_when_nothing_was_terminated() {
+        let (cell, calls) = cell();
+        run(&cell, DispatchKind::Script);
+
+        assert_eq!(calls.cancel.get(), 0);
+    }
+
+    #[test]
+    fn without_a_handle_causes_are_still_recorded() {
+        let (cell, calls) = cell();
+        cell.uninstall();
+        let id = cell.begin(DispatchKind::Script).expect("nothing armed");
+        cell.request(Interrupt::Stop);
+
+        assert_eq!(calls.terminate.get(), 0);
+        assert_eq!(cell.end(id), STOPPED);
+    }
+}
