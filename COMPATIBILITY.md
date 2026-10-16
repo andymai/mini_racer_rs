@@ -4,7 +4,7 @@
 
 | Engine | Done | Planned | Deviation |
 |---|---|---|---|
-| CRuby | 43 | 11 | 15 |
+| CRuby | 43 | 11 | 16 |
 | TruffleRuby | 58 | 0 | 0 |
 
 ## Surface
@@ -105,6 +105,12 @@ Pending review.
 ### `behavior:callback-reentry@ruby`
 
 Both gems allow an attached callback to call `eval`, `call`, or `attach` on its own context, running the nested call inside the script that invoked the callback. mini_racer_rs accepts the call only from the fiber running the callback. A call from another fiber on the same thread, such as code inside `Enumerator#next`, raises `ThreadError` (`deadlock; lock already owned by another fiber belonging to the same thread`). mini_racer 0.22.1 accepts it: `Enumerator.new { |y| y << context.eval("1") }.next` inside a callback returns `1`. A signal trap that calls the context while a callback waits on a nested `eval` gets `ThreadError` in mini_racer_rs; when rescued, the script completes. With mini_racer 0.22.1, the same program hangs until killed. mini_racer_rs refuses these calls because each nested call must finish before its callback replies, preventing out-of-order replies from being paired with the wrong callback.
+
+Pending review.
+
+### `behavior:fiber-scheduler@ruby`
+
+Under a fiber scheduler, mini_racer_rs parks only a non-blocking fiber waiting for a context through the scheduler's `io_wait`, so the thread's other fibers keep running during `Context.new`, `eval`, `call`, `attach`, `Snapshot.new`, and nested callback calls. mini_racer 0.22.1 releases the GVL but blocks the whole thread until JavaScript returns. In `Sync`, three fibers running 100 ms busy loops in separate contexts finish in 100 ms with mini_racer_rs while a 10 ms ticker ticks 9 times, versus 300 ms and 3 ticks with mini_racer. A scheduler exception ends the mini_racer_rs call: `task.with_timeout(0.05) { context.call("busy", 300) }` raises `Async::TimeoutError` after 50 ms and terminates JavaScript, while mini_racer returns `300` after 300 ms. Each context still evaluates afterward. Fibers sharing one context take turns in both gems. Without a scheduler, or in a blocking fiber, mini_racer_rs releases the GVL and blocks the thread while waiting, as mini_racer does.
 
 Pending review.
 

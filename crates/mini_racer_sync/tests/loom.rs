@@ -5,9 +5,10 @@ use std::time::Duration;
 use loom::sync::Arc;
 use loom::sync::atomic::{AtomicBool, Ordering};
 use loom::thread;
+use mini_racer_sync::primitives::{Condvar, Mutex};
 use mini_racer_sync::{
-    Channel, ChannelError, DispatchKind, Halt, Interrupt, Nesting, Protocol, Side, TermCell,
-    TerminationCause, Terminator, ToRuby, ToV8,
+    Channel, ChannelError, DispatchKind, Halt, Interrupt, Nesting, Notifier, Protocol, Side,
+    TermCell, TerminationCause, Terminator, ToRuby, ToV8, lock, wait,
 };
 
 struct Numbers;
@@ -232,6 +233,63 @@ fn an_external_wake_ends_a_park() {
         channel.park(Side::Ruby, None);
         interrupter.join().expect("interrupter thread");
         assert!(!channel.ready(Side::Ruby));
+    });
+}
+
+// Stands in for a fiber waiting on a file descriptor: it sleeps on its own
+// doorbell, which only the channel's notifier rings.
+#[derive(Default)]
+struct Doorbell {
+    rung: Mutex<bool>,
+    ring: Condvar,
+}
+
+impl Doorbell {
+    fn wait(&self) {
+        let mut rung = lock(&self.rung);
+        while !*rung {
+            rung = wait(&self.ring, rung);
+        }
+        *rung = false;
+    }
+}
+
+struct Ring(Arc<Doorbell>);
+
+impl Notifier for Ring {
+    fn notify(&self) {
+        *lock(&self.0.rung) = true;
+        self.0.ring.notify_one();
+    }
+}
+
+// Model 6: a waiter that sleeps elsewhere, woken only through the notifier,
+// never sleeps through the response or a callback.
+#[test]
+fn a_waiter_woken_by_the_notifier_never_misses_its_turn() {
+    loom::model(|| {
+        let channel = Arc::new(Channel::<Numbers>::default());
+        let bell = Arc::new(Doorbell::default());
+        channel.set_notifier(Side::Ruby, Box::new(Ring(Arc::clone(&bell))));
+        let runner = Arc::clone(&channel);
+        let v8 = thread::spawn(move || {
+            let value = request(next_for_v8(&runner)).expect("a request");
+            runner.callback(value + 1).expect("open");
+            let value = reply(next_for_v8(&runner)).expect("a reply");
+            runner.respond(value + 1).expect("open");
+        });
+
+        channel.request(1).expect("open");
+        let next = || loop {
+            if let Some(message) = channel.recv_ruby().expect("open") {
+                return message;
+            }
+            channel.park_with(Side::Ruby, || bell.wait());
+        };
+        assert_eq!(callback(Ok(next())), Some(2));
+        channel.reply(3).expect("open");
+        assert_eq!(response(Ok(next())), Some(4));
+        v8.join().expect("runner thread");
     });
 }
 

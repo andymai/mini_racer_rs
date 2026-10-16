@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::lock::lock;
-use crate::parker::Parker;
+use crate::parker::{Notifier, Parker};
 use crate::primitives::{AtomicU64, Mutex, Ordering};
 
 // One word holds whose turn it is, whether the channel is closed, which sides
@@ -247,6 +247,13 @@ impl<P: Protocol> Channel<P> {
     /// `wake(side)` is called, or the timeout passes. May return early;
     /// callers recheck `ready`.
     pub fn park(&self, side: Side, timeout: Option<Duration>) {
+        self.park_with(side, || self.parker(side).park(timeout));
+    }
+
+    /// `park` for a waiter that sleeps elsewhere: unless `side` has the turn,
+    /// marks it parked and runs `wait`, which should return once the side's
+    /// notifier fires and may return earlier.
+    pub fn park_with(&self, side: Side, wait: impl FnOnce()) {
         let mut state = self.state.load(Ordering::Acquire);
         loop {
             if ready(state, side) {
@@ -262,8 +269,13 @@ impl<P: Protocol> Channel<P> {
                 Err(actual) => state = actual,
             }
         }
-        self.parker(side).park(timeout);
+        wait();
         self.state.fetch_and(!side.parked(), Ordering::AcqRel);
+    }
+
+    /// Tells `notifier` of every wake of `side`, as well as its parker.
+    pub fn set_notifier(&self, side: Side, notifier: Box<dyn Notifier>) {
+        self.parker(side).set_notifier(notifier);
     }
 
     /// Waits for `wake(side)`, `close`, or the timeout whoever holds the turn,

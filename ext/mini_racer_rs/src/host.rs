@@ -1,9 +1,10 @@
+use std::os::fd::RawFd;
 use std::sync::OnceLock;
 use std::time::Duration;
 
 use magnus::error::ErrorType;
 use magnus::value::ReprValue;
-use magnus::{Class, Error, Exception, Integer, RArray, RString, Ruby, Value};
+use magnus::{Class, Error, Exception, Integer, RArray, RString, Ruby, Value, kwargs};
 use mini_racer_engine::{
     CallbackReply, EngineError, Host, JsError, JsErrorKind, JsText, WaitHandle, WaitOutcome,
 };
@@ -44,8 +45,9 @@ pub struct Callbacks<'r> {
     pub raised: &'r OwnedRoot<Value>,
 }
 
-/// Waits for a runner from a Ruby thread: spins holding the GVL, then releases
-/// it, spins and parks. A Ruby interrupt wakes the park; traps run and the wait
+/// Waits for a runner from a Ruby thread: spins holding the GVL, then parks
+/// the fiber under a fiber scheduler, or else releases the GVL, spins and
+/// parks the thread. A Ruby interrupt wakes the park; traps run and the wait
 /// goes on, while an exception (Timeout, Thread#raise, #kill) cancels the
 /// dispatch and is raised once the engine has its response.
 pub struct RubyHost<'r> {
@@ -95,6 +97,30 @@ impl<'r> RubyHost<'r> {
         }
     }
 
+    // Under a fiber scheduler only this fiber waits: the runner's answer makes
+    // the context's notifier readable and the scheduler resumes the fiber,
+    // while whatever the scheduler raises into it (a timeout, a stop) cancels
+    // the dispatch. None means no notifier could be made.
+    fn wait_in_fiber(&mut self, wait: &WaitHandle<'_>) -> Option<WaitOutcome> {
+        let ruby = self.ruby;
+        loop {
+            let mut raised = None;
+            if wait
+                .park_on_fd(|fd| raised = wait_readable(ruby, fd).err())
+                .is_err()
+            {
+                return None;
+            }
+            if wait.ready() {
+                return Some(WaitOutcome::Ready);
+            }
+            if let Some(error) = raised {
+                self.pending = Some(error);
+                return Some(WaitOutcome::Cancel);
+            }
+        }
+    }
+
     // A captured throw resumes through Ruby's error info, which any protected
     // call in between would clear, so nothing runs Ruby code until it does.
     fn jumping(&self) -> bool {
@@ -125,6 +151,15 @@ impl<'r> RubyHost<'r> {
     }
 }
 
+// The engine owns the descriptor, so Ruby must never close it.
+fn wait_readable(ruby: &Ruby, fd: RawFd) -> Result<(), Error> {
+    let io: Value = ruby
+        .class_io()
+        .funcall("for_fd", (fd, kwargs!("autoclose" => false)))?;
+    let _: Value = io.funcall("wait_readable", ())?;
+    Ok(())
+}
+
 fn exception(ruby: &Ruby, error: &Error) -> Option<Exception> {
     match error.error_type() {
         ErrorType::Jump(_) => None,
@@ -150,6 +185,11 @@ impl Host for RubyHost<'_> {
         let budget = budget();
         if wait.spin(budget.gvl) {
             return WaitOutcome::Ready;
+        }
+        if rb_raw::fiber_scheduler(self.ruby)
+            && let Some(outcome) = self.wait_in_fiber(wait)
+        {
+            return outcome;
         }
         let unparker = wait.unparker();
         loop {

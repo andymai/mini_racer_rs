@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 use mini_racer_sync::{Channel, DispatchId, Protocol, TermCell, Terminator};
 
 use crate::EngineError;
+use crate::notify::NotifyFd;
 
 pub struct Wire;
 
@@ -117,4 +118,5 @@ pub struct ControlBlock {
     pub term: TermCell<IsolateTerminator>,
     pub config: ContextConfig,
     pub timer: Mutex<Timer>,
+    pub notify: NotifyFd,
 }

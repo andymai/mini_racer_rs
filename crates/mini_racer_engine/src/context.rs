@@ -1,3 +1,5 @@
+use std::io;
+use std::os::fd::RawFd;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -7,6 +9,7 @@ use mini_racer_sync::{
 };
 
 use crate::control::{CallbackReply, ContextConfig, ControlBlock, Depth, JsText, Request, Wire};
+use crate::notify::NotifyFd;
 use crate::process::{self, platform, watchdog};
 use crate::spin::spin_until;
 use crate::{EngineError, runner};
@@ -40,6 +43,7 @@ pub trait Host {
 
 pub struct WaitHandle<'a> {
     channel: &'a Channel<Wire>,
+    notify: &'a NotifyFd,
 }
 
 impl<'a> WaitHandle<'a> {
@@ -57,6 +61,15 @@ impl<'a> WaitHandle<'a> {
     /// Sleeps until the runner answers or `Unparker::unpark`; may return early.
     pub fn park(&self) {
         self.channel.park(Side::Ruby, None);
+    }
+
+    /// `park` for a host that sleeps on a file descriptor instead, such as a
+    /// fiber scheduler: `wait` gets one that becomes readable once the runner
+    /// answers, and should return then or earlier.
+    pub fn park_on_fd(&self, wait: impl FnOnce(RawFd)) -> io::Result<()> {
+        let fd = self.notify.drained(self.channel)?;
+        self.channel.park_with(Side::Ruby, || wait(fd));
+        Ok(())
     }
 
     #[must_use]
@@ -136,6 +149,7 @@ impl ContextHandle {
             term: TermCell::default(),
             config,
             timer: Mutex::default(),
+            notify: NotifyFd::default(),
         });
         let runner_block = Arc::clone(&block);
         let stack = platform::stack_size_kb().map_or(MIN_RUNNER_STACK_BYTES, |kb| {
@@ -284,6 +298,7 @@ impl ContextHandle {
         }
         let wait = WaitHandle {
             channel: &self.block.channel,
+            notify: &self.block.notify,
         };
         loop {
             host.wait_blocking(&wait);
@@ -370,6 +385,7 @@ impl ContextHandle {
         let block = &self.block;
         let wait = WaitHandle {
             channel: &block.channel,
+            notify: &block.notify,
         };
         let mut cancelled = false;
         let mut disposed = false;
