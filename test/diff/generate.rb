@@ -48,8 +48,14 @@ module DiffGenerate
     when 1 then ["object", children.call.map { |child| [KEYS.sample(random: random), child] }]
     when 2 then ["map", children.call.map { |child| [js_tree(random, 0), child] }]
     when 3 then ["set", children.call]
-    else ["shared", js_tree(random, depth - 1)]
+    else ["shared", shareable(js_tree(random, depth - 1))]
     end
+  end
+
+  # A wrapper object reaches Ruby as an immediate Integer, so a lost reference
+  # to one cannot be told from a wrong value; it is shared inside an array.
+  def shareable(tree)
+    tree == ["lit", "new Number(1)"] ? ["array", [tree]] : tree
   end
 
   HASH_KEYS = [%w[string UTF-8 text k], ["symbol", %w[string US-ASCII text s]], %w[int 7],

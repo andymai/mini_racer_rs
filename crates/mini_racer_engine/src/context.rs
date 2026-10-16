@@ -5,7 +5,7 @@ use mini_racer_sync::{
     Channel, ChannelError, DispatchId, DispatchKind, Interrupt, Side, TermCell, TermError, ToRuby,
 };
 
-use crate::control::{ContextConfig, ControlBlock, Request, Wire};
+use crate::control::{ContextConfig, ControlBlock, JsText, Request, Wire};
 use crate::process::{self, platform, watchdog};
 use crate::spin::spin_until;
 use crate::{EngineError, runner};
@@ -108,10 +108,20 @@ impl ContextHandle {
         Ok(handle)
     }
 
-    pub fn eval(&self, source: String, host: &mut impl Host) -> Result<Vec<u8>, EngineError> {
+    pub fn eval(
+        &self,
+        filename: impl Into<JsText>,
+        source: impl Into<JsText>,
+        host: &mut impl Host,
+    ) -> Result<Vec<u8>, EngineError> {
+        let (filename, source) = (filename.into(), source.into());
         self.dispatch(
             DispatchKind::Script,
-            |dispatch| Request::Eval { source, dispatch },
+            |dispatch| Request::Eval {
+                filename,
+                source,
+                dispatch,
+            },
             host,
         )
     }

@@ -34,12 +34,20 @@ pub fn churn() {
                         .expect("spawn");
                     assert!(
                         context
-                            .eval("[1, 'two', 3.5]".to_owned(), &mut Parking)
+                            .eval(
+                                "<eval>".to_owned(),
+                                "[1, 'two', 3.5]".to_owned(),
+                                &mut Parking
+                            )
                             .is_ok()
                     );
                     if round % 3 == 0 {
                         context.stop().expect("live context");
-                        assert!(terminated(context.eval("1".to_owned(), &mut Parking)));
+                        assert!(terminated(context.eval(
+                            "<eval>".to_owned(),
+                            "1".to_owned(),
+                            &mut Parking
+                        )));
                     }
                     context.begin_dispose();
                     context.dispose(&mut Parking).expect("dispose");
@@ -51,9 +59,11 @@ pub fn churn() {
                             &mut Parking,
                         )
                         .expect("spawn");
-                        assert!(terminated(
-                            timed.eval("while (true) {}".to_owned(), &mut Parking)
-                        ));
+                        assert!(terminated(timed.eval(
+                            "<eval>".to_owned(),
+                            "while (true) {}".to_owned(),
+                            &mut Parking
+                        )));
                         timed.begin_dispose();
                         timed.dispose(&mut Parking).expect("dispose");
                     }

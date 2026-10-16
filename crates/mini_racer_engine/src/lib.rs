@@ -3,6 +3,7 @@ mod control;
 mod error;
 pub mod process;
 mod runner;
+mod serialize;
 mod spin;
 #[allow(
     unsafe_code,
@@ -11,5 +12,5 @@ mod spin;
 mod sys;
 
 pub use context::{ContextHandle, Host, Unparker, WaitHandle, WaitOutcome};
-pub use control::ContextConfig;
+pub use control::{ContextConfig, JsText};
 pub use error::{EngineError, FlagError, JsError, JsErrorKind, TerminationCause};

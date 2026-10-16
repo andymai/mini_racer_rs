@@ -1,0 +1,23 @@
+# Upstream tests that `run.rb --gc-stress` runs with GC.stress on around each
+# and a compaction check after each, on legs where the ledger has them at pass.
+# They move values between JavaScript and Ruby, where a value Ruby's GC cannot
+# see would be collected or moved under the decoder.
+test/mini_racer_test.rb#MiniRacerTest#test_types
+test/mini_racer_test.rb#MiniRacerTest#test_array
+test/mini_racer_test.rb#MiniRacerTest#test_object
+test/mini_racer_test.rb#MiniRacerTest#test_return_hash
+test/mini_racer_test.rb#MiniRacerTest#test_return_date
+test/mini_racer_test.rb#MiniRacerTest#test_object_ref
+test/mini_racer_test.rb#MiniRacerTest#test_map
+test/mini_racer_test.rb#MiniRacerTest#test_symbol_support
+test/mini_racer_test.rb#MiniRacerTest#test_large_integer
+test/mini_racer_test.rb#MiniRacerTest#test_binary_returns_uint8array
+test/mini_racer_test.rb#MiniRacerTest#test_function_property
+test/mini_racer_test.rb#MiniRacerTest#test_proxy_uncloneable
+test/mini_racer_test.rb#MiniRacerTest#test_returns_javascript_function
+test/mini_racer_test.rb#MiniRacerTest#test_uint8array_is_converted_to_string
+test/mini_racer_test.rb#MiniRacerTest#test_v8_bigint_deserialization_handles_zero_and_large_nested_values
+test/mini_racer_test.rb#MiniRacerTest#test_regexp_string_iterator
+test/test_object_identity_fix.rb#ObjectIdentityTest#test_nested_objects_with_identical_content
+test/test_object_identity_fix.rb#ObjectIdentityTest#test_same_ruby_object_multiple_times_shares_identity
+test/test_object_identity_fix.rb#ObjectIdentityTest#test_separate_identical_objects_remain_separate

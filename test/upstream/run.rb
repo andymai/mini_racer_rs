@@ -37,6 +37,9 @@ OptionParser.new do |opts|
   opts.on("--strict", "Fail unless every result matches the ledger") { options[:strict] = true }
   opts.on("--scripts", "Run upstream's standalone scripts instead of the suite") { options[:scripts] = true }
   opts.on("--weekly", "With --scripts, include the scripts marked weekly") { options[:weekly] = true }
+  opts.on("--gc-stress", "Run the tests in gc_stress.txt that pass on this leg under GC.stress") do
+    options[:gc_stress] = true
+  end
   opts.on("--ledger PATH") { |path| options[:ledger] = path }
 end.parse!
 
@@ -54,9 +57,10 @@ FileUtils.mkdir_p(WORK)
 
 abort "#{SUITE[:root]} is empty; run `git submodule update --init`" unless Dir.exist?(File.join(UPSTREAM, "test"))
 
-def child_env(mode, report)
+def child_env(mode, report, gc_stress: false)
   reference = mode == "reference"
   env = {
+    "MINI_RACER_RS_GC_STRESS" => gc_stress ? "1" : nil,
     "BUNDLE_GEMFILE" => File.join(ROOT, reference ? "tools/reference/Gemfile" : "Gemfile"),
     "RUBYOPT" => "-rbundler/setup -r#{File.join(__dir__, reference ? "preload_reference.rb" : "preload.rb")}",
     "MINI_RACER_RS_UPSTREAM_REPORT" => report,
@@ -154,7 +158,8 @@ def run_suite(options, ledger)
     report = "#{stem}.events.jsonl"
     log = "#{stem}.log"
     FileUtils.rm_f([report, "#{report}.threads", "#{report}.guard"])
-    pid = spawn_clean(child_env(options[:mode], report), *suite_command(files, options, results.keys),
+    pid = spawn_clean(child_env(options[:mode], report, gc_stress: options[:gc_stress]),
+                      *suite_command(files, options, results.keys),
                       chdir: UPSTREAM, out: log, err: %i[child out],)
 
     started = {}
@@ -290,6 +295,17 @@ if options[:scripts]
 end
 
 ledger = UpstreamLedger.load(options[:ledger])
+if options[:gc_stress]
+  abort "--gc-stress runs mini_racer's suite only" unless options[:suite] == "mini_racer"
+
+  listed = File.readlines(File.join(__dir__, "gc_stress.txt"), chomp: true).reject { _1.empty? || _1.start_with?("#") }
+  selected = listed.select { |id| UpstreamLedger.effective(ledger[id], LEG)&.fetch("status") == "pass" }
+  abort "--gc-stress: no test in gc_stress.txt passes on #{LEG}" if selected.empty?
+
+  puts "gc-stress: #{selected.size} of #{listed.size} listed tests pass on #{LEG}"
+  options[:files] = selected.map { _1.split("#", 2).first }.uniq
+  options[:filter] = "/\\A(?:#{selected.map { Regexp.escape(_1.split("#", 2).last) }.join("|")})\\z/"
+end
 results, suite = run_suite(options, ledger)
 
 out = options[:out] || File.join(WORK, "#{options[:suite]}-#{options[:mode]}-#{LEG}-#{options[:seed]}.jsonl")

@@ -15,12 +15,35 @@ impl Protocol for Wire {
     type Reply = Infallible;
 }
 
+/// Text in the encoding Ruby holds it in. V8 reads each form directly, so a
+/// lone surrogate in UTF-16 and invalid UTF-8 reach it as `mini_racer` sends
+/// them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JsText {
+    Utf8(Vec<u8>),
+    Latin1(Vec<u8>),
+    Utf16(Vec<u16>),
+}
+
+impl From<String> for JsText {
+    fn from(text: String) -> Self {
+        Self::Utf8(text.into_bytes())
+    }
+}
+
+impl From<&str> for JsText {
+    fn from(text: &str) -> Self {
+        Self::Utf8(text.as_bytes().to_vec())
+    }
+}
+
 pub enum Request {
     Init {
         dispatch: DispatchId,
     },
     Eval {
-        source: String,
+        filename: JsText,
+        source: JsText,
         dispatch: DispatchId,
     },
     Dispose,

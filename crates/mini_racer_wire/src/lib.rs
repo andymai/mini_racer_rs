@@ -6,6 +6,7 @@
 )]
 
 mod decode;
+pub mod marker;
 pub mod text;
 mod write;
 

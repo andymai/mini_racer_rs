@@ -169,5 +169,145 @@
         ]
       }
     ]
+  },
+  {
+    "id": "curated-uncloneable-after-filter-symbol",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "({a: Symbol(\"s\")})"
+      }
+    ]
+  },
+  {
+    "id": "curated-uncloneable-after-filter-map-key",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "new Map([[() => 1, 2]])"
+      }
+    ]
+  },
+  {
+    "id": "curated-view-at-offset",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "new Uint8Array(new ArrayBuffer(8), 4)"
+      }
+    ]
+  },
+  {
+    "id": "curated-reference-after-date",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "(() => { const d = new Date(0); const o = {}; return [d, d, o, o] })()"
+      }
+    ]
+  },
+  {
+    "id": "curated-error-caused-by-itself",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "(() => { const e = new Error(\"x\"); e.cause = e; return e })()"
+      }
+    ]
+  },
+  {
+    "id": "curated-bigint-objects",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "[Object(1n), Object(-5n)]"
+      }
+    ]
+  },
+  {
+    "id": "curated-padded-regexp-pattern",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "[1, new RegExp('\\u6771')]"
+      }
+    ]
+  },
+  {
+    "id": "curated-padded-string-object",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "[new String('\\u6771')]"
+      }
+    ]
+  },
+  {
+    "id": "curated-reference-to-a-regexp",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "(() => { const r = /a/; return [r, r] })()"
+      }
+    ]
+  },
+  {
+    "id": "curated-reference-to-a-number-object",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "(() => { const n = new Number(1); return [n, n] })()"
+      }
+    ]
+  },
+  {
+    "id": "curated-error-with-undefined-cause",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "new Error('x', {cause: undefined})"
+      }
+    ]
+  },
+  {
+    "id": "curated-error-without-message",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "new Error()"
+      }
+    ]
+  },
+  {
+    "id": "curated-nesting-past-the-limit",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "(() => { let a = []; for (let i = 0; i < 96; i++) a = [a]; return a; })()"
+      }
+    ]
+  },
+  {
+    "id": "curated-repeated-error",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "(() => { const e = new Error('x'); return [e, e] })()"
+      }
+    ]
   }
 ]

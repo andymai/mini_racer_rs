@@ -17,11 +17,9 @@ no-madvise-wrap = []
 deno_core_icudata.workspace = true
 libc.workspace = true
 mini_racer_sync.workspace = true
+mini_racer_wire.workspace = true
 thiserror.workspace = true
 v8.workspace = true
-
-[dev-dependencies]
-mini_racer_wire.workspace = true
 
 [lints]
 workspace = true

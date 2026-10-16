@@ -234,9 +234,6 @@ status = "xfail:M5"
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_array"]
-status = "xfail:M1"
-
-[tests."test/mini_racer_test.rb#MiniRacerTest#test_array".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_attach_non_object"]
@@ -330,7 +327,7 @@ status = "pass"
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_date_nan"]
-status = "xfail:M1"
+status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_date_nan".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
@@ -387,9 +384,6 @@ status = "pass"
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_eval_with_filename"]
-status = "xfail:M1"
-
-[tests."test/mini_racer_test.rb#MiniRacerTest#test_eval_with_filename".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_exception_message_encoding"]
@@ -420,9 +414,6 @@ status = "xfail:M1"
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_function_property"]
-status = "xfail:M1"
-
-[tests."test/mini_racer_test.rb#MiniRacerTest#test_function_property".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_function_rval"]
@@ -490,18 +481,12 @@ status = "pass"
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_it_handles_malformed_js_with_backtrace"]
-status = "xfail:M1"
-
-[tests."test/mini_racer_test.rb#MiniRacerTest#test_it_handles_malformed_js_with_backtrace".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_it_remembers_stuff_in_context"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_it_returns_runtime_error"]
-status = "xfail:M1"
-
-[tests."test/mini_racer_test.rb#MiniRacerTest#test_it_returns_runtime_error".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_javascript_exception_with_nul_message_preserves_message"]
@@ -547,9 +532,6 @@ status = "pass"
 status = "upstream-skip"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_map"]
-status = "xfail:M1"
-
-[tests."test/mini_racer_test.rb#MiniRacerTest#test_map".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_max_memory"]
@@ -568,9 +550,6 @@ status = "xfail:M3"
 status = "upstream-skip"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_object"]
-status = "xfail:M1"
-
-[tests."test/mini_racer_test.rb#MiniRacerTest#test_object".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_object_ref"]
@@ -610,15 +589,12 @@ status = "pass"
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_poison"]
-status = "xfail:M1"
+status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_poison".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_promise"]
-status = "xfail:M4"
-
-[tests."test/mini_racer_test.rb#MiniRacerTest#test_promise".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_proxy_support"]
@@ -628,13 +604,10 @@ status = "xfail:M1"
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_proxy_uncloneable"]
-status = "xfail:M1"
-
-[tests."test/mini_racer_test.rb#MiniRacerTest#test_proxy_uncloneable".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_regexp_string_iterator"]
-status = "xfail:M1"
+status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_regexp_string_iterator".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
@@ -682,9 +655,6 @@ status = "xfail:S3b"
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_returns_javascript_function"]
-status = "xfail:M1"
-
-[tests."test/mini_racer_test.rb#MiniRacerTest#test_returns_javascript_function".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_ruby_based_property_in_rval"]
@@ -772,9 +742,6 @@ status = "pass"
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_symbol_support"]
-status = "xfail:M1"
-
-[tests."test/mini_racer_test.rb#MiniRacerTest#test_symbol_support".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_termination_exception"]
@@ -802,9 +769,6 @@ status = "upstream-skip"
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_uint8array_is_converted_to_string"]
-status = "xfail:M1"
-
-[tests."test/mini_racer_test.rb#MiniRacerTest#test_uint8array_is_converted_to_string".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_undef_mem"]
@@ -814,7 +778,7 @@ status = "xfail:M1"
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_v8_bigint_deserialization_handles_zero_and_large_nested_values"]
-status = "xfail:M1"
+status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_v8_bigint_deserialization_handles_zero_and_large_nested_values".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
@@ -826,7 +790,7 @@ status = "xfail:M5"
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_wasm_ref"]
-status = "xfail:M4"
+status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_wasm_ref".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"

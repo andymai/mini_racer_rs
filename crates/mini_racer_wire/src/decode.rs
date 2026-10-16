@@ -438,6 +438,8 @@ impl<'a, 'v, V: Visitor> Decoder<'a, 'v, V> {
                 return self.scalar_with_id(Scalar::Date(time));
             }
             tag::REGEXP => {
+                // mini_racer counts the pattern as a level of nesting.
+                Self::child(depth)?;
                 let pattern = self.string()?.ok_or(DecodeError::RegExp)?;
                 let flags = self.reader.varint_u32()?;
                 let unicode_both = REGEXP_UNICODE | REGEXP_UNICODE_SETS;
@@ -650,6 +652,7 @@ impl<'a, 'v, V: Visitor> Decoder<'a, 'v, V> {
         }
         for (tag, name) in [(tag::ERROR_MESSAGE, "message"), (tag::ERROR_STACK, "stack")] {
             if field == tag {
+                Self::child(depth)?;
                 let text = self.string()?.ok_or(DecodeError::ErrorField(name))?;
                 let key = self.key(name)?;
                 let value = Self::visit(self.visitor.scalar(Scalar::Text(text)))?;

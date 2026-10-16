@@ -3,6 +3,9 @@
 $LOAD_PATH.unshift(File.expand_path("../../lib", __dir__))
 
 require "minitest/autorun"
+
+# CI's GC stress job moves objects on every major collection.
+GC.auto_compact = true if ENV["MINI_RACER_RS_AUTO_COMPACT"]
 require "open3"
 require "rbconfig"
 

@@ -1,6 +1,7 @@
 use std::cell::Cell;
 use std::sync::OnceLock;
 
+use magnus::encoding::{EncodingCapable, RbEncoding};
 use magnus::gc::Marker;
 use magnus::r_hash::ForEach;
 use magnus::scan_args::scan_args;
@@ -9,7 +10,7 @@ use magnus::{
     Class, DataTypeFunctions, Error, Fixnum, Module, RHash, RModule, RString, Ruby, Symbol,
     TypedData, Value,
 };
-use mini_racer_engine::{ContextConfig, ContextHandle, EngineError};
+use mini_racer_engine::{ContextConfig, ContextHandle, EngineError, JsText};
 
 use crate::gc_root::OwnedRoot;
 use crate::host::RubyHost;
@@ -52,7 +53,7 @@ pub fn init(ruby: &Ruby, racer: RModule) -> Result<(), Error> {
     let class = racer.define_class("Context", ruby.class_object())?;
     class.define_alloc_func::<Context>();
     class.define_method("initialize", export!(method Context::initialize, -1))?;
-    class.define_method("eval", export!(method Context::eval, 1))?;
+    class.define_method("eval", export!(method Context::eval, -1))?;
     class.define_method("stop", export!(method Context::stop, 0))?;
     class.define_method("dispose", export!(method Context::dispose, 0))?;
     Ok(())
@@ -74,6 +75,23 @@ impl Drop for Locked {
     fn drop(&mut self) {
         let _ = self.0.unlock();
     }
+}
+
+// mini_racer sends ISO-8859-1 and UTF-16LE strings in their own encoding and
+// every other string's bytes as UTF-8.
+fn js_text(ruby: &Ruby, string: RString) -> Result<JsText, Error> {
+    let bytes = rb_raw::string_bytes(ruby, string);
+    Ok(match RbEncoding::from(string.enc_get()).name() {
+        "ISO-8859-1" => JsText::Latin1(bytes),
+        "UTF-16LE" => {
+            let (units, rest) = bytes.as_chunks::<2>();
+            if !rest.is_empty() {
+                return Err(errors::undeserializable(ruby));
+            }
+            JsText::Utf16(units.iter().map(|unit| u16::from_le_bytes(*unit)).collect())
+        }
+        _ => JsText::Utf8(bytes),
+    })
 }
 
 fn option_value(ruby: &Ruby, value: Value) -> OptionValue {
@@ -99,11 +117,15 @@ fn config(ruby: &Ruby, keywords: RHash) -> Result<ContextConfig, Error> {
         Ok(ForEach::Continue)
     })?;
     options::configure(pairs.into_iter()).map_err(|error| match error {
-        OptionError::Type(_) => Error::new(ruby.exception_type_error(), error.to_string()),
-        OptionError::Range(_) => Error::new(ruby.exception_arg_error(), error.to_string()),
-        OptionError::Keyword(_) => errors::runtime(ruby, error.to_string()),
+        OptionError::Type(_) => {
+            errors::raised(ruby, ruby.exception_type_error(), &error.to_string())
+        }
+        OptionError::Range(_) => {
+            errors::raised(ruby, ruby.exception_arg_error(), &error.to_string())
+        }
+        OptionError::Keyword(_) => errors::runtime(ruby, &error.to_string()),
         OptionError::Unsupported(_) => {
-            Error::new(ruby.exception_not_imp_error(), error.to_string())
+            errors::raised(ruby, ruby.exception_not_imp_error(), &error.to_string())
         }
     })
 }
@@ -112,13 +134,13 @@ impl Context {
     fn handle(&self, ruby: &Ruby) -> Result<&ContextHandle, Error> {
         self.handle
             .get()
-            .ok_or_else(|| errors::internal(ruby, "context is not initialized".to_owned()))
+            .ok_or_else(|| errors::internal(ruby, "context is not initialized"))
     }
 
     fn mutex(&self, ruby: &Ruby) -> Result<magnus::Mutex, Error> {
         self.lock
             .get(ruby)
-            .ok_or_else(|| errors::internal(ruby, "context is not initialized".to_owned()))
+            .ok_or_else(|| errors::internal(ruby, "context is not initialized"))
     }
 
     // trylock first: an uncontended call then works from a signal trap, where
@@ -133,10 +155,7 @@ impl Context {
 
     fn initialize(ruby: &Ruby, rb_self: &Self, args: &[Value]) -> Result<(), Error> {
         if rb_self.handle.get().is_some() || rb_self.initializing.get() {
-            return Err(errors::internal(
-                ruby,
-                "context is already initialized".to_owned(),
-            ));
+            return Err(errors::internal(ruby, "context is already initialized"));
         }
         let args = scan_args::<(), (), (), (), RHash, ()>(args)?;
         let config = config(ruby, args.keywords)?;
@@ -150,21 +169,32 @@ impl Context {
         rb_self
             .handle
             .set(handle)
-            .map_err(|_| errors::internal(ruby, "context is already initialized".to_owned()))?;
+            .map_err(|_| errors::internal(ruby, "context is already initialized"))?;
         rb_raw::adjust_memory(ruby, ISOLATE_BYTES.cast_signed());
         rb_self.accounted.set(true);
         Ok(())
     }
 
-    fn eval(ruby: &Ruby, rb_self: &Self, source: RString) -> Result<Value, Error> {
+    fn eval(ruby: &Ruby, rb_self: &Self, args: &[Value]) -> Result<Value, Error> {
         let handle = rb_self.handle(ruby)?;
-        let source = source.to_string()?;
-        let _locked = rb_self.acquire(ruby)?;
-        let mut host = RubyHost::new(ruby);
-        let result = handle
-            .eval(source, &mut host)
-            .map_err(|e| errors::engine(ruby, e));
-        let bytes = host.finish(result)?;
+        let args = scan_args::<(Value,), (), (), (), RHash, ()>(args)?;
+        let source = rb_raw::expect_string(ruby, args.required.0)?;
+        let filename = match args.keywords.get(ruby.to_symbol("filename")) {
+            Some(filename) if !filename.is_nil() => {
+                js_text(ruby, rb_raw::expect_string(ruby, filename)?)?
+            }
+            _ => JsText::from("<eval>"),
+        };
+        let source = js_text(ruby, source)?;
+        // Decoding runs Ruby code, so the lock is released first, as in mini_racer.
+        let bytes = {
+            let _locked = rb_self.acquire(ruby)?;
+            let mut host = RubyHost::new(ruby);
+            let result = handle
+                .eval(filename, source, &mut host)
+                .map_err(|e| errors::engine(ruby, e));
+            host.finish(result)?
+        };
         decode::value(ruby, &bytes)
     }
 

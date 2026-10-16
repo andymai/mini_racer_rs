@@ -21,7 +21,7 @@ impl Host for Parking {
 }
 
 fn eval(context: &ContextHandle, source: &str) -> Result<Vec<u8>, EngineError> {
-    context.eval(source.to_owned(), &mut Parking)
+    context.eval("<eval>".to_owned(), source.to_owned(), &mut Parking)
 }
 
 fn runtime_error(result: Result<Vec<u8>, EngineError>) -> String {

@@ -516,12 +516,38 @@ jobs:
       - name: ExecJS contract suite (strict)
         run: bundle exec ruby test/upstream/run.rb --suite execjs --strict --seed "${{ github.run_number }}"
 
+  gc-stress:
+    name: GC Stress
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      CI: "true"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: true
+      - uses: ./.github/actions/setup
+        with:
+          ruby: "3.4"
+      - run: bundle exec rake compile
+      - name: Upstream conversion tests under GC.stress with compaction
+        run: bundle exec ruby test/upstream/run.rb --gc-stress --strict
+      - name: Ruby tests with compaction on every major collection
+        env:
+          MINI_RACER_RS_AUTO_COMPACT: "1"
+        run: bundle exec rake test
+
   # !cancelled() rather than always(): a run superseded by a newer push must
   # not report a failing gate for its commit.
   ci-pass:
     name: CI Pass
     if: ${{ !cancelled() }}
-    needs: [changes, fmt, taplo, rubocop, machete, deny, audit, notices, boundaries, repo-checks, msrv, rustdoc, clippy, rust-test, loom, fuzz-smoke, gem-verify, ruby, truffleruby]
+    needs: [changes, fmt, taplo, rubocop, machete, deny, audit, notices, boundaries, repo-checks, msrv, rustdoc, clippy, rust-test, loom, fuzz-smoke, gem-verify, ruby, truffleruby, gc-stress]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

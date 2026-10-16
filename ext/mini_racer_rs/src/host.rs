@@ -75,10 +75,7 @@ impl Host for RubyHost<'_> {
                 return WaitOutcome::Ready;
             }
             if parked.as_ref().is_some_and(Result::is_err) {
-                self.pending = Some(errors::internal(
-                    self.ruby,
-                    "panic while waiting".to_owned(),
-                ));
+                self.pending = Some(errors::internal(self.ruby, "panic while waiting"));
                 return WaitOutcome::Cancel;
             }
             if let Err(error) = rb_raw::check_ints(self.ruby) {

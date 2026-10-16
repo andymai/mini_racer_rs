@@ -24,6 +24,19 @@ class DiffCanonicalTest < Minitest::Test
     assert_same decoded[0], decoded[1]["a"]
   end
 
+  def test_the_same_string_or_time_returned_twice_is_marked_without_shifting_refs
+    text = +"a"
+    time = Time.at(0).utc
+    shared = [1]
+    encoded = DiffCanonical.encode([text, text, time, time, "k", "k", shared, shared])
+
+    assert_equal %w[string UTF-8 text a], encoded[1][0]
+    assert_equal ["again", %w[string UTF-8 text a]], encoded[1][1]
+    assert_equal ["again", ["time", "0", 0, 0, true]], encoded[1][3]
+    assert_equal %w[string UTF-8 text k], encoded[1][5]
+    assert_equal ["ref", 1], encoded[1][7]
+  end
+
   def test_floats_strings_symbols_and_times_keep_what_a_comparison_needs
     refute_equal DiffCanonical.encode(0.0), DiffCanonical.encode(-0.0)
     assert_equal %w[float nan], DiffCanonical.encode(Float::NAN)
