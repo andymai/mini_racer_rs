@@ -62,18 +62,21 @@ class ConversionGcTest < Minitest::Test
         (() => {
           const strings = Array.from({length: 200}, (_, i) => "item " + i)
           const object = Object.fromEntries(strings.map((s, i) => [s, [i, s]]))
+          const texts = Object.fromEntries(strings.map((s) => [s, s + "!"]))
           const holey = new Array(200)
           for (let i = 0; i < 200; i++) holey[i] = "hole " + i
-          return {strings, object, holey, numbers: Array.from({length: 200}, (_, i) => 2 ** 70 + i * 2 ** 20)}
+          return {strings, object, texts, holey, numbers: Array.from({length: 200}, (_, i) => 2 ** 70 + i * 2 ** 20)}
         })()
       JS
     end
 
     assert_equal Array.new(200) { |i| "item #{i}" }, value["strings"]
     assert_equal(Array.new(200) { |i| ["item #{i}", [i, "item #{i}"]] }.to_h, value["object"])
+    assert_equal(Array.new(200) { |i| ["item #{i}", "item #{i}!"] }.to_h, value["texts"])
     assert_equal Array.new(200) { |i| "hole #{i}" }, value["holey"]
     assert_equal Array.new(200) { |i| (2**70) + (i * (2**20)) }, value["numbers"]
     assert value["object"].keys.all?(&:frozen?)
+    assert value["texts"].keys.all?(&:frozen?)
   end
 
   # Catches an unpinned value only in an optimized build, since a debug build's
