@@ -1,3 +1,5 @@
+use std::io;
+use std::os::fd::OwnedFd;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -7,6 +9,7 @@ use mini_racer_sync::{
 };
 
 use crate::control::{CallbackReply, ContextConfig, ControlBlock, Depth, JsText, Request, Wire};
+use crate::notify::NotifyFd;
 use crate::process::{self, platform, watchdog};
 use crate::spin::spin_until;
 use crate::{EngineError, runner};
@@ -40,9 +43,17 @@ pub trait Host {
 
 pub struct WaitHandle<'a> {
     channel: &'a Channel<Wire>,
+    notify: &'a NotifyFd,
 }
 
 impl<'a> WaitHandle<'a> {
+    const fn new(block: &'a ControlBlock) -> Self {
+        Self {
+            channel: &block.channel,
+            notify: &block.notify,
+        }
+    }
+
     #[must_use]
     pub fn ready(&self) -> bool {
         self.channel.ready(Side::Ruby)
@@ -57,6 +68,23 @@ impl<'a> WaitHandle<'a> {
     /// Sleeps until the runner answers or `Unparker::unpark`; may return early.
     pub fn park(&self) {
         self.channel.park(Side::Ruby, None);
+    }
+
+    /// `park` for a host that sleeps on a file descriptor instead, such as a
+    /// fiber scheduler: `wait` should return once a `notifier` descriptor is
+    /// readable, which it becomes when the runner answers, and may return
+    /// earlier.
+    pub fn park_notified(&self, wait: impl FnOnce()) -> io::Result<()> {
+        // Drained before the channel is marked, so a ring for this handover
+        // always comes after the drain.
+        self.notify.drain(self.channel)?;
+        self.channel.park_notified(Side::Ruby, wait);
+        Ok(())
+    }
+
+    /// A descriptor the host owns that `park_notified` waits are rung on.
+    pub fn notifier(&self) -> io::Result<OwnedFd> {
+        self.notify.duplicate(self.channel)
     }
 
     #[must_use]
@@ -136,6 +164,7 @@ impl ContextHandle {
             term: TermCell::default(),
             config,
             timer: Mutex::default(),
+            notify: NotifyFd::default(),
         });
         let runner_block = Arc::clone(&block);
         let stack = platform::stack_size_kb().map_or(MIN_RUNNER_STACK_BYTES, |kb| {
@@ -277,14 +306,18 @@ impl ContextHandle {
             return Err(EngineError::DisposeBusy);
         }
         self.block.term.dispose();
+        let result = self.shut_down(host);
+        self.block.notify.release(&self.block.channel);
+        result
+    }
+
+    fn shut_down(&self, host: &mut impl Host) -> Result<(), EngineError> {
         match self.block.channel.request(Request::Dispose) {
             Ok(()) => {}
             Err(ChannelError::Closed) => return Ok(()),
             Err(error) => return Err(protocol(error)),
         }
-        let wait = WaitHandle {
-            channel: &self.block.channel,
-        };
+        let wait = WaitHandle::new(&self.block);
         loop {
             host.wait_blocking(&wait);
             match self.block.channel.recv_ruby() {
@@ -368,9 +401,7 @@ impl ContextHandle {
     // as mini_racer's callback finds its context gone.
     fn await_response(&self, nested: bool, host: &mut impl Host) -> Result<Vec<u8>, EngineError> {
         let block = &self.block;
-        let wait = WaitHandle {
-            channel: &block.channel,
-        };
+        let wait = WaitHandle::new(block);
         let mut cancelled = false;
         let mut disposed = false;
         let abandon = |cancelled: &mut bool| {
