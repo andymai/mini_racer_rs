@@ -2,7 +2,7 @@
 
 mod common;
 
-use common::{Tree, hex};
+use common::{Tree, hex, number};
 use mini_racer_wire::{Limits, Writer, decode_value, text};
 use proptest::prelude::*;
 
@@ -53,8 +53,12 @@ fn write(writer: &mut Writer<'_>, value: &Value) {
         Value::Float(f) => writer.number(*f),
         Value::Utf8(s) => writer.utf8(s.as_bytes()),
         Value::Latin1(bytes) => writer.latin1(bytes),
-        Value::Date(time) => writer.date(*time),
-        Value::Bytes(bytes) => writer.uint8_array(bytes),
+        Value::Date(time) => {
+            writer.date(*time);
+        }
+        Value::Bytes(bytes) => {
+            writer.uint8_array(bytes);
+        }
         Value::Array(items) => {
             let len = u32::try_from(items.len()).expect("short");
             writer.begin_array(len);
@@ -71,14 +75,6 @@ fn write(writer: &mut Writer<'_>, value: &Value) {
             }
             writer.end_object(u32::try_from(entries.len()).expect("short"));
         }
-    }
-}
-
-fn number(n: f64) -> String {
-    if n == 0.0 && n.is_sign_negative() {
-        "-0".to_owned()
-    } else {
-        format!("{n:?}")
     }
 }
 

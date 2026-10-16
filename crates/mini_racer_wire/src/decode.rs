@@ -39,10 +39,12 @@ pub enum Scalar<'a> {
 pub enum Container {
     /// Every value of a multi-value frame, in order.
     Values,
-    /// `length` comes from the input; do not reserve by it.
+    /// `length` is at most the bytes left in the input.
     DenseArray {
         length: u32,
     },
+    /// `length` can be far larger than the entries that follow; do not
+    /// reserve by it.
     SparseArray {
         length: u32,
     },
@@ -80,8 +82,9 @@ pub trait Visitor {
 
     fn end(&mut self, frame: Self::Frame) -> Result<Self::Value, Self::Error>;
 
-    /// Remembers `value` as V8's object `id` for later back references; ids
-    /// count up from 0 in the order V8 assigned them.
+    /// Remembers `value` as V8's object `id` for later back references. Ids
+    /// arrive in increasing order, except that a container whose `begin`
+    /// returned no value is registered when it ends.
     fn register(&mut self, id: u32, value: Self::Value) -> Result<(), Self::Error>;
 
     fn back_ref(&mut self, id: u32) -> Result<Self::Value, Self::Error>;
@@ -145,6 +148,10 @@ pub enum DecodeError<E> {
     ErrorObject,
     #[error("too many objects")]
     TooManyObjects,
+    #[error("bad object reference {0}")]
+    Reference(u32),
+    #[error("bad arraybuffer")]
+    ArrayBuffer,
     #[error("{0}")]
     Visitor(E),
 }
@@ -157,8 +164,25 @@ fn printable(tag: u8) -> String {
     }
 }
 
-// Typed array subtags V8 writes after a view tag.
-const VIEW_SUBTAGS: &[u8] = b"?BCDFQWbdfhqw";
+// A view's offset and length must be multiples of its element size.
+const fn element_size(subtag: u8) -> Option<u64> {
+    match subtag {
+        b'?' | b'B' | b'C' | b'b' => Some(1),
+        b'W' | b'w' | b'h' => Some(2),
+        b'D' | b'd' | b'f' => Some(4),
+        b'F' | b'Q' | b'q' => Some(8),
+        _ => None,
+    }
+}
+
+const REGEXP_FLAG_BITS: u32 = 9;
+const REGEXP_UNICODE: u32 = 1 << 4;
+// V8 rejects it unless its experimental regexp engine is on, which it is not.
+const REGEXP_LINEAR: u32 = 1 << 6;
+const REGEXP_UNICODE_SETS: u32 = 1 << 8;
+
+const VIEW_LENGTH_TRACKING: u64 = 1;
+const VIEW_BACKED_BY_RESIZABLE: u64 = 1 << 1;
 
 struct Reader<'a> {
     rest: &'a [u8],
@@ -205,12 +229,14 @@ impl<'a> Reader<'a> {
         Ok(head)
     }
 
+    // Every NaN reads as the one quiet NaN, as in V8 and mini_racer.
     fn double<E>(&mut self) -> Result<f64, DecodeError<E>> {
         let bytes: [u8; 8] = self
             .take(8)?
             .try_into()
             .map_err(|_| DecodeError::Truncated)?;
-        Ok(f64::from_le_bytes(bytes))
+        let value = f64::from_le_bytes(bytes);
+        Ok(if value.is_nan() { f64::NAN } else { value })
     }
 
     // V8 pads before a two-byte string to align its characters.
@@ -230,32 +256,83 @@ const fn zigzag(raw: u32) -> i32 {
     }
 }
 
+#[derive(Clone, Copy)]
+struct Buffer {
+    id: u32,
+    len: u64,
+    resizable: bool,
+}
+
 struct Decoder<'a, 'v, V> {
     reader: Reader<'a>,
     visitor: &'v mut V,
     version: u32,
     limits: Limits,
     next_id: u32,
-    // The byte length of each object id that is an array buffer, so a view
-    // after a back reference can be checked against it.
-    buffers: Vec<Option<u64>>,
+    // One bit per id, set once registered, so a reference to an id not yet
+    // registered fails here as in V8, whatever the visitor stores.
+    registered: Vec<u64>,
+    // In increasing id order, so a view after a back reference can be
+    // checked against its buffer.
+    buffers: Vec<Buffer>,
 }
 
 type Decoded<V> = Result<<V as Visitor>::Value, DecodeError<<V as Visitor>::Error>>;
 
-impl<'a, V: Visitor> Decoder<'a, '_, V> {
+impl<'a, 'v, V: Visitor> Decoder<'a, 'v, V> {
     fn visit<T>(result: Result<T, V::Error>) -> Result<T, DecodeError<V::Error>> {
         result.map_err(DecodeError::Visitor)
+    }
+
+    fn new(
+        bytes: &'a [u8],
+        limits: Limits,
+        visitor: &'v mut V,
+    ) -> Result<Self, DecodeError<V::Error>> {
+        let mut reader = Reader { rest: bytes };
+        if reader.byte()? != tag::HEADER {
+            return Err(DecodeError::Header);
+        }
+        let version = reader.varint_u32()?;
+        if !READ_VERSIONS.contains(&version) {
+            return Err(DecodeError::Version(version));
+        }
+        Ok(Self {
+            reader,
+            visitor,
+            version,
+            limits,
+            next_id: 0,
+            registered: Vec::new(),
+            buffers: Vec::new(),
+        })
     }
 
     fn id(&mut self) -> Result<u32, DecodeError<V::Error>> {
         let id = self.next_id;
         self.next_id = id.checked_add(1).ok_or(DecodeError::TooManyObjects)?;
-        self.buffers.push(None);
         Ok(id)
     }
 
+    const fn bit(id: u32) -> (usize, u64) {
+        ((id / 64) as usize, 1 << (id % 64))
+    }
+
+    fn is_registered(&self, id: u32) -> bool {
+        let (word, mask) = Self::bit(id);
+        self.registered
+            .get(word)
+            .is_some_and(|bits| bits & mask != 0)
+    }
+
     fn register(&mut self, id: u32, value: V::Value) -> Result<(), DecodeError<V::Error>> {
+        let (word, mask) = Self::bit(id);
+        if self.registered.len() <= word {
+            self.registered.resize(word.saturating_add(1), 0);
+        }
+        if let Some(bits) = self.registered.get_mut(word) {
+            *bits |= mask;
+        }
         Self::visit(self.visitor.register(id, value))
     }
 
@@ -282,10 +359,11 @@ impl<'a, V: Visitor> Decoder<'a, '_, V> {
             }
             tag::TWO_BYTE_STRING => {
                 let len = self.reader.varint()?;
+                let bytes = self.reader.take(len)?;
                 if !len.is_multiple_of(2) {
                     return Err(DecodeError::Utf16Length);
                 }
-                Text::Utf16Le(self.reader.take(len)?)
+                Text::Utf16Le(bytes)
             }
             _ => return Ok(None),
         };
@@ -302,25 +380,33 @@ impl<'a, V: Visitor> Decoder<'a, '_, V> {
         if negative && len == 0 {
             return Err(DecodeError::NegativeZero);
         }
+        let digits = self.reader.take(len)?;
         if len > self.limits.max_bigint_bytes {
             return Err(DecodeError::BigIntTooBig);
         }
-        Ok(Scalar::BigInt {
-            negative,
-            digits: self.reader.take(len)?,
-        })
+        Ok(Scalar::BigInt { negative, digits })
     }
 
-    fn value(&mut self, depth: u32) -> Decoded<V> {
-        let tag = loop {
+    fn tag(&mut self) -> Result<u8, DecodeError<V::Error>> {
+        loop {
             match self.reader.byte()? {
                 tag::PADDING => {}
                 tag::VERIFY_OBJECT_COUNT => {
-                    self.reader.varint()?;
+                    self.reader.varint_u32()?;
                 }
-                tag => break tag,
+                tag => return Ok(tag),
             }
-        };
+        }
+    }
+
+    // Where V8 reads a string by itself: any value, which must be a string.
+    fn string(&mut self) -> Result<Option<Text<'a>>, DecodeError<V::Error>> {
+        let tag = self.tag()?;
+        self.text(tag)
+    }
+
+    fn value(&mut self, depth: u32) -> Decoded<V> {
+        let tag = self.tag()?;
         if let Some(text) = self.text(tag)? {
             return Self::visit(self.visitor.scalar(Scalar::Text(text)));
         }
@@ -344,9 +430,7 @@ impl<'a, V: Visitor> Decoder<'a, '_, V> {
                 return self.scalar_with_id(bigint);
             }
             tag::STRING_OBJECT => {
-                self.reader.skip_padding();
-                let inner = self.reader.byte()?;
-                let text = self.text(inner)?.ok_or(DecodeError::StringObject)?;
+                let text = self.string()?.ok_or(DecodeError::StringObject)?;
                 return self.scalar_with_id(Scalar::Text(text));
             }
             tag::DATE => {
@@ -354,14 +438,16 @@ impl<'a, V: Visitor> Decoder<'a, '_, V> {
                 return self.scalar_with_id(Scalar::Date(time));
             }
             tag::REGEXP => {
-                let id = self.id()?;
-                self.reader.skip_padding();
-                let inner = self.reader.byte()?;
-                let pattern = self.text(inner)?.ok_or(DecodeError::RegExp)?;
+                let pattern = self.string()?.ok_or(DecodeError::RegExp)?;
                 let flags = self.reader.varint_u32()?;
-                let value = Self::visit(self.visitor.scalar(Scalar::RegExp { pattern, flags }))?;
-                self.register(id, value)?;
-                return Ok(value);
+                let unicode_both = REGEXP_UNICODE | REGEXP_UNICODE_SETS;
+                if flags >> REGEXP_FLAG_BITS != 0
+                    || flags & REGEXP_LINEAR != 0
+                    || flags & unicode_both == unicode_both
+                {
+                    return Err(DecodeError::RegExp);
+                }
+                return self.scalar_with_id(Scalar::RegExp { pattern, flags });
             }
             tag::ARRAY_BUFFER | tag::IMMUTABLE_ARRAY_BUFFER | tag::RESIZABLE_ARRAY_BUFFER => {
                 return self.array_buffer(tag);
@@ -380,46 +466,60 @@ impl<'a, V: Visitor> Decoder<'a, '_, V> {
 
     fn array_buffer(&mut self, tag: u8) -> Decoded<V> {
         let len = self.reader.varint()?;
-        if tag == tag::RESIZABLE_ARRAY_BUFFER {
-            self.reader.varint()?;
+        let resizable = tag == tag::RESIZABLE_ARRAY_BUFFER;
+        if resizable && self.reader.varint()? < len {
+            return Err(DecodeError::ArrayBuffer);
         }
         let id = self.id()?;
         let bytes = self.reader.take(len)?;
         let value = Self::visit(self.visitor.scalar(Scalar::ArrayBuffer(bytes)))?;
         self.register(id, value)?;
-        if let Some(slot) = self.buffers.last_mut() {
-            *slot = Some(len);
-        }
-        self.view(value, len)
+        let buffer = Buffer { id, len, resizable };
+        self.buffers.push(buffer);
+        self.view(value, buffer)
     }
 
     fn back_ref(&mut self) -> Decoded<V> {
         let id = self.reader.varint_u32()?;
-        let value = Self::visit(self.visitor.back_ref(id))?;
-        match self.buffers.get(usize::try_from(id).unwrap_or(usize::MAX)) {
-            Some(Some(len)) => self.view(value, *len),
-            _ => Ok(value),
+        if !self.is_registered(id) {
+            return Err(DecodeError::Reference(id));
         }
+        let value = Self::visit(self.visitor.back_ref(id))?;
+        let buffer = self
+            .buffers
+            .binary_search_by_key(&id, |buffer| buffer.id)
+            .ok()
+            .and_then(|index| self.buffers.get(index).copied());
+        buffer.map_or(Ok(value), |buffer| self.view(value, buffer))
     }
 
-    // A view over the buffer just read decodes to the buffer itself, but still
-    // takes an object id of its own.
-    fn view(&mut self, buffer: V::Value, buffer_len: u64) -> Decoded<V> {
+    // A view over a buffer decodes to the buffer itself but still takes an
+    // object id of its own.
+    fn view(&mut self, buffer: V::Value, of: Buffer) -> Decoded<V> {
         if self.reader.peek::<V::Error>().ok() != Some(tag::ARRAY_BUFFER_VIEW) {
             return Ok(buffer);
         }
         self.reader.byte()?;
-        let subtag = self.reader.varint()?;
-        if !u8::try_from(subtag).is_ok_and(|subtag| VIEW_SUBTAGS.contains(&subtag)) {
-            return Err(DecodeError::View);
-        }
+        let size = u8::try_from(self.reader.varint()?)
+            .ok()
+            .and_then(element_size)
+            .ok_or(DecodeError::View)?;
         let offset = self.reader.varint()?;
         let len = self.reader.varint()?;
-        if offset > buffer_len || len > buffer_len.saturating_sub(offset) {
+        if offset > of.len
+            || len > of.len.saturating_sub(offset)
+            || !offset.is_multiple_of(size)
+            || !len.is_multiple_of(size)
+        {
             return Err(DecodeError::View);
         }
         if self.version >= 14 {
-            self.reader.varint()?;
+            let flags = self.reader.varint()?;
+            let tracking = flags & VIEW_LENGTH_TRACKING != 0;
+            let backed = flags & VIEW_BACKED_BY_RESIZABLE != 0;
+            if (tracking || backed) != of.resizable || (of.resizable && !backed) {
+                return Err(DecodeError::View);
+            }
         }
         let id = self.id()?;
         self.register(id, buffer)?;
@@ -489,6 +589,10 @@ impl<'a, V: Visitor> Decoder<'a, '_, V> {
 
     fn dense_array(&mut self, depth: u32) -> Decoded<V> {
         let length = self.reader.varint_u32()?;
+        // Every element takes at least a byte.
+        if usize::try_from(length).map_or(true, |length| length > self.reader.rest.len()) {
+            return Err(DecodeError::Truncated);
+        }
         let (mut frame, id, registered) = self.begin(Container::DenseArray { length })?;
         for _ in 0..length {
             let element = if self.reader.peek()? == tag::THE_HOLE {
@@ -534,79 +638,57 @@ impl<'a, V: Visitor> Decoder<'a, '_, V> {
         self.end(frame, id, registered)
     }
 
-    // V8 gives an error its id up front but registers it only once complete,
-    // so nothing inside an error can refer back to it.
+    // V8 reads an optional prototype, message and stack in that order, then
+    // registers the error, so a cause after them can refer back to it.
     fn error(&mut self, depth: u32) -> Decoded<V> {
         let id = self.id()?;
-        let mut frame = Self::visit(self.visitor.begin(Container::Error))?.frame;
-        loop {
-            let field = match self.reader.byte()? {
-                tag::ERROR_END => break,
-                b'E' | b'F' | b'R' | b'S' | b'T' | b'U' => continue,
-                tag::ERROR_MESSAGE => "message",
-                tag::ERROR_STACK => "stack",
-                tag::ERROR_CAUSE => "cause",
-                _ => return Err(DecodeError::ErrorObject),
-            };
-            let key = Self::visit(
-                self.visitor
-                    .scalar(Scalar::Text(Text::Utf8(field.as_bytes()))),
-            )?;
-            if field != "cause"
-                && !matches!(
-                    self.reader.peek()?,
-                    tag::UTF8_STRING | tag::ONE_BYTE_STRING | tag::TWO_BYTE_STRING | tag::PADDING
-                )
-            {
-                return Err(DecodeError::ErrorField(field));
+        let begun = Self::visit(self.visitor.begin(Container::Error))?;
+        let mut frame = begun.frame;
+        let mut field = self.reader.byte()?;
+        if matches!(field, b'E' | b'F' | b'R' | b'S' | b'T' | b'U') {
+            field = self.reader.byte()?;
+        }
+        for (tag, name) in [(tag::ERROR_MESSAGE, "message"), (tag::ERROR_STACK, "stack")] {
+            if field == tag {
+                let text = self.string()?.ok_or(DecodeError::ErrorField(name))?;
+                let key = self.key(name)?;
+                let value = Self::visit(self.visitor.scalar(Scalar::Text(text)))?;
+                Self::visit(self.visitor.insert(&mut frame, key, value))?;
+                field = self.reader.byte()?;
             }
+        }
+        if let Some(value) = begun.value {
+            self.register(id, value)?;
+        }
+        if field == tag::ERROR_CAUSE {
+            let key = self.key("cause")?;
             let value = self.value(Self::child(depth)?)?;
             Self::visit(self.visitor.insert(&mut frame, key, value))?;
+            field = self.reader.byte()?;
         }
-        let value = Self::visit(self.visitor.end(frame))?;
-        self.register(id, value)?;
-        Ok(value)
+        if field != tag::ERROR_END {
+            return Err(DecodeError::ErrorObject);
+        }
+        self.end(frame, id, begun.value.is_some())
     }
-}
 
-fn header<V: Visitor>(bytes: &[u8]) -> Result<(Reader<'_>, u32), DecodeError<V::Error>> {
-    let mut reader = Reader { rest: bytes };
-    if reader.byte()? != tag::HEADER {
-        return Err(DecodeError::Header);
+    fn key(&mut self, name: &'static str) -> Decoded<V> {
+        Self::visit(
+            self.visitor
+                .scalar(Scalar::Text(Text::Utf8(name.as_bytes()))),
+        )
     }
-    let version = reader.varint_u32()?;
-    if !READ_VERSIONS.contains(&version) {
-        return Err(DecodeError::Version(version));
-    }
-    Ok((reader, version))
 }
 
 /// Decodes the one value of a V8 `ValueSerializer` buffer.
 pub fn decode_value<V: Visitor>(bytes: &[u8], limits: Limits, visitor: &mut V) -> Decoded<V> {
-    let (reader, version) = header::<V>(bytes)?;
-    let mut decoder = Decoder {
-        reader,
-        visitor,
-        version,
-        limits,
-        next_id: 0,
-        buffers: Vec::new(),
-    };
-    decoder.value(limits.max_depth)
+    Decoder::new(bytes, limits, visitor)?.value(limits.max_depth)
 }
 
 /// Decodes every value of a buffer written as several values after one
 /// header, which share object ids. They arrive as a `Container::Values`.
 pub fn decode_values<V: Visitor>(bytes: &[u8], limits: Limits, visitor: &mut V) -> Decoded<V> {
-    let (reader, version) = header::<V>(bytes)?;
-    let mut decoder = Decoder {
-        reader,
-        visitor,
-        version,
-        limits,
-        next_id: 0,
-        buffers: Vec::new(),
-    };
+    let mut decoder = Decoder::new(bytes, limits, visitor)?;
     let mut frame = Decoder::<V>::visit(decoder.visitor.begin(Container::Values))?.frame;
     loop {
         decoder.reader.skip_padding();

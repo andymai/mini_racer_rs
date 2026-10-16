@@ -5,10 +5,11 @@
 
 mod common;
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use common::Tree;
-use mini_racer_wire::{Limits, decode_value};
+use common::render;
+use mini_racer_wire::Limits;
 
 fn golden() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden")
@@ -23,21 +24,13 @@ fn corpus() -> Vec<String> {
         .collect()
 }
 
-fn render(bytes: &[u8]) -> String {
-    let mut tree = Tree::default();
-    match decode_value(bytes, Limits::default(), &mut tree) {
-        Ok(root) => tree.render(root),
-        Err(error) => format!("error: {error}"),
-    }
-}
-
 #[test]
 fn v8_output_decodes_as_reviewed() {
     let update = std::env::var_os("UPDATE_GOLDEN").is_some();
     let mut stale = Vec::new();
     for name in corpus() {
         let bytes = std::fs::read(golden().join(format!("{name}.bin"))).expect("bin");
-        let rendered = render(&bytes) + "\n";
+        let rendered = render(&bytes, Limits::default()) + "\n";
         let expected = golden().join(format!("{name}.txt"));
         if update {
             std::fs::write(&expected, &rendered).expect("write");
@@ -49,11 +42,29 @@ fn v8_output_decodes_as_reviewed() {
 }
 
 #[test]
+fn every_golden_file_has_a_corpus_entry() {
+    let names: HashSet<String> = corpus().into_iter().collect();
+    let orphans: Vec<PathBuf> = std::fs::read_dir(golden())
+        .expect("golden dir")
+        .map(|entry| entry.expect("entry").path())
+        .filter(|path| {
+            let generated = matches!(
+                path.extension().and_then(|ext| ext.to_str()),
+                Some("bin" | "txt")
+            );
+            let stem = path.file_stem().and_then(|stem| stem.to_str());
+            generated && !stem.is_some_and(|stem| names.contains(stem))
+        })
+        .collect();
+    assert!(orphans.is_empty(), "no corpus entry for {orphans:?}");
+}
+
+#[test]
 fn every_prefix_of_v8_output_decodes_or_fails_without_panicking() {
     for name in corpus() {
         let bytes = std::fs::read(golden().join(format!("{name}.bin"))).expect("bin");
         for end in 0..bytes.len() {
-            let _ = render(&bytes[..end]);
+            let _ = render(&bytes[..end], Limits::default());
         }
     }
 }

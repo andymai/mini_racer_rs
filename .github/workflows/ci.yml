@@ -290,7 +290,11 @@ jobs:
       - name: Wire golden bytes match V8
         run: |
           cargo run -q -p mini_racer_engine --example gen_wire_golden --locked
-          git diff --exit-code -- crates/mini_racer_wire/tests/golden
+          drift=$(git status --porcelain -- crates/mini_racer_wire/tests/golden)
+          if [ -n "$drift" ]; then
+            echo "$drift"
+            exit 1
+          fi
 
   loom:
     name: Loom

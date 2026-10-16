@@ -1,0 +1,1 @@
+#0=error{"message": "x", "stack": "Error: x\n    at <anonymous>:1:20\n    at <anonymous>:1:60", "cause": @0}

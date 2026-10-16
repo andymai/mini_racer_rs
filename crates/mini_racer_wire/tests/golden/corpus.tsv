@@ -20,12 +20,14 @@ bigint_large	2n ** 200n
 string_ascii	"hello"
 string_latin1	"caf\u00e9"
 string_two_byte	"\u6771\u4eac"
+array_padded_string	["a", "\u6771"]
 string_emoji	"\ud83d\ude00"
 string_lone_surrogate	"\ud800x"
 string_empty	""
 date	new Date(1622505600000)
 date_invalid	new Date(NaN)
 regexp	/a+b/gi
+regexp_padded	[1, new RegExp("\u6771", "g")]
 boolean_object	new Boolean(false)
 number_object	new Number(2.5)
 string_object	new String("boxed")
@@ -46,6 +48,8 @@ set	new Set([1, "two", {}])
 error	new Error("boom")
 error_type	new TypeError("bad type")
 error_cause	new Error("outer", {cause: new RangeError("inner")})
+error_two_byte	new Error("\u6771")
+error_cause_self	(() => { const e = new Error("x"); e.cause = e; return e })()
 uint8array	new Uint8Array([1, 2, 255])
 float64array	new Float64Array([1.5, -2])
 dataview	new DataView(new ArrayBuffer(4), 1, 2)

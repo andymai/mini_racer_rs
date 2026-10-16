@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
-use mini_racer_wire::{Begun, Container, Scalar, Text, Visitor, text};
+use mini_racer_wire::{Begun, Container, Limits, Scalar, Text, Visitor, decode_value, text};
 
 pub fn hex(bytes: impl IntoIterator<Item = u8>) -> String {
     bytes.into_iter().fold(String::new(), |mut out, byte| {
@@ -159,11 +159,20 @@ impl Visitor for Tree {
     }
 }
 
-fn number(n: f64) -> String {
+pub fn number(n: f64) -> String {
     if n == 0.0 && n.is_sign_negative() {
         "-0".to_owned()
     } else {
         format!("{n:?}")
+    }
+}
+
+/// The rendering of one decoded value, or the decoder's error.
+pub fn render(bytes: &[u8], limits: Limits) -> String {
+    let mut tree = Tree::default();
+    match decode_value(bytes, limits, &mut tree) {
+        Ok(root) => tree.render(root),
+        Err(error) => format!("error: {error}"),
     }
 }
 

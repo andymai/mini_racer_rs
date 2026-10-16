@@ -11,8 +11,12 @@ const CANONICAL_NAN: f64 = f64::from_bits(0x7FF8_0000_0000_0000);
 
 /// Writes the V8 wire format the way `mini_racer`'s encoder does, into a buffer
 /// the caller owns and can reuse.
+///
+/// Each method that writes an object returns the id V8 gives that object on
+/// reading, for `object_ref`.
 pub struct Writer<'a> {
     out: &'a mut Vec<u8>,
+    next_id: u32,
 }
 
 impl<'a> Writer<'a> {
@@ -20,9 +24,15 @@ impl<'a> Writer<'a> {
     pub fn new(out: &'a mut Vec<u8>) -> Self {
         out.clear();
         out.push(tag::HEADER);
-        let mut writer = Self { out };
+        let mut writer = Self { out, next_id: 0 };
         writer.varint(WRITE_VERSION.into());
         writer
+    }
+
+    const fn id(&mut self) -> u32 {
+        let id = self.next_id;
+        self.next_id = id.saturating_add(1);
+        id
     }
 
     fn varint(&mut self, mut value: u64) {
@@ -122,7 +132,7 @@ impl<'a> Writer<'a> {
     }
 
     /// Milliseconds since the Unix epoch; non-finite times become NaN.
-    pub fn date(&mut self, millis: f64) {
+    pub fn date(&mut self, millis: f64) -> u32 {
         self.out.push(tag::DATE);
         let millis = if millis.is_finite() {
             millis
@@ -130,10 +140,12 @@ impl<'a> Writer<'a> {
             CANONICAL_NAN
         };
         self.out.extend_from_slice(&millis.to_le_bytes());
+        self.id()
     }
 
-    /// A `Uint8Array` over a fresh buffer holding `bytes`.
-    pub fn uint8_array(&mut self, bytes: &[u8]) {
+    /// A `Uint8Array` over a fresh buffer holding `bytes`. The id is the
+    /// view's; the buffer takes the one before it.
+    pub fn uint8_array(&mut self, bytes: &[u8]) -> u32 {
         self.out.push(tag::ARRAY_BUFFER);
         self.len(bytes.len());
         self.out.extend_from_slice(bytes);
@@ -142,10 +154,13 @@ impl<'a> Writer<'a> {
         self.varint(0);
         self.len(bytes.len());
         self.varint(0);
+        self.id();
+        self.id()
     }
 
-    pub fn begin_object(&mut self) {
+    pub fn begin_object(&mut self) -> u32 {
         self.out.push(tag::BEGIN_OBJECT);
+        self.id()
     }
 
     pub fn end_object(&mut self, properties: u32) {
@@ -153,9 +168,10 @@ impl<'a> Writer<'a> {
         self.varint(properties.into());
     }
 
-    pub fn begin_array(&mut self, length: u32) {
+    pub fn begin_array(&mut self, length: u32) -> u32 {
         self.out.push(tag::BEGIN_DENSE_ARRAY);
         self.varint(length.into());
+        self.id()
     }
 
     pub fn end_array(&mut self, length: u32) {
@@ -164,7 +180,6 @@ impl<'a> Writer<'a> {
         self.varint(length.into());
     }
 
-    /// A value already written, by the object id V8 gives it on reading.
     pub fn object_ref(&mut self, id: u32) {
         self.out.push(tag::OBJECT_REFERENCE);
         self.varint(id.into());
