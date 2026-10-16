@@ -4,7 +4,7 @@
 
 | Engine | Done | Planned | Deviation |
 |---|---|---|---|
-| CRuby | 42 | 12 | 15 |
+| CRuby | 42 | 12 | 17 |
 | TruffleRuby | 58 | 0 | 0 |
 
 ## Surface
@@ -105,6 +105,18 @@ Pending review.
 ### `behavior:callback-reentry@ruby`
 
 Both gems allow an attached callback to call `eval`, `call`, or `attach` on its own context, running the nested call inside the script that invoked the callback. mini_racer_rs accepts the call only from the fiber running the callback. A call from another fiber on the same thread, such as code inside `Enumerator#next`, raises `ThreadError` (`deadlock; lock already owned by another fiber belonging to the same thread`). mini_racer 0.22.1 accepts it: `Enumerator.new { |y| y << context.eval("1") }.next` inside a callback returns `1`. A signal trap that calls the context while a callback waits on a nested `eval` gets `ThreadError` in mini_racer_rs; when rescued, the script completes. With mini_racer 0.22.1, the same program hangs until killed. mini_racer_rs refuses these calls because each nested call must finish before its callback replies, preventing out-of-order replies from being paired with the wrong callback.
+
+Pending review.
+
+### `behavior:fork-hook-reentry@ruby`
+
+With the `:single_threaded` platform flag, mini_racer_rs raises `MiniRacer::RuntimeError` with the message `context busy: fork in progress` when the forking thread calls `context.eval("1")` from an earlier prepended `Process._fork` hook invoked through `super`. mini_racer 0.22.1 has no fork hook, so the same call returns `1`. mini_racer_rs waits for every context runner to become idle before forking and keeps runners waiting during the fork, so allowing that call to wait would deadlock. In the child, after `super` returns, the call returns `1` in both gems. Other threads wait until the fork finishes. Without `:single_threaded`, mini_racer_rs returns `1`.
+
+Pending review.
+
+### `behavior:multi-threaded-fork@ruby`
+
+In a child forked from a process using V8's default multi-threaded platform, mini_racer 0.22.1 hangs when an inherited context runs `context.eval("1 + 1")`; the observed child was still waiting after 3 seconds. mini_racer_rs instead raises `MiniRacer::RuntimeError` at once with `single-threaded runner: Device or resource busy`, while the parent's contexts remain unaffected. The child inherits none of the context runner or V8 worker threads. A new `MiniRacer::Context` in the child can evaluate `eval("2")` to `2`, but work requiring V8 worker threads may never finish. Contexts intended to keep working in a child should use `:single_threaded`.
 
 Pending review.
 
