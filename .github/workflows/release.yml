@@ -109,8 +109,9 @@ jobs:
       CI: "true"
       RB_SYS_CARGO_PROFILE: release
       # Shipped extensions carry no debug info and no local symbols: each gem
-      # holds one extension per Ruby, and line tables nearly doubled the
-      # Linux gems. Panic messages keep their source locations.
+      # holds one extension per Ruby, and line tables and local symbols made
+      # the Linux gems about half again as large. Panic messages keep their
+      # source locations.
       CARGO_PROFILE_RELEASE_DEBUG: "false"
       CARGO_PROFILE_RELEASE_STRIP: symbols
       MACOSX_DEPLOYMENT_TARGET: ${{ needs.verify.outputs.macos }}
@@ -122,7 +123,7 @@ jobs:
         with:
           ruby: ${{ matrix.ruby }}
           tools: taplo-cli
-      # Build paths stay out of the extension's panic messages and debug info.
+      # Build paths stay out of the extension's panic messages.
       - name: Compile
         run: |
           export RUSTFLAGS="--remap-path-prefix=$GITHUB_WORKSPACE=/mini_racer_rs --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/cargo"
