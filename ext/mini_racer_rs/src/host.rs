@@ -74,6 +74,8 @@ impl<'r> RubyHost<'r> {
     /// The Ruby exception that cancelled the dispatch outranks whatever the
     /// engine returned.
     pub fn finish<T>(self, result: Result<T, EngineError>) -> Result<T, Error> {
+        // mini_racer raises an interrupt before it clears the kept exception,
+        // so a later rethrow of that error still raises it.
         if let Some(pending) = self.pending {
             return Err(pending);
         }

@@ -68,6 +68,23 @@ class AttachTest < Minitest::Test
     assert_equal "ok!", @context.eval("guarded() + '!'")
   end
 
+  # mini_racer raises the interrupt before it clears the kept exception.
+  def test_an_interrupted_dispatch_keeps_the_callback_exception
+    @context.attach("raises", proc { raise KeyError, "kept" })
+    assert_raises(Timeout::Error) do
+      Timeout.timeout(0.2) { @context.eval("try { raises() } catch (e) { globalThis.saved = e }; while (true) {}") }
+    end
+
+    assert_raises(KeyError) { @context.eval("throw saved") }
+  end
+
+  def test_attach_on_a_disposed_context_raises_and_keeps_nothing
+    context = MiniRacer::Context.new
+    context.dispose
+
+    assert_raises(MiniRacer::ContextDisposedError) { context.attach("late", proc { 1 }) }
+  end
+
   def test_dispose_inside_a_callback_is_refused_on_any_fiber
     @context.attach("disposes", proc { Enumerator.new { |y| y << @context.dispose }.next })
 

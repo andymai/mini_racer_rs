@@ -88,7 +88,6 @@ fn parked(wait: &WaitHandle<'_>) {
     }
 }
 
-/// Answers every callback with `answer(arguments, id)`.
 struct Answering<F>(F);
 
 impl<F: FnMut(&[i64], i64) -> CallbackReply> Host for Answering<F> {

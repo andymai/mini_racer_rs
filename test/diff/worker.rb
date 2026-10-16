@@ -59,7 +59,6 @@ def evaluate(context, step)
   context.eval(step["setup"] ? "#{source(step)}\n;undefined" : source(step))
 end
 
-# A callback either returns what JavaScript passed it or the step's own values.
 def attach(context, step)
   callable = case step.fetch("callable")
              when "echo" then proc { |*args| args }

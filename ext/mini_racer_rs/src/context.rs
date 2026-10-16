@@ -253,8 +253,18 @@ impl Context {
         let request = encode::encode(ruby, request.as_value(), |message| {
             errors::runtime(ruby, message)
         })?;
-        callables.push(callable)?;
-        rb_self.dispatch(ruby, |host| handle.attach(request, host))?;
+        if handle.is_disposed() {
+            return Err(errors::engine(ruby, EngineError::Disposed));
+        }
+        // Kept only once the lock is held, so an attach refused there leaves
+        // nothing behind; once V8 has the id it may have installed the
+        // function, so the callable stays whatever the outcome.
+        rb_self.dispatch(ruby, |host| {
+            callables
+                .push(callable)
+                .map_err(|_| EngineError::Internal("cannot keep the callable".to_owned()))?;
+            handle.attach(request, host)
+        })?;
         Ok(ruby.qnil().as_value())
     }
 
