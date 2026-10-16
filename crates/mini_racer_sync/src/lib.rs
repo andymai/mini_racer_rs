@@ -7,7 +7,7 @@ mod parker;
 pub mod primitives;
 mod termination;
 
-pub use channel::{Channel, ChannelError, Nesting, Protocol, Side, ToRuby, ToV8};
+pub use channel::{Channel, ChannelError, Nesting, Notifier, Protocol, Side, ToRuby, ToV8};
 pub use fork::{ForkGate, Phase, RunnerPhase};
 pub use lock::{lock, wait, wait_timeout};
 pub use termination::{

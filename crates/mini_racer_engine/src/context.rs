@@ -1,3 +1,5 @@
+use std::io;
+use std::os::fd::OwnedFd;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -7,6 +9,7 @@ use mini_racer_sync::{
 };
 
 use crate::control::{CallbackReply, ContextConfig, ControlBlock, Depth, JsText, Request, Wire};
+use crate::notify::NotifyFd;
 use crate::process::fork::{self, Generation};
 use crate::process::platform::Mode;
 use crate::process::{self, platform, watchdog};
@@ -43,13 +46,15 @@ pub trait Host {
 
 pub struct WaitHandle<'a> {
     channel: &'a Channel<Wire>,
+    notify: &'a NotifyFd,
     epoch: u64,
 }
 
 impl<'a> WaitHandle<'a> {
-    fn new(channel: &'a Channel<Wire>) -> Self {
+    fn new(block: &'a ControlBlock) -> Self {
         Self {
-            channel,
+            channel: &block.channel,
+            notify: &block.notify,
             epoch: fork::epoch(),
         }
     }
@@ -74,6 +79,33 @@ impl<'a> WaitHandle<'a> {
     /// Sleeps until the runner answers or `Unparker::unpark`; may return early.
     pub fn park(&self) {
         self.channel.park(Side::Ruby, None);
+    }
+
+    /// `park` for a host that sleeps on a file descriptor instead, such as a
+    /// fiber scheduler: `wait` should return once a `notifier` descriptor is
+    /// readable, which it becomes when the runner answers, and may return
+    /// earlier.
+    pub fn park_notified(&self, wait: impl FnOnce()) -> io::Result<()> {
+        // The descriptor is shared with the parent: draining it in a child
+        // would take the parent's ring.
+        if self.forked() {
+            return Ok(());
+        }
+        // Drained before the channel is marked, so a ring for this handover
+        // always comes after the drain.
+        self.notify.drain(self.channel)?;
+        self.channel.park_notified(Side::Ruby, wait);
+        Ok(())
+    }
+
+    /// A descriptor the host owns that `park_notified` waits are rung on.
+    pub fn notifier(&self) -> io::Result<OwnedFd> {
+        if self.forked() {
+            return Err(io::Error::other(
+                "the context's runner stayed with the parent process",
+            ));
+        }
+        self.notify.duplicate(self.channel)
     }
 
     #[must_use]
@@ -254,6 +286,16 @@ impl ContextHandle {
         .map(drop)
     }
 
+    /// Asks V8 to collect as much garbage as it can; returns once it has.
+    pub fn low_memory_notification(&self, host: &mut impl Host) -> Result<(), EngineError> {
+        self.dispatch(
+            DispatchKind::Maintenance,
+            |depth| Request::LowMemoryNotification { depth },
+            host,
+        )
+        .map(drop)
+    }
+
     /// Builds a startup snapshot from `code`, or warms `base` up with it, on
     /// a context made for the purpose and disposed after, as `mini_racer`
     /// does.
@@ -332,12 +374,23 @@ impl ContextHandle {
             return Err(EngineError::DisposeBusy);
         }
         block.term.dispose();
+        let epoch = fork::epoch();
+        let result = Self::shut_down(block, host);
+        // A child that forked during the wait leaves the parent's descriptor
+        // alone, as it does every lock it inherited.
+        if fork::epoch() == epoch {
+            block.notify.release(&block.channel);
+        }
+        result
+    }
+
+    fn shut_down(block: &ControlBlock, host: &mut impl Host) -> Result<(), EngineError> {
         match block.channel.request(Request::Dispose) {
             Ok(()) => {}
             Err(ChannelError::Closed) => return Ok(()),
             Err(error) => return Err(protocol(error)),
         }
-        let wait = WaitHandle::new(&block.channel);
+        let wait = WaitHandle::new(block);
         loop {
             host.wait_blocking(&wait);
             if wait.forked() {
@@ -452,7 +505,7 @@ impl ContextHandle {
         }
         self.session.owner.store(thread, Ordering::Release);
         let owning = Owning(&self.session.owner);
-        let wait = WaitHandle::new(&block.channel);
+        let wait = WaitHandle::new(block);
         let result = match block.channel.request(request(Depth::Outermost(dispatch))) {
             Ok(()) => self.await_response(block, &wait, false, host),
             Err(error) => Err(channel(error)),
@@ -478,7 +531,7 @@ impl ContextHandle {
         if block.term.is_disposing() {
             return Err(EngineError::Disposed);
         }
-        let wait = WaitHandle::new(&block.channel);
+        let wait = WaitHandle::new(block);
         block.channel.request(request).map_err(channel)?;
         let _waiting = Counted::enter(&self.session.waits);
         self.await_response(block, &wait, true, host)

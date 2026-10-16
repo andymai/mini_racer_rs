@@ -50,6 +50,7 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | Context handle, dispatch, nested dispatch from callbacks, the `Host` contract, stop, dispose | `crates/mini_racer_engine/src/context.rs` |
 | Control block shared by a handle and its runner, request types, context config | `crates/mini_racer_engine/src/control.rs` |
 | Timeout watchdog thread | `crates/mini_racer_engine/src/process/watchdog.rs` |
+| The descriptor a fiber scheduler waits on for a context's runner | `crates/mini_racer_engine/src/notify.rs` |
 | Forks: the fork epoch, per-process generations, quiescing runners inside `fork()` (`pthread_atfork`), taking idle contexts over in the child, dispatches orphaned by a fork from a callback | `crates/mini_racer_engine/src/process/fork.rs`, `crates/mini_racer_engine/src/sys.rs`, `crates/mini_racer_engine/src/context.rs` (`Lineage`, `adopt`) |
 | Building and warming up startup snapshots | `crates/mini_racer_engine/src/snapshot.rs` |
 | Engine errors | `crates/mini_racer_engine/src/error.rs` |
@@ -60,13 +61,14 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | V8 reading what `Writer` writes | `crates/mini_racer_engine/tests/writer.rs` |
 | Wire fuzz targets | `crates/mini_racer_wire/fuzz/fuzz_targets/`, `scripts/fuzz-smoke.sh` |
 | Mutex poison policy | `crates/mini_racer_sync/src/lock.rs` |
-| Turn-taking channel between a Ruby thread and a runner, parking | `crates/mini_racer_sync/src/channel.rs`, `crates/mini_racer_sync/src/parker.rs` |
+| Turn-taking channel between a Ruby thread and a runner, parking, notifiers for waiters that sleep elsewhere | `crates/mini_racer_sync/src/channel.rs`, `crates/mini_racer_sync/src/parker.rs` |
 | Termination causes, stop consumption, timeout scoping | `crates/mini_racer_sync/src/termination.rs` |
 | Runner phases and the gate that holds runners back during a fork | `crates/mini_racer_sync/src/fork.rs` |
 | std or loom primitives for protocol code | `crates/mini_racer_sync/src/primitives.rs` |
 | Loom models | `crates/mini_racer_sync/tests/loom.rs` |
 | `MiniRacer::Context` methods, per-context lock | `ext/mini_racer_rs/src/context.rs` |
-| Waiting from a Ruby thread (spin, GVL release, park, interrupts) and running attached callables | `ext/mini_racer_rs/src/host.rs` |
+| Waiting from a Ruby thread (spin, fiber scheduler, GVL release, park, interrupts) and running attached callables | `ext/mini_racer_rs/src/host.rs` |
+| Waiting for contexts from fibers under a scheduler (the `async` gem) | `test/ruby/fiber_scheduler_test.rb` |
 | `Context.new` option rules (Ruby-free) | `ext/mini_racer_rs/src/options.rs` |
 | `MiniRacer::Snapshot` | `ext/mini_racer_rs/src/snapshot.rs` |
 | `MiniRacer::Platform.set_flags!` | `ext/mini_racer_rs/src/platform.rs` |

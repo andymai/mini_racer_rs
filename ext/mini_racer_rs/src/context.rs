@@ -15,7 +15,7 @@ use mini_racer_engine::{ContextConfig, ContextHandle, EngineError, JsText};
 
 use crate::encode;
 use crate::gc_root::OwnedRoot;
-use crate::host::{Callbacks, RubyHost};
+use crate::host::{Callbacks, RubyHost, Waiter};
 use crate::options::{self, OptionError, OptionValue};
 use crate::{decode, errors, export, rb_raw, snapshot};
 
@@ -44,6 +44,8 @@ pub struct Context {
     // What each attached name calls, indexed by the id V8 sends back.
     callables: OwnedRoot<RArray>,
     raised: OwnedRoot<Value>,
+    // The IO a fiber scheduler waits on for this context's runner.
+    waiter: Waiter,
     accounted: Cell<bool>,
     // Set before the GVL is released to wait for the runner, so a second
     // initialize cannot start while the first waits.
@@ -55,6 +57,7 @@ impl DataTypeFunctions for Context {
         self.lock.mark(marker);
         self.callables.mark(marker);
         self.raised.mark(marker);
+        self.waiter.mark(marker);
     }
 }
 
@@ -73,6 +76,10 @@ pub fn init(ruby: &Ruby, racer: RModule) -> Result<(), Error> {
     class.define_method("eval", export!(method Context::eval, -1))?;
     class.define_method("call", export!(method Context::call, -1))?;
     class.define_method("attach", export!(method Context::attach, 2))?;
+    class.define_method(
+        "low_memory_notification",
+        export!(method Context::low_memory_notification, 0),
+    )?;
     class.define_method("stop", export!(method Context::stop, 0))?;
     class.define_method("dispose", export!(method Context::dispose, 0))?;
     Ok(())
@@ -221,7 +228,7 @@ impl Context {
         let args = scan_args::<(), (), (), (), RHash, ()>(args)?;
         let config = config(ruby, args.keywords)?;
         rb_self.initializing.set(true);
-        let mut host = RubyHost::new(ruby);
+        let mut host = RubyHost::new(ruby).waiting_on(&rb_self.waiter);
         let spawned = ContextHandle::spawn(config, &mut host);
         let handle = host.finish(spawned);
         rb_self.initializing.set(false);
@@ -304,6 +311,17 @@ impl Context {
         ruby: &Ruby,
         run: impl FnOnce(&mut RubyHost<'_>) -> Result<T, EngineError>,
     ) -> Result<T, Error> {
+        self.warn_if_deep(ruby)?;
+        let callbacks = Callbacks {
+            callables: self.callables(ruby)?,
+            raised: &self.raised,
+        };
+        let mut host = RubyHost::with_callbacks(ruby, callbacks).waiting_on(&self.waiter);
+        let result = run(&mut host);
+        host.finish(result)
+    }
+
+    fn warn_if_deep(&self, ruby: &Ruby) -> Result<(), Error> {
         let depth = self.handle(ruby)?.depth();
         if depth > 0 && depth % DEEP_NESTING == 0 {
             let _ = writeln!(
@@ -311,12 +329,17 @@ impl Context {
                 "mini_racer: deep js->ruby->js recursion, depth={depth}"
             );
         }
-        let callbacks = Callbacks {
-            callables: self.callables(ruby)?,
-            raised: &self.raised,
-        };
-        let mut host = RubyHost::with_callbacks(ruby, callbacks);
-        let result = run(&mut host);
+        Ok(())
+    }
+
+    // mini_racer sends this one without its result decoding, which also
+    // leaves the exception a callback raised for the enclosing dispatch.
+    fn low_memory_notification(ruby: &Ruby, rb_self: &Self) -> Result<(), Error> {
+        let handle = rb_self.handle(ruby)?;
+        let _locked = rb_self.acquire(ruby)?;
+        rb_self.warn_if_deep(ruby)?;
+        let mut host = RubyHost::new(ruby).waiting_on(&rb_self.waiter);
+        let result = handle.low_memory_notification(&mut host);
         host.finish(result)
     }
 
@@ -367,11 +390,16 @@ impl Context {
             }
         }
         let _locked = Locked(mutex);
-        let mut host = RubyHost::new(ruby);
+        let mut host = RubyHost::new(ruby).waiting_on(&rb_self.waiter);
         let result = handle.dispose(&mut host);
         let disposed = host.finish(result);
-        if disposed.is_ok() && rb_self.accounted.replace(false) {
-            rb_raw::adjust_memory(ruby, -ISOLATE_BYTES.cast_signed());
+        if disposed.is_ok() {
+            if rb_self.accounted.replace(false) {
+                rb_raw::adjust_memory(ruby, -ISOLATE_BYTES.cast_signed());
+            }
+            if let Some(io) = rb_self.waiter.take(ruby) {
+                let _: Value = io.funcall("close", ())?;
+            }
         }
         interrupted.map_or(disposed, Err)
     }

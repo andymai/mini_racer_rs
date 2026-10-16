@@ -2,7 +2,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use mini_racer_sync::{DispatchKind, Halt, Phase, Side, TerminationCause, ToV8, lock};
+use mini_racer_sync::{DispatchId, DispatchKind, Halt, Phase, Side, TerminationCause, ToV8, lock};
 use v8::ValueDeserializerHelper;
 
 use crate::control::{CallbackReply, ControlBlock, Depth, IsolateTerminator, JsText, Request};
@@ -314,10 +314,7 @@ fn handle(
 ) -> Result<Vec<u8>, EngineError> {
     match request {
         Request::Init { depth } => match depth {
-            Depth::Outermost(dispatch) => match runtime.block.term.end(dispatch) {
-                Some(_) => Err(EngineError::Disposed),
-                None => Ok(Vec::new()),
-            },
+            Depth::Outermost(dispatch) => ended(runtime, dispatch),
             Depth::Nested => Err(EngineError::Internal("setup inside a callback".to_owned())),
         },
         Request::Eval {
@@ -337,6 +334,16 @@ fn handle(
                 attach(tc, &request)
             })
         }
+        // A collection for a context about to be torn down is wasted.
+        Request::LowMemoryNotification { depth } => {
+            if !runtime.block.term.is_disposing() {
+                scope.low_memory_notification();
+            }
+            match depth {
+                Depth::Outermost(dispatch) => ended(runtime, dispatch),
+                Depth::Nested => Ok(Vec::new()),
+            }
+        }
         // The extension refuses a dispose from inside a callback before it
         // gets here.
         Request::Dispose => Err(EngineError::DisposeBusy),
@@ -344,6 +351,14 @@ fn handle(
         Request::Snapshot { .. } => Err(EngineError::Internal(
             "snapshot inside a callback".to_owned(),
         )),
+    }
+}
+
+// A maintenance dispatch reports only whether a dispose caught it.
+fn ended(runtime: &Runtime, dispatch: DispatchId) -> Result<Vec<u8>, EngineError> {
+    match runtime.block.term.end(dispatch) {
+        Some(_) => Err(EngineError::Disposed),
+        None => Ok(Vec::new()),
     }
 }
 

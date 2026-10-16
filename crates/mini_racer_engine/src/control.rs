@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 use mini_racer_sync::{Channel, DispatchId, Protocol, RunnerPhase, TermCell, Terminator, lock};
 
 use crate::EngineError;
+use crate::notify::NotifyFd;
 
 pub struct Wire;
 
@@ -70,6 +71,9 @@ pub enum Request {
         request: Vec<u8>,
         depth: Depth,
     },
+    LowMemoryNotification {
+        depth: Depth,
+    },
     // Built on the runner of a context made for it, as mini_racer builds one
     // on a throwaway context: from `code` alone, or by warming `base` up.
     Snapshot {
@@ -114,6 +118,7 @@ pub struct ControlBlock {
     pub term: TermCell<IsolateTerminator>,
     pub config: ContextConfig,
     pub timer: Mutex<Timer>,
+    pub notify: NotifyFd,
     pub phase: RunnerPhase,
     pub isolate: OnceLock<v8::IsolateHandle>,
     // The isolate a snapshot is being built in on this runner, if any.
@@ -157,6 +162,7 @@ impl ControlBlock {
             term: TermCell::default(),
             config,
             timer: Mutex::default(),
+            notify: NotifyFd::default(),
             phase: RunnerPhase::default(),
             isolate: OnceLock::new(),
             building: Mutex::new(None),

@@ -1,6 +1,7 @@
 mod context;
 mod control;
 mod error;
+mod notify;
 pub mod process;
 mod runner;
 mod serialize;

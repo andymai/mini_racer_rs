@@ -15,4 +15,8 @@ group :lint do
   gem "rubocop-rake", require: false
 end
 gem "tomlrb", "~> 2.0"
+# A fiber scheduler for the tests that wait for a context from a fiber; CRuby only.
+group :scheduler do
+  gem "async", "~> 2.0"
+end
 gem "tzinfo-data"

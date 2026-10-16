@@ -95,6 +95,15 @@ pub fn release_memory(bytes: usize) {
     unsafe { rb_sys::rb_gc_adjust_memory_usage(diff) };
 }
 
+/// Whether the current fiber has a scheduler that waits for it, so a wait can
+/// park the fiber instead of the thread.
+pub fn fiber_scheduler(_ruby: &Ruby) -> bool {
+    // SAFETY: the `&Ruby` argument proves this thread holds the GVL, and
+    // rb_fiber_scheduler_current only reads the current thread and fiber.
+    let scheduler = unsafe { rb_sys::rb_fiber_scheduler_current() };
+    scheduler != rb_sys::Qnil as rb_sys::VALUE
+}
+
 pub fn dbl2big(_ruby: &Ruby, n: f64) -> Value {
     // SAFETY: rb_dbl2big allocates a Bignum and requires the GVL, which the
     // `&Ruby` argument proves this thread holds.
