@@ -39,6 +39,8 @@ def keywords(method)
   method.parameters.filter_map { |kind, name| name if KEYWORD_PARAMETERS.include?(kind) }
 end
 
+# Any other error means the probe itself could not run (on TruffleRuby without
+# GraalJS, Context.new fails), and guessing either way would corrupt the surface.
 def accepted?(method, key)
   probe = KEYWORD_PROBES.fetch(method) { abort "reflect: no probe for #{method}" }
   probe.call(key.to_sym => PROBE_VALUES.fetch(key) { abort "reflect: no probe value for #{key}" })
@@ -46,7 +48,9 @@ def accepted?(method, key)
 rescue ArgumentError, NoMethodError, NotImplementedError
   false
 rescue StandardError => e
-  !REFUSED.match?(e.message)
+  return false if REFUSED.match?(e.message)
+
+  abort "reflect: probing #{method} with #{key}: was not refused but failed: #{e.class}: #{e.message}"
 end
 
 def walk(mod, ids)

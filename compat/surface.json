@@ -57,7 +57,7 @@
     "imethod:MiniRacer::Snapshot#warmup_unsafe!@truffleruby",
     "imethod:MiniRacer::SnapshotError#backtrace",
     "kwarg:MiniRacer::Context#eval:filename",
-    "kwarg:MiniRacer::Context#eval_await:filename",
+    "kwarg:MiniRacer::Context#eval_await:filename@ruby",
     "kwarg:MiniRacer::Context#initialize:ensure_gc_after_idle",
     "kwarg:MiniRacer::Context#initialize:isolate@truffleruby",
     "kwarg:MiniRacer::Context#initialize:marshal_stack_depth",

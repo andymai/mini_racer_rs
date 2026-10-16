@@ -5,7 +5,7 @@
 | Engine | Done | Planned | Deviation |
 |---|---|---|---|
 | CRuby | 26 | 28 | 4 |
-| TruffleRuby | 59 | 0 | 0 |
+| TruffleRuby | 58 | 0 | 0 |
 
 ## Surface
 
@@ -67,7 +67,7 @@
 | `imethod:MiniRacer::Snapshot#warmup_unsafe!` | n/a | done |
 | `imethod:MiniRacer::SnapshotError#backtrace` | done | done |
 | `kwarg:MiniRacer::Context#eval:filename` | planned (M1) | done |
-| `kwarg:MiniRacer::Context#eval_await:filename` | planned (M4) | done |
+| `kwarg:MiniRacer::Context#eval_await:filename` | planned (M4) | n/a |
 | `kwarg:MiniRacer::Context#initialize:ensure_gc_after_idle` | planned (M3) | done |
 | `kwarg:MiniRacer::Context#initialize:isolate` | n/a | done |
 | `kwarg:MiniRacer::Context#initialize:marshal_stack_depth` | planned (S2) | done |
