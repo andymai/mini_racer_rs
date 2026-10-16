@@ -20,13 +20,13 @@ module CompatCheck
   module_function
 
   def problems(inputs)
-    entries = inputs.ledger.fetch("ids", {})
+    ledger = inputs.ledger.fetch("ids", {})
     ids = inputs.surface.fetch("ids")
     engine = inputs.candidate.fetch("engine")
-    out = (ids - entries.keys).map { |id| "MISSING #{id}: no compat.toml entry" }
+    entries = ledger.select { |_, entry| entry.is_a?(Hash) }
+    out = (ids - ledger.keys).map { |id| "MISSING #{id}: no compat.toml entry" }
+    out.concat((ledger.keys - entries.keys).map { |id| "MALFORMED #{id}: an entry is a table with a status" })
     entries.each do |id, entry|
-      next out << "MALFORMED #{id}: an entry is a table with a status" unless entry.is_a?(Hash)
-
       kind = CompatSurface.kind(id)
       out << "STALE #{id}: not in compat/surface.json" if kind != "behavior" && !ids.include?(id)
       out.concat(malformed(id, entry, kind, inputs.milestones, entries))
@@ -40,6 +40,8 @@ module CompatCheck
   def malformed(id, entry, kind, milestones, entries)
     out = []
     out << "MALFORMED #{id}: unknown kind #{kind}" unless CompatSurface::KINDS.include?(kind)
+    suffix = CompatSurface.split(id).last
+    out << "MALFORMED #{id}: unknown engine #{suffix}" if suffix && !CompatSurface::ENGINES.include?(suffix)
     out << "MALFORMED #{id}: unknown keys #{(entry.keys - KEYS).join(", ")}" unless (entry.keys - KEYS).empty?
     match = STATUS.match(entry["status"].to_s)
     return out << "MALFORMED #{id}: status #{entry["status"].inspect}" unless match
