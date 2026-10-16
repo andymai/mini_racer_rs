@@ -128,7 +128,8 @@ impl Drop for Owning<'_> {
 
 impl ContextHandle {
     /// Starts a runner and waits, through `host`, until its isolate exists.
-    pub fn spawn(config: ContextConfig, host: &mut impl Host) -> Result<Self, EngineError> {
+    pub fn spawn(mut config: ContextConfig, host: &mut impl Host) -> Result<Self, EngineError> {
+        let snapshot = config.snapshot.take();
         process::ensure_initialized();
         let block = Arc::new(ControlBlock {
             channel: Channel::default(),
@@ -144,7 +145,7 @@ impl ContextHandle {
         std::thread::Builder::new()
             .name("mini_racer_rs".to_owned())
             .stack_size(stack)
-            .spawn(move || runner::run(&runner_block))
+            .spawn(move || runner::run(&runner_block, snapshot))
             .map_err(|e| EngineError::Internal(format!("spawn runner: {e}")))?;
         let handle = Self {
             block,

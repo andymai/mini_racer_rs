@@ -80,7 +80,7 @@ pub fn engine(ruby: &Ruby, error: EngineError) -> Error {
         }
         EngineError::Busy => raised(ruby, INTERNAL.get(ruby), error.to_string()),
         EngineError::Internal(message) => raised(ruby, INTERNAL.get(ruby), &message),
-        EngineError::Snapshot(message) => Error::new(SNAPSHOT.get(ruby), message),
+        EngineError::Snapshot(message) => snapshot(ruby, &message),
     }
 }
 
@@ -120,6 +120,23 @@ pub fn undeserializable(ruby: &Ruby) -> Error {
         INTERNAL.get(ruby),
         "Error: Unable to deserialize cloned data.",
     )
+}
+
+// mini_racer reads a snapshot error without transcoding: text that fits in
+// Latin-1 arrives as those bytes in a binary String, anything wider as UTF-8.
+pub fn snapshot(ruby: &Ruby, message: &str) -> Error {
+    let latin1: Option<Vec<u8>> = message
+        .chars()
+        .map(|c| u8::try_from(u32::from(c)).ok())
+        .collect();
+    let text = latin1.map_or_else(
+        || ruby.str_new(message),
+        |bytes| ruby.str_from_slice(&bytes),
+    );
+    SNAPSHOT
+        .get(ruby)
+        .new_instance((text,))
+        .map_or_else(|error| error, Error::from)
 }
 
 pub fn runtime(ruby: &Ruby, message: impl AsRef<[u8]>) -> Error {

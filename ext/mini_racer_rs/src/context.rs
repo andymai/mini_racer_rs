@@ -29,7 +29,13 @@ const DEEP_NESTING: u32 = 50;
 static OWNED: LazyId = LazyId::new("owned?");
 
 #[derive(Default, TypedData)]
-#[magnus(class = "MiniRacer::Context", free_immediately, size, mark)]
+#[magnus(
+    class = "MiniRacer::Context",
+    name = "mini_racer/context",
+    free_immediately,
+    size,
+    mark
+)]
 pub struct Context {
     handle: OnceLock<ContextHandle>,
     // One dispatch at a time per context, as mini_racer's per-context mutex;
@@ -120,28 +126,43 @@ fn resolve_date_time(ruby: &Ruby) -> Result<(), Error> {
 }
 
 fn option_value(ruby: &Ruby, value: Value) -> OptionValue {
-    if let Some(blob) = snapshot::blob_of(ruby, value) {
-        return OptionValue::Snapshot(blob);
-    }
     let other = || {
         if value.is_nil() {
             OptionValue::Nil
         } else if value.as_value().equal(ruby.qfalse()).unwrap_or(false) {
             OptionValue::False
         } else {
-            OptionValue::Other(match value.class().inspect().as_str() {
-                "TrueClass" => "true".to_owned(),
-                name => name.to_owned(),
-            })
+            OptionValue::Other(rb_raw::type_name(ruby, value))
         }
     };
     Fixnum::from_value(value).map_or_else(other, |n| OptionValue::Fixnum(n.to_i64()))
 }
 
+// mini_racer's typed data check names a typed object of the wrong kind by
+// its struct name.
+fn snapshot_value(ruby: &Ruby, value: Value) -> OptionValue {
+    if let Some(blob) = snapshot::blob_of(ruby, value) {
+        return OptionValue::Snapshot(blob);
+    }
+    match (
+        option_value(ruby, value),
+        rb_raw::typed_data_name(ruby, value),
+    ) {
+        (OptionValue::Other(_), Some(name)) => OptionValue::Other(name),
+        (other, _) => other,
+    }
+}
+
 fn config(ruby: &Ruby, keywords: RHash) -> Result<ContextConfig, Error> {
     let mut pairs = Vec::new();
     keywords.foreach(|key: Symbol, value: Value| {
-        pairs.push((key.name()?.into_owned(), option_value(ruby, value)));
+        let key = key.name()?.into_owned();
+        let value = if key == "snapshot" {
+            snapshot_value(ruby, value)
+        } else {
+            option_value(ruby, value)
+        };
+        pairs.push((key, value));
         Ok(ForEach::Continue)
     })?;
     options::configure(pairs.into_iter()).map_err(|error| match error {

@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use mini_racer_sync::{Channel, DispatchId, Protocol, TermCell, Terminator};
@@ -95,8 +95,9 @@ impl Terminator for IsolateTerminator {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ContextConfig {
     pub timeout: Option<Duration>,
-    /// A blob from `ContextHandle::create_snapshot` the isolate starts from.
-    pub snapshot: Option<Arc<[u8]>>,
+    /// A blob from `ContextHandle::create_snapshot` the isolate starts from;
+    /// the runner takes it, so V8 holds the only copy.
+    pub snapshot: Option<Vec<u8>>,
 }
 
 /// The context's pending timeout and the earliest deadline the watchdog holds

@@ -1,7 +1,5 @@
 #![allow(clippy::panic, reason = "test helpers fail the test by panicking")]
 
-use std::sync::Arc;
-
 use mini_racer_engine::{ContextConfig, ContextHandle, EngineError, Host, WaitHandle, WaitOutcome};
 use mini_racer_wire::{Begun, Container, Limits, Scalar, Visitor, decode_value};
 
@@ -65,7 +63,7 @@ fn snapshot(code: &str, base: Option<Vec<u8>>) -> Result<Vec<u8>, EngineError> {
 
 fn eval_in(blob: &[u8], source: &str) -> i64 {
     let config = ContextConfig {
-        snapshot: Some(Arc::from(blob)),
+        snapshot: Some(blob.to_vec()),
         ..ContextConfig::default()
     };
     let context = ContextHandle::spawn(config, &mut Parking).expect("spawn");

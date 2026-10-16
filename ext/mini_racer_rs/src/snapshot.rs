@@ -1,21 +1,26 @@
-use std::sync::Arc;
-
+use magnus::encoding::EncodingCapable;
 use magnus::gc::Marker;
 use magnus::scan_args::scan_args;
 use magnus::typed_data::Obj;
 use magnus::value::ReprValue;
 use magnus::{
-    Class, DataTypeFunctions, Error, Module, Object, RModule, RString, Ruby, TryConvert, TypedData,
-    Value,
+    Class, DataTypeFunctions, Error, Module, Object, RClass, RModule, RString, Ruby, TryConvert,
+    TypedData, Value,
 };
 use mini_racer_engine::ContextHandle;
 
 use crate::gc_root::OwnedRoot;
 use crate::host::RubyHost;
-use crate::{context, export, rb_raw};
+use crate::{context, errors, export, rb_raw};
 
 #[derive(Default, TypedData)]
-#[magnus(class = "MiniRacer::Snapshot", free_immediately, mark)]
+#[magnus(
+    class = "MiniRacer::Snapshot",
+    name = "mini_racer/snapshot",
+    free_immediately,
+    mark,
+    size
+)]
 pub struct Snapshot {
     blob: OwnedRoot<RString>,
 }
@@ -23,6 +28,11 @@ pub struct Snapshot {
 impl DataTypeFunctions for Snapshot {
     fn mark(&self, marker: &Marker) {
         self.blob.mark(marker);
+    }
+
+    fn size(&self) -> usize {
+        let blob = Ruby::get().ok().and_then(|ruby| self.blob.get(&ruby));
+        size_of::<Self>().saturating_add(blob.map_or(0, RString::len))
     }
 }
 
@@ -33,18 +43,21 @@ pub fn init(ruby: &Ruby, racer: RModule) -> Result<(), Error> {
     class.define_method("dump", export!(method Snapshot::dump, 0))?;
     class.define_method("size", export!(method Snapshot::size, 0))?;
     class.define_method("warmup!", export!(method Snapshot::warmup, 1))?;
-    class.define_singleton_method("load", export!(function Snapshot::load, 1))?;
+    class.define_singleton_method("load", export!(method Snapshot::load, 1))?;
     Ok(())
 }
 
 /// The blob of `value` when it is a `MiniRacer::Snapshot`, for `Context.new`.
-pub fn blob_of(ruby: &Ruby, value: Value) -> Option<Arc<[u8]>> {
+pub fn blob_of(ruby: &Ruby, value: Value) -> Option<Vec<u8>> {
     let snapshot = Obj::<Snapshot>::try_convert(value).ok()?;
-    Some(Arc::from(snapshot.bytes(ruby)))
+    Some(snapshot.bytes(ruby))
 }
 
+// mini_racer raises every failure of a build as a snapshot error, V8's
+// refusal of an odd-length UTF-16LE string included.
 fn build(ruby: &Ruby, code: RString, base: Option<Vec<u8>>) -> Result<RString, Error> {
-    let code = context::js_text(ruby, code)?;
+    let code = context::js_text(ruby, code)
+        .map_err(|_| errors::snapshot(ruby, "Error: Unable to deserialize cloned data."))?;
     let mut host = RubyHost::new(ruby);
     let built = ContextHandle::create_snapshot(code, base, &mut host);
     let blob = host.finish(built)?;
@@ -53,10 +66,17 @@ fn build(ruby: &Ruby, code: RString, base: Option<Vec<u8>>) -> Result<RString, E
 
 impl Snapshot {
     fn bytes(&self, ruby: &Ruby) -> Vec<u8> {
-        self.blob
-            .get(ruby)
-            .map(|blob| rb_raw::string_bytes(ruby, blob))
-            .unwrap_or_default()
+        rb_raw::string_bytes(ruby, self.blob(ruby))
+    }
+
+    // mini_racer allocates every snapshot with an empty blob it then hands
+    // out, so `dump` on one never built is that same String.
+    fn blob(&self, ruby: &Ruby) -> RString {
+        self.blob.get(ruby).unwrap_or_else(|| {
+            let empty = ruby.str_from_slice(b"");
+            self.blob.set(ruby, empty);
+            empty
+        })
     }
 
     fn initialize(ruby: &Ruby, rb_self: &Self, args: &[Value]) -> Result<(), Error> {
@@ -70,14 +90,11 @@ impl Snapshot {
     }
 
     fn dump(ruby: &Ruby, rb_self: &Self) -> RString {
-        rb_self
-            .blob
-            .get(ruby)
-            .unwrap_or_else(|| ruby.str_from_slice(b""))
+        rb_self.blob(ruby)
     }
 
     fn size(ruby: &Ruby, rb_self: &Self) -> usize {
-        rb_self.blob.get(ruby).map_or(0, RString::len)
+        rb_self.blob(ruby).len()
     }
 
     // The blob is replaced only once the warmed-up one is built, so a failed
@@ -90,10 +107,11 @@ impl Snapshot {
         Ok(rb_self)
     }
 
-    fn load(ruby: &Ruby, blob: Value) -> Result<Obj<Self>, Error> {
+    fn load(ruby: &Ruby, class: RClass, blob: Value) -> Result<Obj<Self>, Error> {
         let blob = rb_raw::expect_string(ruby, blob)?;
-        let copy = ruby.str_from_slice(&rb_raw::string_bytes(ruby, blob));
-        let snapshot = ruby.obj_wrap(Self::default());
+        let copy = rb_raw::str_dup(ruby, blob);
+        copy.enc_associate(ruby.ascii8bit_encindex())?;
+        let snapshot = ruby.obj_wrap_as(Self::default(), class);
         snapshot.blob.set(ruby, copy);
         Ok(snapshot)
     }

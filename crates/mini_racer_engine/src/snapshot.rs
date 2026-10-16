@@ -1,20 +1,24 @@
-use mini_racer_sync::TerminationCause;
-
+use crate::EngineError;
 use crate::control::JsText;
+use crate::runner;
 use crate::serialize::{self, Tc};
-use crate::{EngineError, JsError};
 
 const UNEXPECTED: &str = "unexpected failure";
 
-// mini_racer reads the code back from V8 as UTF-8, so a lone surrogate or an
-// invalid byte arrives as U+FFFD.
-fn lossy(text: &JsText) -> String {
-    match text {
-        JsText::Utf8(bytes) => String::from_utf8_lossy(bytes).into_owned(),
-        JsText::Latin1(bytes) => bytes.iter().copied().map(char::from).collect(),
-        JsText::Utf16(units) => char::decode_utf16(units.iter().copied())
-            .map(|unit| unit.unwrap_or(char::REPLACEMENT_CHARACTER))
-            .collect(),
+// mini_racer reads the code back from V8 as UTF-8, which turns a lone
+// surrogate into U+FFFD; V8 decodes UTF-8 and Latin-1 as mini_racer's does.
+fn source<'s>(tc: &Tc<'s, '_, '_, '_>, code: &JsText) -> Option<v8::Local<'s, v8::String>> {
+    match code {
+        JsText::Utf16(units) => {
+            let mut fixed = Vec::with_capacity(units.len());
+            for decoded in char::decode_utf16(units.iter().copied()) {
+                let mut buffer = [0; 2];
+                let unit = decoded.unwrap_or(char::REPLACEMENT_CHARACTER);
+                fixed.extend_from_slice(unit.encode_utf16(&mut buffer));
+            }
+            runner::string(tc, &JsText::Utf16(fixed))
+        }
+        JsText::Utf8(_) | JsText::Latin1(_) => runner::string(tc, code),
     }
 }
 
@@ -45,10 +49,12 @@ pub fn create(code: &JsText, base: Option<Vec<u8>>) -> Result<Vec<u8>, EngineErr
         let outcome = {
             let scope = &mut v8::ContextScope::new(scope, context);
             v8::tc_scope!(let tc, scope);
-            run(tc, &lossy(code), name)
+            run(tc, code, name)
         };
-        // V8 needs a default context to write a blob even on the error path.
-        let default = if warmup && outcome.is_ok() {
+        // V8 needs a default context to write a blob even on the error path;
+        // a fresh one leaves the failed script's objects unreachable, so
+        // writing it cannot meet one V8 refuses to serialize.
+        let default = if warmup || outcome.is_err() {
             v8::Context::new(scope, v8::ContextOptions::default())
         } else {
             context
@@ -62,8 +68,8 @@ pub fn create(code: &JsText, base: Option<Vec<u8>>) -> Result<Vec<u8>, EngineErr
         .ok_or_else(|| EngineError::Snapshot(UNEXPECTED.to_owned()))
 }
 
-fn run(tc: &Tc<'_, '_, '_, '_>, code: &str, name: &str) -> Result<(), EngineError> {
-    let source = v8::String::new(tc, code).ok_or_else(|| failure(tc))?;
+fn run(tc: &Tc<'_, '_, '_, '_>, code: &JsText, name: &str) -> Result<(), EngineError> {
+    let source = source(tc, code).ok_or_else(|| failure(tc))?;
     let name = v8::String::new(tc, name).ok_or_else(|| failure(tc))?;
     let origin = serialize::origin(tc, name.into());
     let script = v8::Script::compile(tc, source, Some(&origin)).ok_or_else(|| failure(tc))?;
@@ -73,21 +79,5 @@ fn run(tc: &Tc<'_, '_, '_, '_>, code: &str, name: &str) -> Result<(), EngineErro
 
 // mini_racer's format: the message, then where it happened.
 fn failure(tc: &Tc<'_, '_, '_, '_>) -> EngineError {
-    if tc.has_terminated() {
-        return EngineError::from(JsError::terminated(TerminationCause::Stop));
-    }
-    let Some(message) = tc.message() else {
-        return EngineError::Snapshot(UNEXPECTED.to_owned());
-    };
-    let text = message.get(tc).to_rust_string_lossy(tc);
-    let Some(name) = message
-        .get_script_resource_name(tc)
-        .and_then(|name| name.to_string(tc))
-    else {
-        return EngineError::Snapshot(UNEXPECTED.to_owned());
-    };
-    let name = name.to_rust_string_lossy(tc);
-    let line = message.get_line_number(tc).unwrap_or(0);
-    let column = message.get_start_column().cast_signed();
-    EngineError::Snapshot(format!("{text}\n{name}:{line}:{column}"))
+    EngineError::Snapshot(runner::located(tc, "\n").unwrap_or_else(|| UNEXPECTED.to_owned()))
 }

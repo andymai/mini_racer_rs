@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::time::Duration;
 
 use mini_racer_engine::ContextConfig;
@@ -9,9 +8,9 @@ pub enum OptionValue {
     Fixnum(i64),
     Nil,
     False,
-    /// A `MiniRacer::Snapshot`, by its blob.
-    Snapshot(Arc<[u8]>),
-    /// Anything else, by its class name.
+    /// A `MiniRacer::Snapshot`, by its blob; given only for `snapshot:`.
+    Snapshot(Vec<u8>),
+    /// Anything else, by the name Ruby's type errors give it.
     Other(String),
 }
 
@@ -191,14 +190,24 @@ mod tests {
 
     #[test]
     fn a_snapshot_must_be_one_and_an_empty_one_is_none() {
-        let blob: Arc<[u8]> = Arc::from(&b"blob"[..]);
-        let config = configure_pairs(&[("snapshot", OptionValue::Snapshot(Arc::clone(&blob)))]);
-        assert_eq!(config.map(|config| config.snapshot), Ok(Some(blob)));
-        let empty = configure_pairs(&[("snapshot", OptionValue::Snapshot(Arc::from(&b""[..])))]);
+        let config = configure_pairs(&[("snapshot", OptionValue::Snapshot(b"blob".to_vec()))]);
+        assert_eq!(
+            config.map(|config| config.snapshot),
+            Ok(Some(b"blob".to_vec()))
+        );
+        let empty = configure_pairs(&[("snapshot", OptionValue::Snapshot(Vec::new()))]);
         assert_eq!(empty.map(|config| config.snapshot), Ok(None));
         assert_eq!(
             configure_pairs(&[("snapshot", OptionValue::False)]).map(drop),
             Err(OptionError::SnapshotType("false".to_owned()))
+        );
+        assert_eq!(
+            configure_pairs(&[(
+                "snapshot",
+                OptionValue::Other("mini_racer/context".to_owned())
+            )])
+            .map(drop),
+            Err(OptionError::SnapshotType("mini_racer/context".to_owned()))
         );
     }
 
