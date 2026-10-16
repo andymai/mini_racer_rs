@@ -27,8 +27,9 @@ fn an_interrupt_never_loses_the_result() {
         let completer = thread::spawn(move || runner.complete(7_u8));
         let interrupt = thread::spawn(move || interrupter.interrupt());
 
-        if handoff.wait() == Outcome::Interrupted {
-            assert_eq!(handoff.wait(), Outcome::Done(7));
+        match handoff.wait() {
+            Outcome::Done(value) => assert_eq!(value, 7),
+            Outcome::Interrupted => assert_eq!(handoff.wait(), Outcome::Done(7)),
         }
         completer.join().expect("completer thread");
         interrupt.join().expect("interrupter thread");
