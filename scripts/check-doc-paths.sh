@@ -11,6 +11,7 @@ cd "$(dirname "$0")/.."
 # everything under it.
 allowed=(
   "lib/mini_racer_rs/mini_racer_rs.so"
+  "pkg/"
   "target/"
   "tmp/"
 )

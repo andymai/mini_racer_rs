@@ -1,0 +1,361 @@
+name: Release
+
+# Builds a native gem per platform (one extension per Ruby in
+# tools/versions.toml) and the source gem, install-tests every one, and for a
+# published release pushes them to RubyGems.org through trusted publishing.
+# A manual run is a dry run unless it is on a release tag with publish set,
+# and a pull request that changes the pipeline runs it as a dry run too.
+
+on:
+  release:
+    types: [published]
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - rakelib/package.rake
+      - release/**
+      - scripts/check-gem-sizes.sh
+      - scripts/check-glibc-floor.sh
+      - scripts/check-macos-minos.sh
+      - scripts/publish-gems.sh
+      - tools/versions.toml
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish to RubyGems.org (a release tag only)"
+        type: boolean
+        default: false
+
+permissions: {}
+
+# Never cancel a release part-way through a publish; a pull request's run
+# gives way to the next push.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      rubies: ${{ steps.release.outputs.rubies }}
+      macos: ${{ steps.release.outputs.macos }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          v8: "false"
+          tools: taplo-cli
+      - name: Version, tag and release matrix
+        id: release
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          version=$(sed -nE 's/^ *VERSION = "([^"]+)"$/\1/p' lib/mini_racer_rs/version.rb)
+          if [ "$REF_TYPE" = tag ] && [ "$REF_NAME" != "v$version" ]; then
+            echo "::error::lib/mini_racer_rs/version.rb is at $version but the tag is $REF_NAME"
+            exit 1
+          fi
+          {
+            echo "version=$version"
+            echo "rubies=$(taplo get -f tools/versions.toml -o json release.rubies | jq -c .)"
+            echo "macos=$(taplo get -f tools/versions.toml release.macos)"
+          } >>"$GITHUB_OUTPUT"
+      - run: scripts/check-versions.sh
+      - run: scripts/check-platforms.sh
+
+  compile:
+    name: Compile ${{ matrix.platform }} (Ruby ${{ matrix.ruby }})
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby: ${{ fromJSON(needs.verify.outputs.rubies) }}
+        platform: [aarch64-linux-gnu, arm64-darwin, x86_64-darwin, x86_64-linux-gnu]
+        include:
+          # ubuntu-22.04 sets the glibc floor; the floor checks confirm it.
+          - platform: aarch64-linux-gnu
+            os: ubuntu-22.04-arm
+          - platform: arm64-darwin
+            os: macos-15
+          - platform: x86_64-darwin
+            os: macos-15-intel
+          - platform: x86_64-linux-gnu
+            os: ubuntu-22.04
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      CI: "true"
+      RB_SYS_CARGO_PROFILE: release
+      MACOSX_DEPLOYMENT_TARGET: ${{ needs.verify.outputs.macos }}
+      BUNDLE_WITHOUT: scheduler
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          ruby: ${{ matrix.ruby }}
+          tools: taplo-cli
+      # Build paths stay out of the extension's panic messages and debug info.
+      - name: Compile
+        run: |
+          export RUSTFLAGS="--remap-path-prefix=$GITHUB_WORKSPACE=/mini_racer_rs --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/cargo"
+          bundle exec rake compile
+      - name: Check exports and the platform floor
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          case "$PLATFORM" in
+            *-linux-gnu)
+              scripts/check-exports.sh lib/mini_racer_rs/mini_racer_rs.so
+              scripts/check-glibc-floor.sh lib/mini_racer_rs/mini_racer_rs.so ;;
+            *-darwin)
+              scripts/check-exports.sh lib/mini_racer_rs/mini_racer_rs.bundle
+              scripts/check-macos-minos.sh lib/mini_racer_rs/mini_racer_rs.bundle ;;
+          esac
+      - name: Smoke
+        run: ruby -Ilib -e 'require "mini_racer"; exit(MiniRacer::Context.new.eval("1+1") == 2)'
+      - name: Stage
+        run: bundle exec rake package:stage PLATFORM=${{ matrix.platform }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-${{ matrix.platform }}-${{ matrix.ruby }}
+          path: tmp/native
+          if-no-files-found: error
+          retention-days: 7
+
+  package:
+    name: Package ${{ matrix.platform }}
+    needs: [verify, compile]
+    strategy:
+      fail-fast: false
+      matrix:
+        # `ruby` is the source gem.
+        platform: [aarch64-linux-gnu, arm64-darwin, x86_64-darwin, x86_64-linux-gnu, ruby]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      BUNDLE_WITHOUT: scheduler
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          ruby: "3.4"
+          v8: "false"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: matrix.platform != 'ruby'
+        with:
+          pattern: native-${{ matrix.platform }}-*
+          path: tmp/native
+          merge-multiple: true
+      # The commit time, so the same commit packages to the same bytes.
+      - name: Build the gem
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
+          export SOURCE_DATE_EPOCH
+          if [ "$PLATFORM" = ruby ]; then
+            bundle exec rake package:source
+          else
+            bundle exec rake package:native
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gem-${{ matrix.platform }}
+          path: pkg/*.gem
+          if-no-files-found: error
+          retention-days: 7
+
+  install:
+    name: Install ${{ matrix.platform }} (Ruby ${{ matrix.ruby }})
+    needs: [verify, package]
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby: ${{ fromJSON(needs.verify.outputs.rubies) }}
+        platform: [aarch64-linux-gnu, arm64-darwin, x86_64-darwin, x86_64-linux-gnu]
+        include:
+          - platform: aarch64-linux-gnu
+            os: ubuntu-22.04-arm
+          - platform: arm64-darwin
+            os: macos-15
+          - platform: x86_64-darwin
+            os: macos-15-intel
+          - platform: x86_64-linux-gnu
+            os: ubuntu-22.04
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ruby/setup-ruby@651ff0d62c5c79bed6d53ec518387aae20e72c1a # v1.329.0
+        with:
+          ruby-version: ${{ matrix.ruby }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: gem-${{ matrix.platform }}
+          path: pkg
+      - name: Install into an empty GEM_HOME and smoke-test
+        env:
+          EXPECTED_PLATFORM: ${{ matrix.platform }}
+        run: |
+          export GEM_HOME="$RUNNER_TEMP/gems" GEM_PATH="$RUNNER_TEMP/gems"
+          gem install --local --no-document pkg/*.gem
+          cd "$RUNNER_TEMP"
+          ruby "$GITHUB_WORKSPACE/release/smoke.rb"
+
+  install-truffleruby:
+    name: Install the source gem (TruffleRuby)
+    needs: [verify, package]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ruby/setup-ruby@651ff0d62c5c79bed6d53ec518387aae20e72c1a # v1.329.0
+        with:
+          ruby-version: truffleruby+graalvm-40.0.0
+      - run: truffleruby-polyglot-get js
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: gem-ruby
+          path: pkg
+      - name: Install into an empty GEM_HOME and smoke-test
+        env:
+          EXPECTED_PLATFORM: ruby
+        run: |
+          export GEM_HOME="$RUNNER_TEMP/gems" GEM_PATH="$RUNNER_TEMP/gems"
+          rb_sys=$(sed -nE 's/^ *spec\.add_dependency "rb_sys", "= ([^"]+)"$/\1/p' mini_racer_rs.gemspec)
+          gem install rb_sys -v "$rb_sys" --no-document
+          gem install --local --no-document pkg/*.gem
+          cd "$RUNNER_TEMP"
+          ruby "$GITHUB_WORKSPACE/release/smoke.rb"
+
+  # A machine with Rust and libclang but nothing of this repository's setup:
+  # extconf.rb's own V8 archive pin is what downloads and verifies V8.
+  install-source:
+    name: Install the source gem (clean room)
+    needs: [verify, package]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ruby/setup-ruby@651ff0d62c5c79bed6d53ec518387aae20e72c1a # v1.329.0
+        with:
+          ruby-version: "3.4"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: gem-ruby
+          path: pkg
+      - name: Install into an empty GEM_HOME and smoke-test
+        env:
+          EXPECTED_PLATFORM: ruby
+        run: |
+          rustc --version
+          export GEM_HOME="$RUNNER_TEMP/gems" GEM_PATH="$RUNNER_TEMP/gems"
+          rb_sys=$(sed -nE 's/^ *spec\.add_dependency "rb_sys", "= ([^"]+)"$/\1/p' mini_racer_rs.gemspec)
+          gem install rb_sys -v "$rb_sys" --no-document
+          gem install --local --no-document pkg/*.gem
+          cd "$RUNNER_TEMP"
+          ruby "$GITHUB_WORKSPACE/release/smoke.rb"
+
+  checksums:
+    name: Checksums and provenance
+    needs: [verify, install, install-truffleruby, install-source]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          v8: "false"
+          tools: taplo-cli
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: gem-*
+          path: pkg
+          merge-multiple: true
+      - run: scripts/check-gem-sizes.sh pkg
+      - name: SHA256SUMS
+        working-directory: pkg
+        run: |
+          sha256sum -- *.gem >SHA256SUMS
+          cat SHA256SUMS
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        if: github.ref_type == 'tag'
+        with:
+          subject-path: pkg/*.gem
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-${{ needs.verify.outputs.version }}
+          path: pkg
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish to RubyGems.org
+    needs: [verify, checksums]
+    if: github.ref_type == 'tag' && (github.event_name == 'release' || inputs.publish)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # Its required reviewer approves every publish; only v* tags may deploy.
+    environment: rubygems
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ruby/setup-ruby@651ff0d62c5c79bed6d53ec518387aae20e72c1a # v1.329.0
+        with:
+          ruby-version: "3.4"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-${{ needs.verify.outputs.version }}
+          path: pkg
+      - name: Verify checksums
+        working-directory: pkg
+        run: sha256sum -c SHA256SUMS
+      - uses: rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a # v2.1.0
+      - run: scripts/publish-gems.sh pkg
+      - name: Attach the gems to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: gh release upload "$TAG" pkg/*.gem pkg/SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"

@@ -82,6 +82,9 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | Third-party notices: Rust crates, the Rust standard library, and the code in the V8 archives | `THIRD_PARTY_NOTICES.md`, `about.toml`, `about.hbs`, `licenses/v8/`, `licenses/rust/`, `scripts/update-notices.sh` |
 | Dependency updates and advisory scans | `.github/dependabot.yml`, `.github/workflows/dependabot-auto-merge.yml`, `.github/workflows/osv-scan.yml`, `osv-scanner.toml` |
 | CI | `.github/workflows/ci.yml`, `.github/actions/setup/action.yml` |
+| Releases: the release PR, native and source gem builds, install tests, publishing | `.github/workflows/release-please.yml`, `.github/workflows/release.yml`, `release-please-config.json`, `.release-please-manifest.json` |
+| Gem packaging (one extension per Ruby minor in a native gem) and the installed-gem smoke test | `rakelib/package.rake`, `release/smoke.rb`, `tools/versions.toml` (`[release]`) |
+| Release checks: glibc and macOS floors, gem sizes, publish order, lockfiles after a version bump | `scripts/check-glibc-floor.sh`, `scripts/check-macos-minos.sh`, `scripts/check-gem-sizes.sh`, `scripts/publish-gems.sh`, `scripts/sync-release-locks.sh` |
 | Sanitizer runs (nightly, and on PRs labeled `sanitizers`) | `.github/workflows/nightly.yml`, `scripts/sanitizers.sh`, `.github/sanitizers/lsan.supp` |
 | Engine teardown checked for leaks, in both V8 platform modes | `crates/mini_racer_engine/tests/teardown.rs`, `crates/mini_racer_engine/tests/teardown_single_threaded.rs` |
 | Upstream suite runner, suites, guard, reporter | `test/upstream/run.rb`, `test/upstream/suites.rb`, `test/upstream/preload.rb`, `test/upstream/reporter.rb` |
@@ -99,7 +102,7 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | Compat reflection, extraction, check and rendering | `tools/compat/`, `rakelib/compat.rake` |
 | Generated from compat.toml (never edit) | `COMPATIBILITY.md`, the README compat table |
 
-Skills: `.claude/skills/pr-workflow` (branch to merge), `.claude/skills/layer-boundaries` (dependencies, fences, check failures), `.claude/skills/parity-suite` (upstream suite and ledger).
+Skills: `.claude/skills/pr-workflow` (branch to merge), `.claude/skills/layer-boundaries` (dependencies, fences, check failures), `.claude/skills/parity-suite` (upstream suite and ledger), `.claude/skills/release-flow` (releases, packaging, publishing).
 
 ## Commands
 
@@ -132,6 +135,9 @@ BUNDLE_GEMFILE=$PWD/test/consumers/transitive/Gemfile bundle exec ruby test/cons
 bundle exec ruby bench/run.rb     # medians against the real gem; --quick for a smoke run
 bundle exec ruby -Ilib test/stress/round_trips.rb   # 1M evals after a 500k warm-up; fails on RSS growth over 5%
 bundle exec ruby -Ilib test/stress/churn.rb 8 600   # 8 threads creating, evaluating and releasing contexts for 10 min
+bundle exec rake package:stage PLATFORM=x86_64-linux-gnu   # copy the compiled extension to tmp/native/<platform>/<ruby minor>/
+bundle exec rake package:native PLATFORM=x86_64-linux-gnu  # a native gem from every staged Ruby's extension, into pkg/
+bundle exec rake package:source    # the source gem, into pkg/
 ```
 
 ## Which tests to run
@@ -147,7 +153,7 @@ bundle exec ruby -Ilib test/stress/churn.rb 8 600   # 8 threads creating, evalua
 
 ## Pitfalls
 
-- `lib/mini_racer_rs/version.rb` holds one version literal; release-please rewrites the first one it finds.
+- `lib/mini_racer_rs/version.rb` holds one version literal; release-please rewrites the first one it finds, and the Cargo workspace version, but no lockfile. `scripts/sync-release-locks.sh` brings the two `Gemfile.lock`s and `Cargo.lock` along, and the release PR workflow runs it.
 - Loom builds need `--cfg loom` in `RUSTFLAGS` and their own `--target-dir target/loom`; sharing the default target dir rebuilds everything on every switch.
 - The fuzz crate is its own workspace with its own `Cargo.lock` (checked by `cargo fetch --locked`, cargo deny and cargo audit); it builds only on the nightly pinned as `toolchains.fuzz` in `tools/versions.toml`, which `scripts/fuzz-smoke.sh` installs when missing.
 - `rake compile` builds the dev profile locally and release when `CI` is set (`RB_SYS_CARGO_PROFILE`).

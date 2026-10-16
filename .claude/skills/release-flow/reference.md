@@ -1,0 +1,19 @@
+# Release Flow reference
+
+## Versions
+
+`lib/mini_racer_rs/version.rb` holds the version, and release-please (release type `ruby`) rewrites its first literal. `release-please-config.json` also bumps `workspace.package.version` in `Cargo.toml`. release-please runs no resolver, so `.github/workflows/release-please.yml` checks out its PR branch and runs `scripts/sync-release-locks.sh`, which rewrites the gem's entries in `Gemfile.lock` and `test/consumers/transitive/Gemfile.lock` and runs `cargo update --workspace`. `scripts/check-versions.sh` fails when any of these disagree with `lib/mini_racer_rs/version.rb` or with `.release-please-manifest.json`. Commits touching only `.claude`, `.github`, `bench`, `scripts`, `test` or `tools` never count toward a release.
+
+## Native gems
+
+The loader (`lib/mini_racer_rs.rb`) loads `lib/mini_racer_rs/<ruby minor>/mini_racer_rs.<dlext>` when it exists, else `lib/mini_racer_rs/mini_racer_rs.<dlext>` (a source build). A native gem therefore holds one extension per Ruby in `[release] rubies`, and its `required_ruby_version` runs from the oldest of them to below the next minor after the newest. `rakelib/package.rake` builds it in `tmp/package/<platform>` from the source gem's file list minus `Cargo.*`, `crates/` and `ext/`, with no extensions to build and no `rb_sys` dependency; it refuses to build without an extension for every listed Ruby, or with one for an unlisted Ruby. The four platforms are listed in `rakelib/package.rake`, `.github/workflows/release.yml`, `scripts/publish-gems.sh` and the files `scripts/check-platforms.sh` already compares, and that script fails when they drift.
+
+Each compile leg of `.github/workflows/release.yml` builds with the release profile, `--remap-path-prefix` for the workspace and `CARGO_HOME`, and `MACOSX_DEPLOYMENT_TARGET` from `[release] macos`, then checks the exported symbols, the glibc or macOS floor, and that the extension evaluates `1+1`. Linux legs run on `ubuntu-22.04` and `ubuntu-22.04-arm`, whose glibc is the floor; Apple Silicon on `macos-15`, Intel on `macos-15-intel`. `SOURCE_DATE_EPOCH` is set to the commit time only while packaging, never while compiling.
+
+## Install tests
+
+Every native gem is installed into an empty `GEM_HOME` on its platform for every Ruby, on the same runners as the compile legs, and `release/smoke.rb` runs from outside the checkout: it checks the loaded gem's platform, then evaluates, calls, attaches a callback, checks ICU data, a timeout and a snapshot. The source gem is installed the same way on TruffleRuby (which loads upstream's backend and builds nothing) and on a plain `ubuntu-24.04` runner with its own Rust and no V8 archive prefetched, so `ext/mini_racer_rs/extconf.rb`'s pinned digest is what downloads V8.
+
+## Publishing
+
+The publish job runs only for a release tag, on the `release` event or a manual run with `publish` set, and only after its environment's reviewer approves. It verifies `SHA256SUMS`, exchanges the job's OIDC token through RubyGems' configure-rubygems-credentials action (trusted publishing, no stored API key), and runs `scripts/publish-gems.sh`, which refuses a directory holding anything but the four platform gems and the source gem, skips any gem RubyGems.org already lists at that version and platform, and pushes the platform gems before the source gem. The gems and `SHA256SUMS` are then attached to the GitHub release. Build provenance is attested for every gem on tag runs.
