@@ -8,12 +8,12 @@ class WatchdogTest < Minitest::Test
 
   def test_timeouts_still_fire_in_a_forked_child
     skip "fork is unavailable" unless Process.respond_to?(:fork)
-    # Passes locally; on CI runners the child dies by a signal. A new context in
-    # a forked child has no V8 platform workers until the fork protocol lands.
-    skip "a new context in a forked child is best effort until the fork protocol lands"
 
+    # Single-threaded: in a multi-threaded child, new contexts are best effort.
+    # The parent's watchdog thread is gone in the child, which starts its own.
     out, err, status = run_ruby(<<~RUBY)
       require "mini_racer"
+      MiniRacer::Platform.set_flags!(:single_threaded)
       MiniRacer::Context.new(timeout: 1_000).eval("1")
       pid = fork do
         MiniRacer::Context.new(timeout: 100).eval("while (true) {}")
