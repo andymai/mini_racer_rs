@@ -2,6 +2,7 @@
 
 require "json"
 require "tomlrb"
+require_relative "shapes"
 
 # What a differential outcome means against the accepted divergences and the
 # candidate ledger. Kept apart from the runner so it is testable without workers.
@@ -22,8 +23,12 @@ module DiffLedger
   def divergence_problems(divergences, compat)
     divergences.flat_map do |divergence|
       id = divergence["id"].to_s
-      missing = DIVERGENCE_KEYS.select { |key| divergence[key].to_s.empty? }
+      structure = divergence["structure"]
+      keys = structure ? %w[id] : DIVERGENCE_KEYS
+      missing = keys.select { |key| divergence[key].to_s.empty? }
       problems = missing.empty? ? [] : ["divergence #{id.inspect}: needs #{missing.join(", ")}"]
+      unknown = structure && !DiffShapes::STRUCTURES.key?(structure)
+      problems << "divergence #{id}: unknown structure #{structure.inspect}" if unknown
       next problems if compat.dig(divergence["compat"], "status") == "deviation"
 
       problems + ["divergence #{id}: compat #{divergence["compat"].inspect} is not a compat.toml deviation"]
@@ -42,12 +47,17 @@ module DiffLedger
     return "diverged" unless expected.size == actual.size
 
     accepted = expected.zip(actual).reject { |pair| pair[0] == pair[1] }.map do |step_expected, step_actual|
-      divergences.find do |divergence|
-        Regexp.new(divergence["expected"]).match?(JSON.generate(step_expected)) &&
-          Regexp.new(divergence["actual"]).match?(JSON.generate(step_actual))
-      end
+      divergences.find { |divergence| matches?(divergence, step_expected, step_actual) }
     end
     accepted.all? ? "accepted:#{accepted.map { |divergence| divergence["id"] }.uniq.sort.join(",")}" : "diverged"
+  end
+
+  def matches?(divergence, expected, actual)
+    structure = divergence["structure"]
+    return DiffShapes.match?(structure, expected, actual) if structure
+
+    Regexp.new(divergence["expected"]).match?(JSON.generate(expected)) &&
+      Regexp.new(divergence["actual"]).match?(JSON.generate(actual))
   end
 
   # What a shrunk variant must keep: the first differing step and how it differs,

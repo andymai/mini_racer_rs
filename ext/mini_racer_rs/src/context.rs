@@ -10,8 +10,7 @@ use magnus::{
     Class, DataTypeFunctions, Error, Fixnum, Module, RHash, RModule, RString, Ruby, Symbol,
     TypedData, Value,
 };
-use mini_racer_engine::{ContextConfig, ContextHandle, EngineError};
-use mini_racer_wire::text;
+use mini_racer_engine::{ContextConfig, ContextHandle, EngineError, JsText};
 
 use crate::gc_root::OwnedRoot;
 use crate::host::RubyHost;
@@ -78,20 +77,21 @@ impl Drop for Locked {
     }
 }
 
-// The text V8 reads from a Ruby String as mini_racer sends it: ISO-8859-1 and
-// UTF-16LE strings by their encoding, anything else as UTF-8.
-fn js_text(ruby: &Ruby, string: RString) -> String {
+// mini_racer sends ISO-8859-1 and UTF-16LE strings in their own encoding and
+// every other string's bytes as UTF-8.
+fn js_text(ruby: &Ruby, string: RString) -> Result<JsText, Error> {
     let bytes = rb_raw::string_bytes(ruby, string);
-    match RbEncoding::from(string.enc_get()).name() {
-        "ISO-8859-1" => text::latin1_to_utf8(&bytes),
+    Ok(match RbEncoding::from(string.enc_get()).name() {
+        "ISO-8859-1" => JsText::Latin1(bytes),
         "UTF-16LE" => {
-            let (units, _) = bytes.as_chunks::<2>();
-            char::decode_utf16(units.iter().map(|unit| u16::from_le_bytes(*unit)))
-                .map(|unit| unit.unwrap_or(char::REPLACEMENT_CHARACTER))
-                .collect()
+            let (units, rest) = bytes.as_chunks::<2>();
+            if !rest.is_empty() {
+                return Err(errors::undeserializable(ruby));
+            }
+            JsText::Utf16(units.iter().map(|unit| u16::from_le_bytes(*unit)).collect())
         }
-        _ => String::from_utf8_lossy(&bytes).into_owned(),
-    }
+        _ => JsText::Utf8(bytes),
+    })
 }
 
 fn option_value(ruby: &Ruby, value: Value) -> OptionValue {
@@ -181,17 +181,20 @@ impl Context {
         let source = rb_raw::expect_string(ruby, args.required.0)?;
         let filename = match args.keywords.get(ruby.to_symbol("filename")) {
             Some(filename) if !filename.is_nil() => {
-                js_text(ruby, rb_raw::expect_string(ruby, filename)?)
+                js_text(ruby, rb_raw::expect_string(ruby, filename)?)?
             }
-            _ => "<eval>".to_owned(),
+            _ => JsText::from("<eval>"),
         };
-        let source = js_text(ruby, source);
-        let _locked = rb_self.acquire(ruby)?;
-        let mut host = RubyHost::new(ruby);
-        let result = handle
-            .eval(filename, source, &mut host)
-            .map_err(|e| errors::engine(ruby, e));
-        let bytes = host.finish(result)?;
+        let source = js_text(ruby, source)?;
+        // Decoding runs Ruby code, so the lock is released first, as in mini_racer.
+        let bytes = {
+            let _locked = rb_self.acquire(ruby)?;
+            let mut host = RubyHost::new(ruby);
+            let result = handle
+                .eval(filename, source, &mut host)
+                .map_err(|e| errors::engine(ruby, e));
+            host.finish(result)?
+        };
         decode::value(ruby, &bytes)
     }
 

@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use mini_racer_sync::{DispatchId, DispatchKind, Halt, Side, TermCell, TerminationCause, ToV8};
 
-use crate::control::{ControlBlock, IsolateTerminator, Request};
+use crate::control::{ControlBlock, IsolateTerminator, JsText, Request};
 use crate::serialize::{self, Filter, Tc};
 use crate::spin::spin_until;
 use crate::{EngineError, JsError, JsErrorKind};
@@ -115,8 +115,8 @@ fn eval(
     scope: &mut v8::PinScope<'_, '_>,
     term: &TermCell<IsolateTerminator>,
     filter: &Filter,
-    filename: &str,
-    source: &str,
+    filename: &JsText,
+    source: &JsText,
     dispatch: DispatchId,
 ) -> Result<Vec<u8>, EngineError> {
     v8::tc_scope!(let tc, scope);
@@ -133,12 +133,12 @@ fn eval(
 fn evaluate(
     tc: &mut Tc<'_, '_, '_, '_>,
     filter: &Filter,
-    filename: &str,
-    source: &str,
+    filename: &JsText,
+    source: &JsText,
 ) -> Result<Vec<u8>, EngineError> {
     let too_large = || EngineError::Internal("source too large".to_owned());
-    let source = v8::String::new(tc, source).ok_or_else(too_large)?;
-    let name = v8::String::new(tc, filename).ok_or_else(too_large)?;
+    let source = string(tc, source).ok_or_else(too_large)?;
+    let name = string(tc, filename).ok_or_else(too_large)?;
     let origin = serialize::origin(tc, name.into());
     let script = v8::Script::compile(tc, source, Some(&origin))
         .ok_or_else(|| failure(tc, JsErrorKind::Parse))?;
@@ -173,6 +173,18 @@ fn failure(tc: &Tc<'_, '_, '_, '_>, kind: JsErrorKind) -> EngineError {
     EngineError::from(JsError { kind, message })
 }
 
+fn string<'s>(scope: &v8::PinScope<'s, '_>, text: &JsText) -> Option<v8::Local<'s, v8::String>> {
+    match text {
+        JsText::Utf8(bytes) => v8::String::new_from_utf8(scope, bytes, v8::NewStringType::Normal),
+        JsText::Latin1(bytes) => {
+            v8::String::new_from_one_byte(scope, bytes, v8::NewStringType::Normal)
+        }
+        JsText::Utf16(units) => {
+            v8::String::new_from_two_byte(scope, units, v8::NewStringType::Normal)
+        }
+    }
+}
+
 fn parse_message(tc: &Tc<'_, '_, '_, '_>) -> Option<String> {
     let message = tc.message()?;
     let text = message.get(tc).to_rust_string_lossy(tc);
@@ -181,8 +193,7 @@ fn parse_message(tc: &Tc<'_, '_, '_, '_>) -> Option<String> {
         .to_string(tc)?
         .to_rust_string_lossy(tc);
     let line = message.get_line_number(tc).unwrap_or(0);
-    let column = Some(message.get_start_column())
-        .filter(|&column| i32::try_from(column).is_ok())
-        .unwrap_or(0);
+    // V8's -1 for no column comes back as usize::MAX; mini_racer prints it signed.
+    let column = message.get_start_column().cast_signed();
     Some(format!("{text} at {name}:{line}:{column}"))
 }

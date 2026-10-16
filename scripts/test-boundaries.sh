@@ -103,7 +103,7 @@ CASES = [
         replace("crates/mini_racer_sync/Cargo.toml", "[lints]\nworkspace = true\n", ""),
     ]),
     ("Ruby method defined without export!", "check-ffi-guards.sh", "export", [
-        replace("ext/mini_racer_rs/src/context.rs", "export!(method Context::eval, 1)", "magnus::method!(Context::eval, 1)"),
+        replace("ext/mini_racer_rs/src/context.rs", "export!(method Context::stop, 0)", "magnus::method!(Context::stop, 0)"),
     ]),
     ("unguarded extern fn", "check-ffi-guards.sh", "extern", [
         append("ext/mini_racer_rs/src/guard.rs", '\npub extern "C" fn planted() -> i32 {\n    1\n}\n'),

@@ -4,7 +4,7 @@
 
 | Engine | Done | Planned | Deviation |
 |---|---|---|---|
-| CRuby | 34 | 20 | 9 |
+| CRuby | 34 | 20 | 10 |
 | TruffleRuby | 58 | 0 | 0 |
 
 ## Surface
@@ -92,7 +92,13 @@ Pending review.
 
 ### `behavior:object-ids@ruby`
 
-mini_racer_rs preserves repeated object references by numbering every serialized object as V8 does. For `(() => { const d = new Date(0); const o = {}; return [d, d, o, o] })()`, it returns `[Time, Time, {}, {}]`, with identical Ruby objects for each pair. mini_racer 0.22.1 returns `[Time, nil, {}, nil]` because its reference list omits dates, regular expressions, typed arrays, and other objects that V8 numbers. Similarly, a self-referential error cause remains the error itself in mini_racer_rs but becomes an empty Array in mini_racer 0.22.1.
+mini_racer_rs preserves repeated object references by numbering every serialized object as V8 does. For `(() => { const d = new Date(0); const o = {}; return [d, d, o, o] })()`, it returns `[Time, Time, {}, {}]`, with identical Ruby objects for each pair. mini_racer 0.22.1 returns `[Time, nil, {}, nil]` because its reference list omits dates, regular expressions, typed arrays, and other objects that V8 numbers. An error reached a second time, including an error that is its own cause, is the same ScriptError in mini_racer_rs but an empty Array in mini_racer 0.22.1.
+
+Pending review.
+
+### `behavior:padded-two-byte-text@ruby`
+
+mini_racer_rs returns a regular expression as its pattern String and a String object as its String, including `[1, new RegExp('東')]`, `new RegExp('東')`, and `[new String('東')]` as `[1, "東"]`, `"東"`, and `["東"]`. It skips V8's optional alignment byte before two-byte text, as V8's own deserializer does. mini_racer 0.22.1 does not accept that byte and raises `MiniRacer::RuntimeError` with `bad regexp` or `bad string object` for these examples, although `({ab: new RegExp('東')})` returns `{"ab" => "東"}` because its serialized position requires no alignment byte.
 
 Pending review.
 

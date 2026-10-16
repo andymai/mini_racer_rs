@@ -27,6 +27,45 @@ class ContextTest < Minitest::Test
     assert_equal 1, MiniRacer::Context.new(snapshot: nil, verbose_exceptions: false).eval("1")
   end
 
+  def nested(levels)
+    "(() => { let a = []; for (let i = 0; i < #{levels}; i++) a = [a]; return a })()"
+  end
+
+  def test_results_nest_as_deep_as_in_mini_racer
+    value = @context.eval(nested(95))
+    95.times { value = value.fetch(0) }
+
+    assert_equal [], value
+    error = assert_raises(MiniRacer::RuntimeError) { @context.eval(nested(96)) }
+    assert_equal "too much recursion", error.message
+  end
+
+  def test_only_messages_from_javascript_are_utf8
+    keyword = assert_raises(MiniRacer::RuntimeError) { MiniRacer::Context.new(bogus: 1) }
+    thrown = assert_raises(MiniRacer::RuntimeError) { @context.eval("throw new Error('boom')") }
+
+    assert_equal Encoding::BINARY, keyword.message.encoding
+    assert_equal Encoding::UTF_8, thrown.message.encoding
+  end
+
+  def test_eval_names_the_script_by_filename
+    error = assert_raises(MiniRacer::ParseError) { @context.eval("1 +", filename: "f.js") }
+
+    assert_equal "Uncaught SyntaxError: Unexpected end of input at f.js:1:3", error.message
+    error = assert_raises(TypeError) { @context.eval("1", filename: 1) }
+    assert_equal "wrong argument type Integer (expected String)", error.message
+  end
+
+  def test_utf16_source_reaches_v8_as_written
+    utf16 = ->(text) { text.encode("UTF-16LE") }
+    lone = utf16.call("'") + [0xD800].pack("v").force_encoding("UTF-16LE") + utf16.call("'.charCodeAt(0)")
+
+    assert_equal 0xD800, @context.eval(lone)
+    odd = (utf16.call("1").b + "\x00".b).force_encoding("UTF-16LE")
+    error = assert_raises(MiniRacer::InternalError) { @context.eval(odd) }
+    assert_equal "Error: Unable to deserialize cloned data.", error.message
+  end
+
   def test_stop_terminates_the_running_script_only
     Thread.new do
       sleep 0.05

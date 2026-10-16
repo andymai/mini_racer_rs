@@ -77,6 +77,24 @@ fn malformed_input_reports_mini_racers_messages() {
 }
 
 #[test]
+fn regexp_patterns_and_error_fields_count_as_nesting() {
+    let flat = Limits {
+        max_depth: 0,
+        ..Limits::default()
+    };
+    assert_eq!(
+        render(&frame(b"RS\x01a\x01"), flat),
+        "error: too much recursion"
+    );
+    assert_eq!(
+        render(&frame(b"rmS\x01x."), flat),
+        "error: too much recursion"
+    );
+    assert_eq!(render(&frame(b"r."), flat), "error{}");
+    assert_eq!(render(&frame(b"sS\x01a"), flat), "\"a\"");
+}
+
+#[test]
 fn checks_run_in_mini_racers_order() {
     assert_eq!(body(b"c\x03ab"), "error: input too short");
     assert_eq!(body(b"c\x03abc"), "error: bad utf16 string size");

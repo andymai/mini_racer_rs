@@ -516,8 +516,6 @@ jobs:
       - name: ExecJS contract suite (strict)
         run: bundle exec ruby test/upstream/run.rb --suite execjs --strict --seed "${{ github.run_number }}"
 
-  # !cancelled() rather than always(): a run superseded by a newer push must
-  # not report a failing gate for its commit.
   gc-stress:
     name: GC Stress
     needs: changes
@@ -544,6 +542,8 @@ jobs:
           MINI_RACER_RS_AUTO_COMPACT: "1"
         run: bundle exec rake test
 
+  # !cancelled() rather than always(): a run superseded by a newer push must
+  # not report a failing gate for its commit.
   ci-pass:
     name: CI Pass
     if: ${{ !cancelled() }}

@@ -120,14 +120,15 @@ impl RubyVisitor<'_> {
 
     fn script_error(&self, parts: ErrorParts) -> Result<Value, Error> {
         let ruby = self.ruby;
+        // mini_racer builds both from C strings, so they are binary.
         let mut message = parts
             .message
-            .unwrap_or_else(|| ruby.str_new("JS exception").as_value());
+            .unwrap_or_else(|| ruby.str_from_slice(b"JS exception").as_value());
         if let Some(stack) = parts.stack {
-            message = message.funcall("concat", (ruby.str_new("\n"), stack))?;
+            message = message.funcall("concat", (ruby.str_from_slice(b"\n"), stack))?;
         }
         let _: Value = parts.error.funcall("initialize", (message,))?;
-        if let Some(cause) = parts.cause {
+        if let Some(cause) = parts.cause.filter(|cause| !cause.is_nil()) {
             RObject::from_value(parts.error)
                 .ok_or_else(|| errors::internal(ruby, "error is not an object"))?
                 .ivar_set("@cause", cause)?;
@@ -252,12 +253,19 @@ impl Visitor for RubyVisitor<'_> {
     }
 }
 
+// mini_racer decodes a result inside its [result, error] reply, one level
+// below its limit.
+const RESULT_LIMITS: Limits = Limits {
+    max_depth: 95,
+    max_bigint_bytes: 16 << 20,
+};
+
 pub fn value(ruby: &Ruby, bytes: &[u8]) -> Result<Value, Error> {
     let mut visitor = RubyVisitor {
         ruby,
         refs: ruby.ary_new(),
     };
-    decode_value(bytes, Limits::default(), &mut visitor).map_err(|e| match e {
+    decode_value(bytes, RESULT_LIMITS, &mut visitor).map_err(|e| match e {
         DecodeError::Visitor(error) => error,
         other => errors::runtime(ruby, &other.to_string()),
     })

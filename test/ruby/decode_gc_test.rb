@@ -47,12 +47,13 @@ class DecodeGcTest < Minitest::Test
   private
 
   def stressed
+    compacting = GC.auto_compact
     GC.auto_compact = true
     GC.stress = true
     yield
   ensure
     GC.stress = false
-    GC.auto_compact = false
+    GC.auto_compact = compacting
     GC.verify_compaction_references(expand_heap: true, toward: :empty)
   end
 end

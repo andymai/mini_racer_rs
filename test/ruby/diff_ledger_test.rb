@@ -33,11 +33,36 @@ class DiffLedgerTest < Minitest::Test
     refute_equal DiffLedger.signature([%w[int 1]], bad_tag.call("0x41")), DiffLedger.signature(REF, OURS)
   end
 
+  def test_a_lost_reference_is_accepted_only_where_the_candidate_repeats_a_value
+    lost = { "id" => "lost", "compat" => "behavior:object-ids@ruby", "structure" => "lost-reference" }
+    time = ["time", "0", 0, 0, false]
+    text = %w[string UTF-8 text a]
+
+    assert_equal "accepted:lost",
+                 DiffLedger.classify([["array", [time, ["nil"], ["hash", []], ["nil"]]]],
+                                     [["array", [time, time, ["hash", []], ["ref", 1]]]], [lost],)
+    assert_equal "accepted:lost",
+                 DiffLedger.classify([["array", [["hash", [[text, time]]], ["nil"]]]],
+                                     [["array", [["hash", [[text, time]]], time]]], [lost],)
+    assert_equal "diverged",
+                 DiffLedger.classify([["array", [["nil"], time, %w[int 5]]]],
+                                     [["array", [["nil"], time, %w[int 6]]]], [lost],)
+    assert_equal "diverged", DiffLedger.classify([["array", [text, ["nil"]]]], [["array", [text, %w[int 1]]]], [lost])
+    error = ["exception", "MiniRacer::ScriptError", text, [], ["nil"]]
+
+    assert_equal "accepted:lost",
+                 DiffLedger.classify([["array", [error, ["array", []]]]], [["array", [error, ["ref", 1]]]], [lost])
+  end
+
   def test_an_accepted_divergence_must_cite_a_compat_deviation
     compat = { "behavior:v8-version@ruby" => { "status" => "deviation" } }
 
     assert_empty DiffLedger.divergence_problems([WORDING], compat)
     assert_match "not a compat.toml deviation", DiffLedger.divergence_problems([WORDING], {}).first
+    shaped = { "id" => "shaped", "compat" => "behavior:v8-version@ruby", "structure" => "lost-reference" }
+
+    assert_empty DiffLedger.divergence_problems([shaped], compat)
+    assert_match "unknown structure", DiffLedger.divergence_problems([shaped.merge("structure" => "x")], compat).first
   end
 
   def test_a_new_divergence_is_recorded_against_the_previous_milestone

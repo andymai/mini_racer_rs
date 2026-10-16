@@ -105,6 +105,15 @@ pub fn raised(ruby: &Ruby, class: ExceptionClass, message: &str) -> Error {
         .map_or_else(|error| error, Error::from)
 }
 
+// mini_racer's V8 refuses an odd-length UTF-16LE string in a request with this
+// JavaScript error.
+pub fn undeserializable(ruby: &Ruby) -> Error {
+    Error::new(
+        INTERNAL.get(ruby),
+        "Error: Unable to deserialize cloned data.",
+    )
+}
+
 pub fn runtime(ruby: &Ruby, message: &str) -> Error {
     raised(ruby, RUNTIME.get(ruby), message)
 }

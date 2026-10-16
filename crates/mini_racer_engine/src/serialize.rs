@@ -1,6 +1,3 @@
-use std::cell::Cell;
-use std::rc::Rc;
-
 use mini_racer_wire::marker;
 use v8::ValueSerializerHelper;
 
@@ -131,20 +128,18 @@ pub fn sanitize<'s>(
     value
 }
 
-// Records whether a failure was V8 refusing to clone a value, as opposed to a
-// getter throwing; only the former turns into mini_racer's `{"error": ...}`.
-struct Delegate {
-    clone_failed: Rc<Cell<bool>>,
-}
+struct Delegate;
 
 impl Delegate {
-    fn refuse(&self, scope: &mut v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>) {
+    // V8's message when it has no delegate, which mini_racer's errors carry.
+    fn refuse(scope: &v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>) {
         let message = format!(
             "#<{}> could not be cloned.",
             object.get_constructor_name().to_rust_string_lossy(scope)
         );
         if let Some(message) = v8::String::new(scope, &message) {
-            v8::ValueSerializerImpl::throw_data_clone_error(self, scope, message);
+            let exception = v8::Exception::error(scope, message);
+            scope.throw_exception(exception);
         }
     }
 }
@@ -155,7 +150,6 @@ impl v8::ValueSerializerImpl for Delegate {
         scope: &mut v8::PinScope<'s, '_>,
         message: v8::Local<'s, v8::String>,
     ) {
-        self.clone_failed.set(true);
         let exception = v8::Exception::error(scope, message);
         scope.throw_exception(exception);
     }
@@ -167,17 +161,7 @@ impl v8::ValueSerializerImpl for Delegate {
         object: v8::Local<'s, v8::Object>,
         _serializer: &dyn ValueSerializerHelper,
     ) -> Option<bool> {
-        self.refuse(scope, object);
-        None
-    }
-
-    // V8's own default throws here, without passing through the delegate.
-    fn get_shared_array_buffer_id<'s>(
-        &self,
-        _scope: &mut v8::PinScope<'s, '_>,
-        _buffer: v8::Local<'s, v8::SharedArrayBuffer>,
-    ) -> Option<u32> {
-        self.clone_failed.set(true);
+        Self::refuse(scope, object);
         None
     }
 
@@ -186,35 +170,32 @@ impl v8::ValueSerializerImpl for Delegate {
         scope: &mut v8::PinScope<'_, '_>,
         module: v8::Local<v8::WasmModuleObject>,
     ) -> Option<u32> {
-        self.refuse(scope, module.into());
+        Self::refuse(scope, module.into());
         None
     }
 }
 
-fn write(tc: &Tc<'_, '_, '_, '_>, value: v8::Local<'_, v8::Value>) -> Result<Vec<u8>, bool> {
-    let clone_failed = Rc::new(Cell::new(false));
-    let delegate = Delegate {
-        clone_failed: Rc::clone(&clone_failed),
-    };
+fn write(tc: &Tc<'_, '_, '_, '_>, value: v8::Local<'_, v8::Value>) -> Option<Vec<u8>> {
     let context = tc.get_current_context();
-    let serializer = v8::ValueSerializer::new(tc, Box::new(delegate));
+    let serializer = v8::ValueSerializer::new(tc, Box::new(Delegate));
     serializer.write_header();
     match serializer.write_value(context, value) {
-        Some(true) => Ok(serializer.release()),
-        _ => Err(clone_failed.get()),
+        Some(true) => Some(serializer.release()),
+        _ => None,
     }
 }
 
 /// Serializes `value` as `mini_racer` replies. A value V8 refuses goes through
-/// the filter, which runs its getters a second time, and is serialized again;
-/// if V8 still refuses to clone it, the result is `mini_racer`'s
-/// `{"error": <exception>}`. `None` leaves the exception in `tc`.
+/// the filter, which runs its getters a second time, and is serialized again.
+/// A failure whose message says the value could not be cloned, from either
+/// step, becomes `mini_racer`'s `{"error": <exception>}`. `None` leaves the
+/// exception in `tc`.
 pub fn reply(
     tc: &mut Tc<'_, '_, '_, '_>,
     filter: &Filter,
     value: v8::Local<'_, v8::Value>,
 ) -> Option<Vec<u8>> {
-    if let Ok(bytes) = write(tc, value) {
+    if let Some(bytes) = write(tc, value) {
         return Some(bytes);
     }
     if !tc.can_continue() {
@@ -227,21 +208,28 @@ pub fn reply(
         let scope = &mut v8::ContextScope::new(&mut **tc, context);
         let receiver = v8::undefined(scope).into();
         function.call(scope, receiver, &[value])
-    }?;
-    match write(tc, filtered) {
-        Ok(bytes) => Some(bytes),
-        Err(true) if tc.can_continue() => {
-            let message = tc.exception()?.to_string(tc)?;
-            tc.reset();
-            let error = {
-                let scope = &mut v8::ContextScope::new(&mut **tc, context);
-                let object = v8::Object::new(scope);
-                let key = v8::String::new(scope, "error")?;
-                object.set(scope, key.into(), message.into())?;
-                object
-            };
-            write(tc, error.into()).ok()
-        }
-        Err(_) => None,
+    };
+    if let Some(bytes) = filtered.and_then(|filtered| write(tc, filtered)) {
+        return Some(bytes);
     }
+    if !tc.can_continue() {
+        return None;
+    }
+    // mini_racer tells a clone failure from any other by this text.
+    let message = tc.exception()?.to_string(tc)?;
+    if !message
+        .to_rust_string_lossy(tc)
+        .contains("could not be cloned")
+    {
+        return None;
+    }
+    tc.reset();
+    let error = {
+        let scope = &mut v8::ContextScope::new(&mut **tc, context);
+        let object = v8::Object::new(scope);
+        let key = v8::String::new(scope, "error")?;
+        object.set(scope, key.into(), message.into())?;
+        object
+    };
+    write(tc, error.into())
 }
