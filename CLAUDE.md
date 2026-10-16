@@ -50,7 +50,7 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | Context handle, dispatch, nested dispatch from callbacks, the `Host` contract, stop, dispose, fork guard | `crates/mini_racer_engine/src/context.rs` |
 | Control block shared by a handle and its runner, request types, context config | `crates/mini_racer_engine/src/control.rs` |
 | Timeout watchdog thread | `crates/mini_racer_engine/src/process/watchdog.rs` |
-| Forks: per-process generations, quiescing runners before a fork, taking idle contexts over in the child | `crates/mini_racer_engine/src/process/fork.rs`, `crates/mini_racer_engine/src/context.rs` (`Lineage`, `adopt`) |
+| Forks: per-process generations, quiescing runners inside `fork()` (`pthread_atfork`), taking idle contexts over in the child | `crates/mini_racer_engine/src/process/fork.rs`, `crates/mini_racer_engine/src/sys.rs`, `crates/mini_racer_engine/src/context.rs` (`Lineage`, `adopt`) |
 | Building and warming up startup snapshots | `crates/mini_racer_engine/src/snapshot.rs` |
 | Engine errors | `crates/mini_racer_engine/src/error.rs` |
 | `madvise` wrapper (fork safety) | `crates/mini_racer_engine/src/sys.rs`, `crates/mini_racer_engine/build.rs` |
@@ -76,7 +76,7 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | Converting values under `GC.stress` with compaction | `test/ruby/conversion_gc_test.rb`, `test/upstream/gc_stress.txt`, `test/upstream/run.rb --gc-stress` |
 | Error class mapping, binary messages for errors mini_racer raises from C, `ScriptError#cause` | `ext/mini_racer_rs/src/errors.rs` |
 | GVL release, interrupts, raw rb-sys | `ext/mini_racer_rs/src/rb_raw.rs` |
-| The `Process._fork` hook | `ext/mini_racer_rs/src/fork.rs` |
+| The `Process._fork` and `Process.daemon` hooks marking forks whose child runs Ruby | `ext/mini_racer_rs/src/fork.rs` |
 | Forking with contexts, one process per case | `test/ruby/fork_test.rb`, `test/ruby/fork/` |
 | Loader and conflict guard | `lib/mini_racer_rs.rb` |
 | Error hierarchy and Ruby compositions | `lib/mini_racer_rs/vocabulary.rb` |
