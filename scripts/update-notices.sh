@@ -121,13 +121,23 @@ if ! $check; then
     fetch "$url" "$work/licenses/rust/std/$file"
     printf 'std\t%s\t%s\t%s\n' "$file" "$url" "$(digest "$work/licenses/rust/std/$file")" >>"$work/licenses/rust/SOURCES.tsv"
   done
+  # The standard library's component notices are generated when Rust is built
+  # and ship only with the toolchain, in the rustc component.
+  case "$(rustc --version)" in
+    "rustc $rust_version "*) ;;
+    *) fail "rustc is $(rustc --version), not the pinned $rust_version" ;;
+  esac
+  cp "$(rustc --print sysroot)/share/doc/rust/COPYRIGHT-library.html" "$work/licenses/rust/std/"
+  printf 'std\tCOPYRIGHT-library.html\trustc %s: share/doc/rust/COPYRIGHT-library.html\t%s\n' "$rust_version" \
+    "$(digest "$work/licenses/rust/std/COPYRIGHT-library.html")" >>"$work/licenses/rust/SOURCES.tsv"
   cp "$table" "$work/licenses/v8/components.tsv"
-  rm -rf licenses/v8 licenses/rust
-  cp -R "$work/licenses/v8" "$work/licenses/rust" licenses/
 fi
 
+root=.
+$check || root="$work"
+
 verify() {
-  local dir="$1" header="$2" listed
+  local dir="$root/$1" header="$2" listed
   [ "$(head -1 "$dir/SOURCES.tsv")" = "$header" ] ||
     fail "$dir/SOURCES.tsv is for $(head -1 "$dir/SOURCES.tsv" | cut -c3-), expected ${header#\# }; run scripts/update-notices.sh"
   listed=$(rows "$dir/SOURCES.tsv" | while IFS=$'\t' read -r component file _ sha; do
@@ -143,7 +153,7 @@ verify() {
 verify licenses/v8 "# rusty_v8 v$v8_version"
 verify licenses/rust "# rust $rust_version"
 wanted=$(rows "$table" | awk -F'\t' '$4 != "-" { print $1 "\t" $4 }' | sort)
-recorded=$(rows licenses/v8/SOURCES.tsv | cut -f1,2 | sort)
+recorded=$(rows "$root/licenses/v8/SOURCES.tsv" | cut -f1,2 | sort)
 [ "$wanted" = "$recorded" ] || fail "$table and licenses/v8/SOURCES.tsv list different files; run scripts/update-notices.sh"
 
 render() {
@@ -153,11 +163,19 @@ render() {
   printf '## V8 prebuilt archive (rusty_v8 v%s)\n\n' "$v8_version"
   section licenses/v8
 }
+# awk 1 ends every license with a newline, so its fence always closes. The
+# HTML notices are too large to inline and ship beside this file instead.
 section() {
-  rows "$1/SOURCES.tsv" | while IFS=$'\t' read -r component file source _; do
-    printf '### %s\n\n%s\n\n```text\n' "$component" "$source"
-    cat "$1/$component/${file##*/}"
-    printf '```\n\n'
+  rows "$root/$1/SOURCES.tsv" | while IFS=$'\t' read -r component file source _; do
+    printf '### %s\n\n%s\n\n' "$component" "$source"
+    case "$file" in
+      *.html) printf '`%s/%s/%s`\n\n' "$1" "$component" "${file##*/}" ;;
+      *)
+        printf '```text\n'
+        awk 1 "$root/$1/$component/${file##*/}"
+        printf '```\n\n'
+        ;;
+    esac
   done
 }
 
@@ -167,6 +185,9 @@ if $check; then
     fail "THIRD_PARTY_NOTICES.md is stale; run scripts/update-notices.sh"
   echo "Third-party notices are current."
 else
+  # Everything is staged and rendered; only now replace the tracked outputs.
+  rm -rf licenses/v8 licenses/rust
+  cp -R "$work/licenses/v8" "$work/licenses/rust" licenses/
   mv "$work/THIRD_PARTY_NOTICES.md" THIRD_PARTY_NOTICES.md
   echo "Wrote THIRD_PARTY_NOTICES.md and licenses/ for rusty_v8 v$v8_version and rust $rust_version."
 fi

@@ -1910,6 +1910,12 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
+### std
+
+rustc 1.99.1: share/doc/rust/COPYRIGHT-library.html
+
+`licenses/rust/std/COPYRIGHT-library.html`
+
 ## V8 prebuilt archive (rusty_v8 v152.2.0)
 
 ### v8
@@ -4367,7 +4373,8 @@ express Statement of Purpose.
     Work.
  d. Affirmer understands and acknowledges that Creative Commons is not a
     party to this document and has no duty or obligation with respect to
-    this CC0 or use of the Work.```
+    this CC0 or use of the Work.
+```
 
 ### simdutf
 
