@@ -14,7 +14,11 @@ class CallTest < Minitest::Test
 
   def setup
     @context = MiniRacer::Context.new
-    @context.eval("globalThis.id = (...a) => a; globalThis.one = () => 1; globalThis.a = {b: {c: (x) => x * 2}}")
+    @context.eval(<<~JS)
+      globalThis.id = (...a) => a
+      globalThis.one = () => 1
+      globalThis.a = {b: {k: 2, c(x) { return x * this.k }}}
+    JS
   end
 
   def teardown
@@ -26,6 +30,13 @@ class CallTest < Minitest::Test
     error = assert_raises(MiniRacer::RuntimeError) { @context.call("a.b.missing") }
     assert_equal "TypeError: not a function", error.message
     assert_raises(ArgumentError) { @context.call }
+  end
+
+  # mini_racer reads the name as UTF-8, so a lone surrogate becomes U+FFFD.
+  def test_a_name_with_a_lone_surrogate_finds_the_replacement_character
+    @context.eval("globalThis['\\ud800'] = () => 'surrogate'; globalThis['\\ufffd'] = () => 'replacement'")
+
+    assert_equal "replacement", @context.call([0xD800].pack("v").force_encoding("UTF-16LE"))
   end
 
   def test_unsupported_values_raise_mini_racers_cut_message
