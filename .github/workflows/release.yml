@@ -108,6 +108,11 @@ jobs:
     env:
       CI: "true"
       RB_SYS_CARGO_PROFILE: release
+      # Shipped extensions carry no debug info and no local symbols: each gem
+      # holds one extension per Ruby, and line tables nearly doubled the
+      # Linux gems. Panic messages keep their source locations.
+      CARGO_PROFILE_RELEASE_DEBUG: "false"
+      CARGO_PROFILE_RELEASE_STRIP: symbols
       MACOSX_DEPLOYMENT_TARGET: ${{ needs.verify.outputs.macos }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
