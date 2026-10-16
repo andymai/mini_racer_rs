@@ -50,20 +50,18 @@ result["call_rtt_ns"] = metric do
   { "p50" => percentile(times, 0.5), "p99" => percentile(times, 0.99) }
 end
 
-# Each context is disposed outside the timed span, so they do not pile up.
-def startup
-  started = now
-  context = MiniRacer::Context.new
-  context.eval("1+1")
-  elapsed = now - started
-  context.dispose if context.respond_to?(:dispose)
-  elapsed
-end
-
+# Neither side disposes inside the loop, since mini_racer_rs has no dispose yet,
+# and GC is off while timing so no finalizer of an earlier context lands in a
+# later sample. The count stays small because every context keeps its isolate.
 result["startup_ns"] = metric do
-  20.times { startup }
-  times = Array.new(quick ? 20 : 200) { startup }.sort
+  GC.start
+  GC.disable
+  5.times { MiniRacer::Context.new.eval("1+1") }
+  times = samples(quick ? 10 : 50, 0) { MiniRacer::Context.new.eval("1+1") }
   { "p50" => percentile(times, 0.5), "p99" => percentile(times, 0.99) }
+ensure
+  GC.enable
+  GC.start
 end
 
 props = BenchPayload.build

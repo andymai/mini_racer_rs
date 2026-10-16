@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
 # An application that depends on mini_racer only through another gem (rtlcss),
-# using the shim recipe from the README: Bundler must resolve mini_racer to the
-# shim and the shim to mini_racer_rs.
+# with mini_racer pointed at the shim gemspec in shim/: Bundler must resolve
+# mini_racer to the shim and the shim to mini_racer_rs.
 
 source "https://rubygems.org"
 

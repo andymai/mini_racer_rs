@@ -61,7 +61,7 @@ step bundle exec ruby test/diff/run.rb --twin --strict
 step npm --prefix test/consumers/js ci --silent
 step npm --prefix test/consumers/js run build --silent
 step bundle exec ruby test/diff/run.rb --set consumers --twin --strict
-BUNDLE_GEMFILE="$PWD/test/consumers/transitive/Gemfile" step bundle install --quiet
+BUNDLE_GEMFILE="$PWD/test/consumers/transitive/Gemfile" BUNDLE_FROZEN=true step bundle install --quiet
 BUNDLE_GEMFILE="$PWD/test/consumers/transitive/Gemfile" step bundle exec ruby test/consumers/transitive/check.rb
 step bundle exec ruby bench/run.rb --quick
 step cargo "+$msrv" check --workspace --all-targets --locked

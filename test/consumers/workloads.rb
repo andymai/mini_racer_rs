@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require "json"
+require "digest"
 
 # Real libraries run the way applications use mini_racer: a bundle loaded once,
 # then work done in the same context through eval, Context#call, or ExecJS.
@@ -66,6 +66,7 @@ module DiffConsumers
     bundles = WORKLOADS.values.flatten.filter_map { |step| step["bundle"] }.uniq
     missing = bundles.reject { |name| File.exist?(bundle(name)) }
     raise "missing consumer bundles #{missing.join(", ")}; run `npm ci && npm run build` in #{JS}" unless missing.empty?
+    raise "consumer bundles are older than #{JS}/package-lock.json; run `npm ci && npm run build` there" unless current?
 
     WORKLOADS.map do |name, steps|
       { "id" => "consumer-#{name}", "kind" => "program", "steps" => steps.map { |step| resolve(step) } }
@@ -76,10 +77,15 @@ module DiffConsumers
     File.join(BUNDLES, "#{name}.js")
   end
 
+  # build.mjs records the lockfile digest the bundles were built from.
+  def current?
+    stamp = File.join(BUNDLES, "package-lock.sha256")
+    File.exist?(stamp) && File.read(stamp).strip == Digest::SHA256.file(File.join(JS, "package-lock.json")).hexdigest
+  end
+
   def resolve(step)
     return step unless step.key?("bundle")
 
-    source = [File.read(bundle(step["bundle"])), step["append"]].compact.join("\n")
-    step.except("bundle", "append").merge("source" => source)
+    step.except("bundle").merge("file" => bundle(step["bundle"]))
   end
 end

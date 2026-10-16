@@ -1,5 +1,6 @@
 import { build } from "esbuild";
-import { copyFileSync, mkdirSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -19,3 +20,6 @@ await build({
   mainFields: ["module", "main"],
   define: { "process.env.NODE_ENV": '"production"' },
 });
+
+const lock = readFileSync(join(here, "package-lock.json"));
+writeFileSync(join(out, "package-lock.sha256"), `${createHash("sha256").update(lock).digest("hex")}\n`);

@@ -29,15 +29,17 @@ options = { set: "values", seed: 1, js: 200, ruby: 100, twin: false, strict: fal
 OptionParser.new do |opts|
   opts.banner = "usage: run.rb [options]"
   opts.on("--set NAME", LEDGERS.keys, "Cases to run: values (default) or consumers") { |set| options[:set] = set }
-  opts.on("--seed N", Integer) { |seed| options[:seed] = seed }
-  opts.on("--js N", Integer, "Generated JS value cases") { |n| options[:js] = n }
-  opts.on("--ruby N", Integer, "Generated Ruby argument cases") { |n| options[:ruby] = n }
+  opts.on("--seed N", Integer) { |seed| options.merge!(seed: seed, generated: true) }
+  opts.on("--js N", Integer, "Generated JS value cases") { |n| options.merge!(js: n, generated: true) }
+  opts.on("--ruby N", Integer, "Generated Ruby argument cases") { |n| options.merge!(ruby: n, generated: true) }
   opts.on("--twin", "Also run a second copy of the real gem, which must match the first") { options[:twin] = true }
   opts.on("--strict", "Fail unless every outcome matches the set's ledger") { options[:strict] = true }
   opts.on("--write-ledger", "Record this run's outcomes in the set's ledger") do
     options[:write_ledger] = true
   end
-  opts.on("--shrink", "Minimize each new divergence into test/diff/corpus") { options[:shrink] = true }
+  opts.on("--shrink", "Minimize each new divergence into test/diff/corpus") do
+    options.merge!(shrink: true, generated: true)
+  end
   opts.on("--out PATH") { |path| options[:out] = path }
 end.parse!
 
@@ -68,8 +70,15 @@ problems = DiffLedger.divergence_problems(divergences, compat_entries)
 abort problems.join("\n") unless problems.empty?
 
 ledger_path = LEDGERS.fetch(options[:set])
+if options[:set] == "consumers" && options[:generated]
+  abort "diff: --set consumers runs fixed workloads; --seed, --js, --ruby and --shrink apply to the values set"
+end
 cases = if options[:set] == "consumers"
-          DiffConsumers.cases
+          begin
+            DiffConsumers.cases
+          rescue RuntimeError => e
+            abort "diff: #{e.message}"
+          end
         else
           DiffGenerate.cases(seed: options[:seed], javascript: options[:js], ruby: options[:ruby]) + load_corpus
         end
@@ -93,23 +102,30 @@ rescue DiffWorkers::HarnessError => e
   abort "diff: #{e.message}"
 end
 
-out = options[:out] || File.join(WORK, "#{options[:set]}-#{options[:seed]}.jsonl")
+out = options[:out] || File.join(WORK,
+                                 options[:set] == "consumers" ? "consumers.jsonl" : "values-#{options[:seed]}.jsonl",)
 File.write(out, results.map { |result| "#{JSON.generate(result)}\n" }.join)
 counts = results.map { |result| result["class"].split(":").first }.tally.sort.map { |kind, n| "#{n} #{kind}" }
-puts "#{options[:set]}, seed #{options[:seed]}: #{results.size} cases, #{counts.join(", ")}"
+label = options[:set] == "consumers" ? "consumers" : "values, seed #{options[:seed]}"
+puts "#{label}: #{results.size} cases, #{counts.join(", ")}"
 puts "results: #{out}"
 
-if options[:shrink] && options[:set] == "values"
+if options[:shrink]
   known = load_ledger(ledger_path)
   by_id = cases.to_h { |kase| [kase["id"], kase] }
-  results.each do |result|
-    next unless result["class"] == "diverged" && !known.dig(result["id"], "status").to_s.start_with?("xfail:", "crash:")
+  begin
+    results.each do |result|
+      next unless result["class"] == "diverged" && !known.dig(result["id"], "status").to_s.start_with?("xfail:",
+                                                                                                       "crash:",)
 
-    minimal = shrink([reference, candidate], by_id.fetch(result["id"]), [result["expected"], result["actual"]],
-                     divergences,)
-    minimal = minimal.merge("id" => "min-#{result["id"]}")
-    File.write(File.join(CORPUS, "#{minimal["id"]}.json"), "#{JSON.pretty_generate([minimal])}\n")
-    puts "minimized #{result["id"]} into test/diff/corpus/#{minimal["id"]}.json"
+      minimal = shrink([reference, candidate], by_id.fetch(result["id"]), [result["expected"], result["actual"]],
+                       divergences,)
+      minimal = minimal.merge("id" => "min-#{result["id"]}")
+      File.write(File.join(CORPUS, "#{minimal["id"]}.json"), "#{JSON.pretty_generate([minimal])}\n")
+      puts "minimized #{result["id"]} into test/diff/corpus/#{minimal["id"]}.json"
+    end
+  rescue DiffWorkers::HarnessError => e
+    abort "diff: #{e.message}"
   end
 end
 [reference, candidate, twin].compact.each(&:stop)
@@ -122,7 +138,8 @@ if options[:write_ledger]
   statuses = results.to_h do |result|
     [result["id"], DiffLedger.ledger_status(previous.dig(result["id"], "status"), result["class"])]
   end
-  File.write(ledger_path, DiffLedger.dump_ledger(statuses))
+  command = "ruby test/diff/run.rb#{" --set consumers" if options[:set] == "consumers"} --write-ledger"
+  File.write(ledger_path, DiffLedger.dump_ledger(statuses, command))
   puts "#{ledger_path}: #{statuses.size} cases"
 end
 exit unless options[:strict]

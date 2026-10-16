@@ -403,6 +403,7 @@ jobs:
         if: matrix.os == 'ubuntu-24.04' && matrix.ruby == '3.4'
         env:
           BUNDLE_GEMFILE: ${{ github.workspace }}/test/consumers/transitive/Gemfile
+          BUNDLE_FROZEN: "true"
         run: |
           bundle install
           bundle exec ruby test/consumers/transitive/check.rb

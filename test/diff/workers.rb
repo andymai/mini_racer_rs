@@ -27,27 +27,13 @@ module DiffWorkers
       start
     end
 
-    def env
-      common = { "TZ" => "UTC", "EXECJS_RUNTIME" => "MiniRacer" }
-      if @role == "candidate"
-        # Read before with_unbundled_env drops every BUNDLE_* variable: CI installs
-        # some groups only, and the child must ask Bundler for the same groups.
-        return common.merge("BUNDLE_GEMFILE" => File.join(ROOT, "Gemfile"),
-                            "BUNDLE_WITHOUT" => ENV.fetch("BUNDLE_WITHOUT", nil),)
-      end
-
-      common.merge("BUNDLE_GEMFILE" => File.join(ROOT, "tools/reference/Gemfile"),
-                   "BUNDLE_PATH" => File.join(ROOT, "tools/reference/vendor/bundle"),)
-    end
-
     def start
-      args = ["bundle", "exec", "ruby", *(@role == "candidate" ? ["-I#{File.join(ROOT, "lib")}"] : []), "-I#{EXECJS}",
-              File.join(__dir__, "worker.rb"), @role,]
-      worker_env = env
+      args = DiffWorkers.ruby(@role, File.join(__dir__, "worker.rb"), @role)
+      worker_env = DiffWorkers.env(@role)
       spawn = lambda do
         IO.popen(worker_env, args, "r+", chdir: ROOT, pgroup: true, err: [@log, "a"], external_encoding: Encoding::UTF_8)
       end
-      @io = defined?(Bundler) ? Bundler.with_unbundled_env(&spawn) : spawn.call
+      @io = DiffWorkers.unbundled(&spawn)
       line = @io.gets if @io.wait_readable(START_LIMIT)
       ready = line && JSON.parse(line)
       raise HarnessError, "the #{@role} worker did not start; see #{@log}" unless ready&.fetch("ready", nil) == @role
@@ -107,6 +93,30 @@ module DiffWorkers
   end
 
   module_function
+
+  # How either gem's process is started, shared with bench/run.rb so both
+  # measure the same setup.
+  def env(role)
+    common = { "TZ" => "UTC", "EXECJS_RUNTIME" => "MiniRacer" }
+    if role == "candidate"
+      # Read before with_unbundled_env drops every BUNDLE_* variable: CI installs
+      # some groups only, and the child must ask Bundler for the same groups.
+      return common.merge("BUNDLE_GEMFILE" => File.join(ROOT, "Gemfile"),
+                          "BUNDLE_WITHOUT" => ENV.fetch("BUNDLE_WITHOUT", nil),)
+    end
+
+    common.merge("BUNDLE_GEMFILE" => File.join(ROOT, "tools/reference/Gemfile"),
+                 "BUNDLE_PATH" => File.join(ROOT, "tools/reference/vendor/bundle"),)
+  end
+
+  def ruby(role, script, *args)
+    ["bundle", "exec", "ruby", *(role == "candidate" ? ["-I#{File.join(ROOT, "lib")}"] : []), "-I#{EXECJS}", script,
+     *args,]
+  end
+
+  def unbundled(&)
+    defined?(Bundler) ? Bundler.with_unbundled_env(&) : yield
+  end
 
   # Every side runs a case at the same time; the outcomes are read in turn.
   def run_case(workers, kase)

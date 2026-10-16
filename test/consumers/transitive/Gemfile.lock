@@ -20,8 +20,13 @@ GEM
       mini_racer (>= 0.6.3)
 
 PLATFORMS
+  aarch64-linux
+  aarch64-linux-gnu
+  arm64-darwin
   ruby
+  x86_64-darwin
   x86_64-linux
+  x86_64-linux-gnu
 
 DEPENDENCIES
   mini_racer!
