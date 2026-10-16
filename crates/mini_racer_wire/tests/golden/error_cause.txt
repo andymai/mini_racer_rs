@@ -1,0 +1,1 @@
+error{"message": "outer", "stack": "Error: outer\n    at <anonymous>:1:1", "cause": error{"message": "inner", "stack": "RangeError: inner\n    at <anonymous>:1:28"}}

@@ -1,0 +1,55 @@
+# name	JavaScript evaluated by crates/mini_racer_engine/examples/gen_wire_golden.rs
+undefined	undefined
+null	null
+true	true
+false	false
+int_zero	0
+int_negative	-1
+int32_max	2147483647
+int32_min	-2147483648
+beyond_int32	2147483648
+double	1.5
+negative_zero	-0
+nan	NaN
+negative_infinity	-Infinity
+past_safe_integer	2 ** 53 + 2
+bigint_zero	0n
+bigint_small	123n
+bigint_negative	-(2n ** 64n)
+bigint_large	2n ** 200n
+string_ascii	"hello"
+string_latin1	"caf\u00e9"
+string_two_byte	"\u6771\u4eac"
+string_emoji	"\ud83d\ude00"
+string_lone_surrogate	"\ud800x"
+string_empty	""
+date	new Date(1622505600000)
+date_invalid	new Date(NaN)
+regexp	/a+b/gi
+boolean_object	new Boolean(false)
+number_object	new Number(2.5)
+string_object	new String("boxed")
+bigint_object	Object(7n)
+array_empty	[]
+array_dense	[1, "two", 3.5, null]
+array_holes	[1, , 3]
+array_named	(() => { const a = [1, 2]; a.extra = "x"; return a })()
+array_sparse	(() => { const a = []; a[1000] = 1; a.name = "s"; return a })()
+array_nested	[[1, [2, [3]]], {a: [4]}]
+object_empty	({})
+object_simple	({a: 1, b: "two"})
+object_integer_keys	({1: "one", 2: "two", x: 3})
+object_shared	(() => { const o = {v: 1}; return [o, o, {o}] })()
+object_cycle	(() => { const a = {name: "a"}; a.self = a; return a })()
+map	new Map([[1, "one"], ["k", {v: 2}], [{}, []]])
+set	new Set([1, "two", {}])
+error	new Error("boom")
+error_type	new TypeError("bad type")
+error_cause	new Error("outer", {cause: new RangeError("inner")})
+uint8array	new Uint8Array([1, 2, 255])
+float64array	new Float64Array([1.5, -2])
+dataview	new DataView(new ArrayBuffer(4), 1, 2)
+arraybuffer	new Uint8Array([9, 8, 7]).buffer
+resizable_arraybuffer	new ArrayBuffer(4, {maxByteLength: 16})
+shared_buffer_views	(() => { const b = new ArrayBuffer(8); return [new Uint8Array(b, 0, 4), new Int16Array(b, 4, 2), b] })()
+deep	(() => { let a = 1; for (let i = 0; i < 50; i++) a = [a]; return a })()

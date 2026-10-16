@@ -1,0 +1,1 @@
+error{"message": "bad type", "stack": "TypeError: bad type\n    at <anonymous>:1:1"}

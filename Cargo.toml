@@ -24,6 +24,7 @@ magnus = {version = "=0.9.2", features = ["rb-sys"]}
 mini_racer_engine = {path = "crates/mini_racer_engine"}
 mini_racer_sync = {path = "crates/mini_racer_sync"}
 mini_racer_wire = {path = "crates/mini_racer_wire"}
+proptest = {version = "1", default-features = false, features = ["std"]}
 rb-sys = "=0.9.130"
 thiserror = "2"
 v8 = "=152.2.0"
