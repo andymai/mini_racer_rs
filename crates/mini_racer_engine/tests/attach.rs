@@ -347,3 +347,51 @@ fn a_nested_await_under_a_pending_stop_reports_the_refusal_as_terminated() {
     }
     assert_eq!(eval(&context, "1 + 1", &mut adding()).expect("eval"), [2]);
 }
+
+// mini_racer's last termination check for a script nested in a callback also
+// comes before its result is serialized: the outer script's timeout firing
+// while a large nested result is copied out leaves that result.
+#[test]
+fn a_timeout_while_a_nested_result_serializes_leaves_the_result() {
+    let length = 64 << 20;
+    let blob = ContextHandle::create_snapshot(
+        JsText::from(format!("var value = 'x'.repeat({length})")),
+        None,
+        &mut adding(),
+    )
+    .expect("snapshot");
+    let context = ContextHandle::spawn(
+        ContextConfig {
+            timeout: Some(Duration::from_millis(50)),
+            snapshot: Some(blob),
+        },
+        &mut adding(),
+    )
+    .expect("spawn");
+    context
+        .attach(name_and_id("grab", 0), &mut adding())
+        .expect("attach");
+    let mut nested = None;
+    let mut host = Answering(|_args: &[i64], _id| {
+        nested = Some(
+            context
+                .eval("<eval>", "value", &mut adding())
+                .map(|bytes| bytes.len()),
+        );
+        CallbackReply::Value(integer(0))
+    });
+
+    let outer = eval(
+        &context,
+        "const end = Date.now() + 40; while (Date.now() < end) {} grab(); 1",
+        &mut host,
+    );
+    assert!(
+        matches!(nested, Some(Ok(bytes)) if bytes > length),
+        "{nested:?}"
+    );
+    assert!(matches!(
+        outer,
+        Err(EngineError::Js(js)) if js.kind == JsErrorKind::Terminated(TerminationCause::Timeout)
+    ));
+}

@@ -435,12 +435,12 @@ fn halted(halt: Halt) -> EngineError {
     }
 }
 
-// Runs a dispatch: nothing starts once it is halted. An outermost script
-// takes its verdict before serializing its result (`verdict`) and stays armed
-// through it, as serializing runs getters: a cause that stops the serializing
-// is reported, and one that lands without stopping it leaves the reply. A
-// nested dispatch reports a halt but leaves its cause to the dispatch it runs
-// in. An exception that escapes as the one a raising callback threw takes
+// Runs a dispatch: nothing starts once it is halted. A script takes its
+// verdict before serializing its result (`verdict`) and stays armed through
+// it, as serializing runs getters: a cause that stops the serializing is
+// reported, and one that lands without stopping it leaves the reply. A nested
+// dispatch reports a halt but leaves its cause to the dispatch it runs in. An
+// exception that escapes as the one a raising callback threw takes
 // precedence, as in mini_racer.
 fn script(
     scope: &mut v8::PinScope<'_, '_>,
@@ -460,6 +460,8 @@ fn script(
     let halt = match depth {
         Depth::Outermost(dispatch) if result.is_ok() => term.finish(dispatch),
         Depth::Outermost(dispatch) => term.end(dispatch),
+        // Its verdict came before it serialized.
+        Depth::Nested if result.is_ok() && kind == DispatchKind::Script => None,
         Depth::Nested => term.check(kind),
     };
     if raised {
@@ -505,17 +507,16 @@ fn evaluate(
     serialize::reply(tc, &runtime.filter, value).ok_or_else(|| failure(tc, JsErrorKind::Runtime))
 }
 
-// mini_racer's last termination check for an outermost dispatch, before its
-// result is serialized. A nested dispatch leaves causes to the one around it.
+// mini_racer's last termination check, before a script's result is
+// serialized. A nested script reads the causes and leaves them to the
+// dispatch around it.
 fn verdict(runtime: &Runtime, depth: Depth) -> Result<(), EngineError> {
-    match depth {
-        Depth::Outermost(dispatch) => runtime
-            .block
-            .term
-            .settle(dispatch)
-            .map_or(Ok(()), |halt| Err(halted(halt))),
-        Depth::Nested => Ok(()),
-    }
+    let term = &runtime.block.term;
+    let halt = match depth {
+        Depth::Outermost(dispatch) => term.settle(dispatch),
+        Depth::Nested => term.check(DispatchKind::Script),
+    };
+    halt.map_or(Ok(()), |halt| Err(halted(halt)))
 }
 
 // V8 runs no microtask checkpoint inside another, so an await nested in a
