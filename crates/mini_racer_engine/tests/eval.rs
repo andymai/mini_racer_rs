@@ -645,6 +645,7 @@ fn waiting_behind_an_idle_collection_does_not_count_against_a_timeout() {
             timeout: Some(Duration::from_millis(30)),
             snapshot: Some(blob),
             gc_after_idle: Some(Duration::from_millis(1)),
+            ..ContextConfig::default()
         },
         &mut Parking,
     )
