@@ -281,6 +281,7 @@ fn serve_held(block: &ControlBlock, shared: &v8::SharedIsolate, runtime: &Arc<Ru
                 Received::Idle => {
                     if !block.term.is_disposing() {
                         isolate.low_memory_notification();
+                        sys::release_free_memory();
                     }
                     collected = true;
                     continue;
@@ -359,18 +360,40 @@ fn serve_one(
                     "snapshot inside a callback".to_owned(),
                 )),
             };
-            return respond(block, response);
+            let served = respond(block, response);
+            sys::release_free_memory();
+            return served;
         }
         Some(ToV8::Request(request)) => request,
         // No callback is outstanding here, so there is nothing to reply to.
         Some(ToV8::Reply(_)) => return Served::Next,
         None => return Served::Stop { disposed: false },
     };
+    let release = match &request {
+        Request::Eval { source, .. } => large(source),
+        Request::LowMemoryNotification { .. } => true,
+        _ => false,
+    };
     let response = {
         v8::scope_with_context!(let scope, isolate, &runtime.context);
         handle(scope, runtime, request)
     };
-    respond(block, response)
+    let served = respond(block, response);
+    // After the response, so the caller does not wait for it.
+    if release {
+        sys::release_free_memory();
+    }
+    served
+}
+
+// A bundle, not a render: what parsing it frees is worth handing back.
+const LARGE_SOURCE: usize = 1 << 20;
+
+const fn large(source: &JsText) -> bool {
+    match source {
+        JsText::Utf8(bytes) | JsText::Latin1(bytes) => bytes.len() >= LARGE_SOURCE,
+        JsText::Utf16(units) => units.len() >= LARGE_SOURCE / 2,
+    }
 }
 
 fn respond(block: &ControlBlock, response: Result<Vec<u8>, EngineError>) -> Served {

@@ -46,6 +46,7 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | Flag normalization, single-threaded detection, stack size | `crates/mini_racer_engine/src/process/platform.rs` |
 | V8 initialization (a custom platform, so foreground tasks come to the runners) and version | `crates/mini_racer_engine/src/process.rs` |
 | Runner thread, script evaluation, attach and the callback trampoline, heap statistics and snapshots, the collection after `ensure_gc_after_idle:`, the verbose `TryCatch` for `verbose_exceptions:`, mini_racer's error formats | `crates/mini_racer_engine/src/runner.rs` |
+| Handing freed malloc memory back after a large eval, a snapshot build or a low-memory collection | `crates/mini_racer_engine/src/runner.rs` (`serve_one`, `large`), `crates/mini_racer_engine/src/sys.rs` (`release_free_memory`) |
 | `eval_await` and `call_await` (`await_promise`), `pump_message_loop`, `perform_microtask_checkpoint`, the nested await refusal, the last termination check before a result serializes (`verdict`) | `crates/mini_racer_engine/src/runner.rs` |
 | V8's foreground tasks: the platform hook, each process's queues by isolate, registering and retiring an isolate's queue | `crates/mini_racer_engine/src/process/tasks.rs`, `crates/mini_racer_engine/src/runner.rs` (`retire`) |
 | One isolate's task queue: posting order, delays, non-nestable tasks, the wait a post or termination ends | `crates/mini_racer_sync/src/tasks.rs` |
@@ -108,7 +109,7 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | Consumer workloads (Babel, Terser, Handlebars, React) and their ledger | `test/consumers/workloads.rb`, `test/consumers/js/`, `test/consumers/candidate.status.toml` |
 | rtlcss resolving through the shim to mini_racer_rs | `test/consumers/transitive/` |
 | Benchmarks against the real gem (informational): per-call costs, real workloads (Babel, Terser, Autoprefixer, React, MUI, Handlebars), resident memory of idle, loaded and churned contexts, a server rendering bundle kept outside the repository (`MINI_RACER_RS_BENCH_SSR_BUNDLE`), and mini_racer's own `benchmark/serde` suite | `bench/run.rb`, `bench/measure.rb`, `bench/workloads.rb`, `bench/memory.rb`, `bench/external.rb`, `bench/fixtures/`, `bench/payload.rb`, `bench/serde.rb` |
-| Memory, lifecycle, fork and spawn stress runs (round trips and churn nightly, and on PRs labeled `stress`) | `test/stress/round_trips.rb`, `test/stress/churn.rb`, `test/stress/fork_loop.rb`, `test/stress/spawn_churn.rb`, `.github/workflows/nightly.yml` |
+| Memory, lifecycle, fork and spawn stress runs (round trips and churn nightly, and on PRs labeled `stress`) | `test/stress/round_trips.rb`, `test/stress/churn.rb`, `test/stress/fork_loop.rb`, `test/stress/spawn_churn.rb`, `test/stress/large_load.rb`, `.github/workflows/nightly.yml` |
 | Differential ledgers and corpus | `test/diff/candidate.status.toml`, `test/diff/divergences.toml`, `test/diff/corpus/` |
 | Vendored TruffleRuby backend | `lib/mini_racer/truffleruby.rb`, `lib/mini_racer/shared.rb` |
 | Public surface status per id, deviation reasons | `compat.toml`, `compat/surface.json` |
@@ -155,6 +156,7 @@ bundle exec ruby -Ilib test/stress/round_trips.rb multi   # 1M evals after a 500
 bundle exec ruby -Ilib test/stress/churn.rb multi 8 600   # 8 threads churning contexts for 10 min; fails over 256 bytes of RSS per context plus 32 MB (also: single)
 bundle exec ruby -Ilib test/stress/fork_loop.rb    # 500 forks with idle contexts, 100 during an eval loop, single-threaded
 bundle exec ruby -Ilib test/stress/spawn_churn.rb single   # 1,000 backticks and IO.popen under context churn (also: multi)
+bundle exec ruby -Ilib test/stress/large_load.rb   # 5 contexts each loading a generated 3 MB script; fails over 16 MB of RSS per context
 scripts/madvise-fixture.sh         # Linux: build without the madvise wrapper and show a fork child crash
 bundle exec rake package:stage PLATFORM=x86_64-linux-gnu   # copy the compiled extension to tmp/native/<platform>/<ruby minor>/
 bundle exec rake package:native PLATFORM=x86_64-linux-gnu  # a native gem from every staged Ruby's extension, into pkg/
