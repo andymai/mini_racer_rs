@@ -1,3 +1,5 @@
+use std::ffi::c_void;
+
 // The prebuilt V8 archive marks every heap mapping MADV_DONTFORK, so a forked
 // child would lose the isolate's memory. `-Wl,--wrap=madvise` (build.rs) routes
 // V8's calls here; this drops that one advice and forwards the rest unchanged.
@@ -21,14 +23,25 @@ pub extern "C" fn __wrap_madvise(
 }
 
 /// Turns a runner's isolate into one any thread can lock, so it can be served
-/// without being held between requests. `None` if V8 refuses.
-pub fn share(isolate: v8::OwnedIsolate) -> Option<v8::SharedIsolate> {
+/// without being held between requests. A refused isolate comes back for its
+/// runner to drop.
+pub fn share(isolate: v8::OwnedIsolate) -> Result<v8::SharedIsolate, v8::OwnedIsolate> {
     // SAFETY: the runner calls this on the thread that created `isolate`, with
     // no reference from `Global::open` live, and the only slot it sets, an
     // `Arc<Runtime>`, is Send.
     let shared = unsafe { isolate.try_into_shared() };
-    // A refused isolate comes back to be dropped here, on its runner.
-    shared.map_err(|refused| drop(refused.into_isolate())).ok()
+    shared.map_err(v8::IntoSharedError::into_isolate)
+}
+
+/// The address V8 names `isolate` by when it posts the isolate a task.
+#[must_use]
+pub fn isolate_key(isolate: &v8::Isolate) -> usize {
+    // SAFETY: the pointer is only compared as an address, never dereferenced.
+    let raw = unsafe { isolate.as_raw_isolate_ptr() };
+    // SAFETY: `UnsafeRawIsolatePtr` is a transparent wrapper around the
+    // pointer V8 passes to its task runners.
+    let pointer = unsafe { std::mem::transmute::<v8::UnsafeRawIsolatePtr, *mut c_void>(raw) };
+    pointer.addr()
 }
 
 /// Asks the isolate's runner to park for a pending fork the next time V8

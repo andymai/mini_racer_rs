@@ -1,10 +1,11 @@
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use mini_racer_sync::{Channel, DispatchId, Protocol, RunnerPhase, TermCell, Terminator, lock};
 
 use crate::EngineError;
 use crate::notify::NotifyFd;
+use crate::process::tasks::Tasks;
 
 pub struct Wire;
 
@@ -58,20 +59,30 @@ pub enum Request {
     Init {
         depth: Depth,
     },
+    /// `awaited`: a promise result is awaited, as `eval_await` does.
     Eval {
         filename: JsText,
         source: JsText,
         depth: Depth,
+        awaited: bool,
     },
     Call {
         request: Vec<u8>,
         depth: Depth,
+        awaited: bool,
     },
     Attach {
         request: Vec<u8>,
         depth: Depth,
     },
     LowMemoryNotification {
+        depth: Depth,
+    },
+    MicrotaskCheckpoint {
+        depth: Depth,
+    },
+    /// Runs one due task; the response is one byte, 1 if a task ran.
+    PumpMessageLoop {
         depth: Depth,
     },
     // Built on the runner of a context made for it, as mini_racer builds one
@@ -84,15 +95,30 @@ pub enum Request {
     Dispose,
 }
 
-pub struct IsolateTerminator(pub v8::IsolateHandle);
+pub struct IsolateTerminator {
+    handle: v8::IsolateHandle,
+    tasks: Arc<Tasks>,
+}
+
+impl IsolateTerminator {
+    pub fn new(handle: v8::IsolateHandle, tasks: &Arc<Tasks>) -> Self {
+        Self {
+            handle,
+            tasks: Arc::clone(tasks),
+        }
+    }
+}
 
 impl Terminator for IsolateTerminator {
+    // A runner awaiting a promise sleeps until a task is due; the ring wakes
+    // it to find the termination.
     fn terminate(&self) {
-        self.0.terminate_execution();
+        self.handle.terminate_execution();
+        self.tasks.ring();
     }
 
     fn cancel(&self) {
-        self.0.cancel_terminate_execution();
+        self.handle.cancel_terminate_execution();
     }
 }
 
@@ -119,6 +145,9 @@ pub struct ControlBlock {
     pub config: ContextConfig,
     pub timer: Mutex<Timer>,
     pub notify: NotifyFd,
+    // V8's foreground tasks for this context's isolate, which the runner runs
+    // while awaiting a promise or pumping.
+    pub tasks: Arc<Tasks>,
     pub phase: RunnerPhase,
     pub isolate: OnceLock<v8::IsolateHandle>,
     // The isolate a snapshot is being built in on this runner, if any.
@@ -157,12 +186,18 @@ impl ControlBlock {
     }
 
     pub fn new(config: ContextConfig) -> Self {
+        Self::with_tasks(config, Tasks::default())
+    }
+
+    /// For a forked child taking over an idle context with its queued tasks.
+    pub fn with_tasks(config: ContextConfig, tasks: Tasks) -> Self {
         Self {
             channel: Channel::default(),
             term: TermCell::default(),
             config,
             timer: Mutex::default(),
             notify: NotifyFd::default(),
+            tasks: Arc::new(tasks),
             phase: RunnerPhase::default(),
             isolate: OnceLock::new(),
             building: Mutex::new(None),

@@ -49,7 +49,7 @@ musl-based Linux, including Alpine, and Windows are out of scope.
 
 | Engine | Done | Planned | Deviation |
 |---|---|---|---|
-| CRuby | 43 | 11 | 20 |
+| CRuby | 48 | 6 | 20 |
 | TruffleRuby | 58 | 0 | 0 |
 
 See [COMPATIBILITY.md](COMPATIBILITY.md).

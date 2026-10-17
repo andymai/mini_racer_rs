@@ -8,8 +8,9 @@ pub enum Phase {
     Running = 0,
     /// Idle, with its isolate in the control block and no lock held.
     Deposited = 1,
-    /// Inside a callback, waiting for Ruby.
-    ParkedInChannel = 2,
+    /// Holding its isolate with no V8 call under way: inside a callback
+    /// waiting for Ruby, or awaiting a promise until a task is due.
+    Parked = 2,
     /// Woken while a fork was pending, before touching its isolate, or
     /// interrupted in JavaScript to wait the fork out.
     ParkedForFork = 3,
@@ -32,7 +33,7 @@ impl RunnerPhase {
     pub fn get(&self) -> Phase {
         match self.0.load(Ordering::SeqCst) {
             1 => Phase::Deposited,
-            2 => Phase::ParkedInChannel,
+            2 => Phase::Parked,
             3 => Phase::ParkedForFork,
             4 => Phase::Exited,
             _ => Phase::Running,

@@ -216,3 +216,37 @@ fn attach_replaces_segments_that_are_not_objects() {
         [42]
     );
 }
+
+#[test]
+fn an_await_nested_in_a_callback_is_refused_and_the_outer_one_settles() {
+    let context = spawn();
+    context
+        .attach(name_and_id("inner", 0), &mut adding())
+        .expect("attach");
+    let mut refusal = None;
+    let mut host = Answering(|_args: &[i64], _id| {
+        refusal = Some(context.eval_await("<eval>", "Promise.resolve(1)", &mut adding()));
+        CallbackReply::Value(integer(41))
+    });
+
+    let settled = context
+        .eval_await(
+            "<eval>",
+            "(async () => { await null; return inner() + 1 })()",
+            &mut host,
+        )
+        .map(|bytes| ints(&bytes));
+    assert_eq!(settled.expect("settles"), [42]);
+    match refusal {
+        Some(Err(EngineError::Js(js))) => {
+            assert_eq!(js.kind, JsErrorKind::Runtime);
+            assert!(
+                js.message
+                    .starts_with("Error: nested call_await/eval_await is not supported"),
+                "{}",
+                js.message
+            );
+        }
+        other => panic!("expected the refusal, got {other:?}"),
+    }
+}

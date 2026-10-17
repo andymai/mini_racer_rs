@@ -12,61 +12,61 @@ legs = [
 ]
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_await_from_pumped_callback_fails_without_hanging"]
-status = "xfail:M4"
+status = "pass"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_await_from_pumped_callback_fails_without_hanging".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_call_await_microtask_chain"]
-status = "xfail:M4"
+status = "pass"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_call_await_microtask_chain".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_call_await_non_existing_function"]
-status = "xfail:M4"
+status = "pass"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_call_await_non_existing_function".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_call_await_non_promise_passthrough"]
-status = "xfail:M4"
+status = "pass"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_call_await_non_promise_passthrough".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_call_await_passes_arguments_exactly"]
-status = "xfail:M4"
+status = "pass"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_call_await_passes_arguments_exactly".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_call_await_rejection_raises_runtime_error"]
-status = "xfail:M4"
+status = "pass"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_call_await_rejection_raises_runtime_error".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_call_await_rejection_with_non_error_value"]
-status = "xfail:M4"
+status = "pass"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_call_await_rejection_with_non_error_value".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_call_await_returns_settled_value"]
-status = "xfail:M4"
+status = "pass"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_call_await_returns_settled_value".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_call_await_ruby_callback_exception_propagates"]
-status = "xfail:M4"
+status = "pass"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_call_await_ruby_callback_exception_propagates".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_call_await_ruby_callback_in_awaited_chain"]
-status = "xfail:M4"
+status = "pass"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_call_await_ruby_callback_in_awaited_chain".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
@@ -78,37 +78,37 @@ status = "pass"
 status = "upstream-skip"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_dispose_after_call_await"]
-status = "xfail:M4"
+status = "pass"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_dispose_after_call_await".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_eval_await_delayed_task"]
-status = "xfail:M4"
+status = "pass"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_eval_await_delayed_task".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_eval_await_filename"]
-status = "xfail:M4"
+status = "pass"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_eval_await_filename".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_eval_await_non_promise"]
-status = "xfail:M4"
+status = "pass"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_eval_await_non_promise".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_eval_await_preserves_max_memory_error"]
-status = "xfail:M4"
+status = "xfail:M3"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_eval_await_preserves_max_memory_error".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_eval_await_top_level_promise"]
-status = "xfail:M4"
+status = "pass"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_eval_await_top_level_promise".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
@@ -129,13 +129,13 @@ status = "flaky:flaky-test_late_watchdog_does_not_terminate_next_eval"
 status = "upstream-skip"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_nested_call_await_fails_instead_of_deadlocking"]
-status = "xfail:M4"
+status = "pass"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_nested_call_await_fails_instead_of_deadlocking".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_nested_eval_await_fails_instead_of_deadlocking"]
-status = "xfail:M4"
+status = "pass"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_nested_eval_await_fails_instead_of_deadlocking".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
@@ -153,19 +153,19 @@ status = "pass"
 status = "upstream-skip"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_never_settling_promise_hits_timeout"]
-status = "xfail:M4"
+status = "pass"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_never_settling_promise_hits_timeout".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_never_settling_promise_interrupted_by_stop"]
-status = "xfail:M4"
+status = "pass"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_never_settling_promise_interrupted_by_stop".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_never_settling_promise_interrupted_by_thread_kill"]
-status = "xfail:M4"
+status = "pass"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_never_settling_promise_interrupted_by_thread_kill".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
@@ -177,13 +177,13 @@ status = "pass"
 status = "upstream-skip"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_sync_stop_does_not_leave_a_wakeup_task"]
-status = "xfail:M4"
+status = "pass"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_sync_stop_does_not_leave_a_wakeup_task".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_timeout_survives_nested_sync_call"]
-status = "xfail:M4"
+status = "pass"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_timeout_survives_nested_sync_call".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
@@ -469,13 +469,13 @@ status = "pass"
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_perform_microtask_checkpoint_drains_from_callback"]
-status = "xfail:M4"
+status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_perform_microtask_checkpoint_drains_from_callback".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_perform_microtask_checkpoint_returns_nil"]
-status = "xfail:M4"
+status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_perform_microtask_checkpoint_returns_nil".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
@@ -664,7 +664,7 @@ status = "pass"
 status = "upstream-skip"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_webassembly"]
-status = "xfail:M1"
+status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_webassembly".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
@@ -682,7 +682,7 @@ status = "pass"
 status = "upstream-skip"
 
 [tests."test/single_threaded_test.rb#MiniRacerSingleThreadedTest#test_call_await_and_eval_await"]
-status = "xfail:M6"
+status = "pass"
 
 [tests."test/single_threaded_test.rb#MiniRacerSingleThreadedTest#test_call_await_and_eval_await".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
