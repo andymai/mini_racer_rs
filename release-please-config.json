@@ -18,7 +18,11 @@
       "extra-files": [
         { "type": "toml", "path": "Cargo.toml", "jsonpath": "$.workspace.package.version" }
       ],
-      "exclude-paths": [".claude", ".github", "bench", "scripts", "test", "tools/compat", "tools/reference"]
+      "exclude-paths": [
+        ".claude", ".github", "bench", "scripts", "test", "tools/compat", "tools/reference",
+        "crates/mini_racer_engine/examples", "crates/mini_racer_engine/tests", "crates/mini_racer_sync/tests",
+        "crates/mini_racer_wire/fuzz", "crates/mini_racer_wire/tests"
+      ]
     }
   }
 }
