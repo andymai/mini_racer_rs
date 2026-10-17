@@ -52,7 +52,7 @@ Locally, write runs into a fresh directory with `--out <dir>/<name>.jsonl` (one 
 | exit 97, "the suite must exercise mini_racer_rs" | A file from upstream's `lib/` loaded | Find what required it; never weaken `test/upstream/preload.rb` |
 | `timeout` result | The watchdog killed a test that overran | Read `tmp/upstream/<test>.timeout.txt` (Ruby threads, then native stacks) |
 | `crash` result | The suite process died, or called exit, inside that test | The suite log in `tmp/upstream/` has the last output |
-| `suite failure` | The process crashed or hung outside any test (loading, between tests, at exit) | Strict mode always fails on it; read the log and `tmp/upstream/suite-attempt-*.timeout.txt` |
+| `suite failure` | The process crashed or hung outside any test (loading, between tests, at exit) | Strict mode always fails on it; read the log and `tmp/upstream/<suite>-suite-attempt-<n>.timeout.txt` |
 | "not in the ledger" | A new upstream test or a renamed one | Regenerate |
 | "in the ledger but did not run" | A ledger entry for a test that no longer exists | Regenerate |
 
