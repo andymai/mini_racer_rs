@@ -100,6 +100,134 @@ pub fn release_free_memory() {
 #[cfg(not(all(target_os = "linux", target_env = "gnu")))]
 pub const fn release_free_memory() {}
 
+// Slots of v8::Platform's vtable, in v8-platform.h's declaration order after
+// the destructor's two; the v8-bump skill checks them against each new V8.
+const NUMBER_OF_WORKER_THREADS: usize = 6;
+const POST_TASK_ON_WORKER_THREAD_IMPL: usize = 20;
+// v8::TaskPriority::kUserBlocking.
+const USER_BLOCKING: u8 = 2;
+
+type TaskMethod = unsafe extern "C" fn(*mut WorkerTask);
+// Apple's arm64 ABI has a complete destructor return `this`; elsewhere the
+// returned value is ignored.
+type TaskDestructor = unsafe extern "C" fn(*mut WorkerTask) -> *mut WorkerTask;
+
+// A C++ vtable as clang lays one out for v8::Task: the object points past the
+// first two words, at the destructors and then `Run`.
+#[repr(C)]
+struct TaskVtable {
+    offset_to_top: isize,
+    type_info: *const c_void,
+    complete_destructor: TaskDestructor,
+    deleting_destructor: TaskMethod,
+    run: TaskMethod,
+}
+
+// A constant reference, promoted to memory that lives as long as the program,
+// as a vtable must.
+const TASK_VTABLE: &TaskVtable = &TaskVtable {
+    offset_to_top: 0,
+    type_info: std::ptr::null(),
+    complete_destructor: destroy_task,
+    deleting_destructor: delete_task,
+    run: run_task,
+};
+
+// A v8::Task made in Rust, which V8 runs once on a worker thread and deletes.
+#[repr(C)]
+struct WorkerTask {
+    vtable: *const TaskMethod,
+    run: Option<Box<dyn FnOnce() + Send>>,
+}
+
+unsafe extern "C" fn destroy_task(task: *mut WorkerTask) -> *mut WorkerTask {
+    let destroyed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // SAFETY: V8 destroys a task it owns once, and it was built in
+        // `post_on_worker_thread`.
+        unsafe { std::ptr::drop_in_place(task) };
+    }));
+    if destroyed.is_err() {
+        std::process::abort();
+    }
+    task
+}
+
+unsafe extern "C" fn delete_task(task: *mut WorkerTask) {
+    let deleted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // SAFETY: V8 deletes a task it owns once; it came from `Box::into_raw`.
+        drop(unsafe { Box::from_raw(task) });
+    }));
+    if deleted.is_err() {
+        std::process::abort();
+    }
+}
+
+unsafe extern "C" fn run_task(task: *mut WorkerTask) {
+    let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // SAFETY: V8 runs a task it owns, on one thread, before deleting it.
+        let run = unsafe { (*task).run.take() };
+        if let Some(run) = run {
+            run();
+        }
+    }));
+    if ran.is_err() {
+        std::process::abort();
+    }
+}
+
+const fn platform_method(platform: &v8::Platform, slot: usize) -> *const c_void {
+    let this: *const v8::Platform = platform;
+    // SAFETY: `platform` is a live C++ v8::Platform, whose first word points
+    // at its vtable.
+    let vtable = unsafe { *this.cast::<*const *const c_void>() };
+    // SAFETY: v8::Platform declares more virtual functions than `slot`, so the
+    // entry is inside the vtable.
+    let entry = unsafe { vtable.add(slot) };
+    // SAFETY: the entry is an initialized function pointer of the vtable.
+    unsafe { *entry }
+}
+
+/// How many worker threads V8's platform runs.
+#[must_use]
+pub fn worker_threads(platform: &v8::Platform) -> usize {
+    let method = platform_method(platform, NUMBER_OF_WORKER_THREADS);
+    // SAFETY: the slot holds `int Platform::NumberOfWorkerThreads()`, called
+    // with `this` first, as clang passes it.
+    let method = unsafe {
+        std::mem::transmute::<*const c_void, unsafe extern "C" fn(*const v8::Platform) -> libc::c_int>(
+            method,
+        )
+    };
+    // SAFETY: `platform` is the live object the method belongs to.
+    let count = unsafe { method(platform) };
+    usize::try_from(count).unwrap_or(0)
+}
+
+/// Has V8 run `run` once on one of its worker threads.
+pub fn post_on_worker_thread(platform: &v8::Platform, run: Box<dyn FnOnce() + Send>) {
+    let task = Box::into_raw(Box::new(WorkerTask {
+        vtable: (&raw const TASK_VTABLE.complete_destructor).cast(),
+        run: Some(run),
+    }));
+    // v8::SourceLocation holds one pointer, which V8 reads as no location when
+    // null.
+    let location: *const c_void = std::ptr::null();
+    let method = platform_method(platform, POST_TASK_ON_WORKER_THREAD_IMPL);
+    // SAFETY: the slot holds `void Platform::PostTaskOnWorkerThreadImpl(
+    // TaskPriority, std::unique_ptr<Task>, const SourceLocation&)`. V8's
+    // libc++ passes a unique_ptr in a register, as its own callers do, and the
+    // callee owns it from then on.
+    let method = unsafe {
+        std::mem::transmute::<
+            *const c_void,
+            unsafe extern "C" fn(*const v8::Platform, u8, *mut WorkerTask, *const *const c_void),
+        >(method)
+    };
+    // SAFETY: `platform` is the live object the method belongs to, `task` is
+    // a whole v8::Task, and `location` outlives the call.
+    unsafe { method(platform, USER_BLOCKING, task, &raw const location) };
+}
+
 /// Runs the engine's fork handlers inside every `fork()` of the process.
 pub fn register_fork_handlers() {
     // SAFETY: the handlers are plain functions that live as long as the
@@ -124,5 +252,89 @@ extern "C" fn on_parent() {
 extern "C" fn on_child() {
     if std::panic::catch_unwind(crate::process::fork::child).is_err() {
         std::process::abort();
+    }
+}
+
+/// Has V8 run `run` on one of its worker threads after `delay` seconds, as
+/// V8's own delayed worker tasks do.
+#[cfg(test)]
+pub fn post_delayed_on_worker_thread(
+    platform: &v8::Platform,
+    delay: f64,
+    run: Box<dyn FnOnce() + Send>,
+) {
+    // v8::Platform::PostDelayedTaskOnWorkerThreadImpl, after the immediate one.
+    const SLOT: usize = POST_TASK_ON_WORKER_THREAD_IMPL + 1;
+    let task = Box::into_raw(Box::new(WorkerTask {
+        vtable: (&raw const TASK_VTABLE.complete_destructor).cast(),
+        run: Some(run),
+    }));
+    let location: *const c_void = std::ptr::null();
+    let method = platform_method(platform, SLOT);
+    // SAFETY: the slot holds `void PostDelayedTaskOnWorkerThreadImpl(
+    // TaskPriority, std::unique_ptr<Task>, double, const SourceLocation&)`,
+    // the unique_ptr passed as in `post_on_worker_thread`.
+    let method = unsafe {
+        std::mem::transmute::<
+            *const c_void,
+            unsafe extern "C" fn(
+                *const v8::Platform,
+                u8,
+                *mut WorkerTask,
+                f64,
+                *const *const c_void,
+            ),
+        >(method)
+    };
+    // SAFETY: as in `post_on_worker_thread`.
+    unsafe { method(platform, USER_BLOCKING, task, delay, &raw const location) };
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+    use std::sync::{Arc, Condvar, Mutex};
+    use std::thread::ThreadId;
+    use std::time::{Duration, Instant};
+
+    // The vtable slots match the V8 this crate links: tasks posted through
+    // them run on every worker thread, each on its own, and are deleted.
+    // Each waits for the rest to start, so one worker cannot run them all.
+    #[test]
+    fn runs_a_task_on_each_of_v8s_worker_threads() {
+        let _turn = mini_racer_sync::lock(&crate::process::fork::WORKER_TESTS);
+        crate::process::ensure_initialized();
+        let platform = crate::process::platform_with_workers().expect("initialized");
+        let workers = super::worker_threads(platform);
+        assert!(workers > 0);
+        let started = Arc::new((Mutex::new(Vec::<ThreadId>::new()), Condvar::new()));
+        for _ in 0..workers {
+            let started = Arc::clone(&started);
+            super::post_on_worker_thread(
+                platform,
+                Box::new(move || {
+                    let (threads, all) = &*started;
+                    let mut threads = threads.lock().expect("lock");
+                    threads.push(std::thread::current().id());
+                    all.notify_all();
+                    let deadline = Instant::now() + Duration::from_secs(10);
+                    while threads.len() < workers && Instant::now() < deadline {
+                        threads = all
+                            .wait_timeout(threads, Duration::from_millis(10))
+                            .expect("wait")
+                            .0;
+                    }
+                    drop(threads);
+                }),
+            );
+        }
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Arc::strong_count(&started) > 1 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let threads = started.0.lock().expect("lock");
+        assert_eq!(threads.len(), workers);
+        assert_eq!(threads.iter().collect::<HashSet<_>>().len(), workers);
+        assert_eq!(Arc::strong_count(&started), 1);
     }
 }

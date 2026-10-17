@@ -4,7 +4,7 @@
 
 | Engine | Done | Planned | Deviation |
 |---|---|---|---|
-| CRuby | 54 | 0 | 22 |
+| CRuby | 54 | 0 | 23 |
 | TruffleRuby | 58 | 0 | 0 |
 
 ## Surface
@@ -131,6 +131,12 @@ Approved 2026-10-16.
 With the `:single_threaded` platform flag, mini_racer_rs waits up to 500 ms inside Ruby's `fork` or `Process.daemon` for every context's runner to become idle or parked. If another thread runs an operation V8 does not interrupt, such as `JSON.parse` of a large string, the child refuses every inherited context: calling an idle one raises `MiniRacer::RuntimeError` with `single-threaded runner: Device or resource busy`. New contexts created in the child work. mini_racer 0.22.1 does not wait for its runners. With `JSON.parse` of a 3,000,000-element array's JSON, its fork took 15 ms and its child's idle context returned `42`; mini_racer_rs took 523 ms and refused that context.
 
 Approved 2026-10-16.
+
+### `behavior:multi-threaded-fork-wait@ruby`
+
+For forks made through Ruby's `fork`, `IO.popen("-")` or `Process.daemon`, mini_racer_rs waits for context runners and, in the default multi-threaded mode, for V8 workers; mini_racer 0.22.1 waits for neither. This avoids inheriting V8 condition-variable wait records that lived on discarded worker stacks and a worker-queue lock left held in the child. On Ubuntu 24.04 with glibc 2.39, 20 of 20 mini_racer children aborted with signal 6 after loading and rendering React, whether or not two parent threads kept rendering. With mini_racer_rs workers held, 20 of 20 exited cleanly in both cases. On Fedora, mini_racer children hung within the first 50 forks in `test/stress/fork_busy.rb`; mini_racer_rs completed 300 forks per run on Fedora and Ubuntu. On one machine, a fork while four threads evaluated took 1.1 ms at the median, versus 0.7 ms with mini_racer. The waits are best effort: the fork proceeds after the 500 ms runner bound or the following 100 ms worker bound expires.
+
+Pending review.
 
 ### `behavior:multi-threaded-fork@ruby`
 

@@ -444,6 +444,8 @@ jobs:
         run: |
           bundle exec ruby -Ilib test/stress/large_load.rb single
           bundle exec ruby -Ilib test/stress/large_load.rb multi
+      - name: Forks from a multi-threaded parent while other threads evaluate
+        run: bundle exec ruby -Ilib test/stress/fork_busy.rb 300 4
       # On macOS spawns go through fork() and the engine's fork handlers.
       - name: Spawns under context churn, both V8 platform modes
         run: |

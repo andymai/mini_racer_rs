@@ -44,6 +44,7 @@ Each script runs alone with `bundle exec ruby -Ilib test/stress/<script>.rb`, ta
 | `test/stress/round_trips.rb single\|multi [count] [warmup] [max_growth]` | RSS grows over 5% after the warm-up | Nightly and PRs labeled `stress`: 10,000,000 evals per mode |
 | `test/stress/churn.rb single\|multi [threads] [seconds] [max_bytes_per_context]` | RSS grows over 256 bytes per context plus 32 MB | Nightly and `stress`: 8 threads for 600 s per mode |
 | `test/stress/fork_loop.rb [quiet] [busy]` | a child fails or hangs past 3 s | every CI Ruby leg |
+| `test/stress/fork_busy.rb [forks] [threads]` | a child of a multi-threaded parent, forked while other threads evaluate, fails or hangs past 3 s | every CI Ruby leg: 300 forks, 4 threads |
 | `test/stress/spawn_churn.rb single\|multi [spawns]` | a spawn hangs or takes over a second | every CI Ruby leg, both modes |
 | `test/stress/large_load.rb single\|multi [contexts] [max_mib]` | a context loaded with a generated 3 MiB script costs over 16 MiB of RSS | every CI Ruby leg on Linux, both modes |
 | `test/stress/madvise_fixture.rb clean\|crash` | the child's outcome is not the expected one | `scripts/madvise-fixture.sh`, CI's ubuntu-24.04 Ruby 3.4 leg |

@@ -12,9 +12,10 @@ while IFS= read -r hit; do
 done < <(grep -rnE '\b(magnus::)?(method|function)!\(' ext/mini_racer_rs/src |
   grep -vE '^ext/mini_racer_rs/src/lib\.rs:[0-9]+: +magnus::(method|function)!\(\$f, ' || true)
 
-for file in $(grep -rlE 'extern "C" fn' crates/*/src ext/*/src 2>/dev/null || true); do
+# A definition names its function; `extern "C" fn(` alone is a pointer type.
+for file in $(grep -rlE 'extern "C" fn [A-Za-z_]' crates/*/src ext/*/src 2>/dev/null || true); do
   awk -v file="$file" '
-    /extern "C" fn/ { inside = 1; guarded = 0; start = FNR; name = $0 }
+    /extern "C" fn [A-Za-z_]/ { inside = 1; guarded = 0; start = FNR; name = $0 }
     inside && /(^|[^a-z_])(guard|catch_unwind)\(/ { guarded = 1 }
     inside && /^}/ {
       if (!guarded) { printf "VIOLATION [extern]: %s:%d extern \"C\" fn lacks a panic guard\n", file, start; bad = 1 }
