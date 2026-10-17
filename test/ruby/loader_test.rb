@@ -35,8 +35,8 @@ class LoaderTest < Minitest::Test
         FileUtils.cp(File.join(LIB, file), File.join(dir, file))
       end
       FileUtils.mkdir_p(File.join(dir, "mini_racer_rs", minor))
-      built = File.join(LIB, "mini_racer_rs", "mini_racer_rs.#{dlext}")
-      File.symlink(built, File.join(dir, "mini_racer_rs", minor, "mini_racer_rs.#{dlext}"))
+      loaded = $LOADED_FEATURES.find { _1.end_with?("/mini_racer_rs.#{dlext}") }
+      File.symlink(loaded, File.join(dir, "mini_racer_rs", minor, "mini_racer_rs.#{dlext}"))
       File.write(File.join(dir, "mini_racer_rs", "mini_racer_rs.#{dlext}"), "not an extension")
       code = <<~RUBY
         require "mini_racer"

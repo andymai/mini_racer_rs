@@ -23,7 +23,7 @@
 | Loom | the loom models in `crates/mini_racer_sync/tests/loom.rs`, under `--cfg loom` |
 | Fuzz Smoke | `scripts/fuzz-smoke.sh 60`: every wire fuzz target for 60 s on the pinned nightly; crash inputs are uploaded on failure |
 | Gem Contents | Builds both gemspecs, checks the file list, resolves the unpacked source gem with `--locked` |
-| Ruby (3.3, 3.4 and 4.0 on ubuntu-24.04 and macos-15; 3.4 on ubuntu-24.04-arm) | `rake compile`, `scripts/check-exports.sh`, `rake test`, the upstream suite in strict mode, upstream's scripts, and a source gem install into an empty `GEM_HOME` |
+| Ruby (3.3, 3.4 and 4.0 on ubuntu-24.04 and macos-15; 3.4 on ubuntu-24.04-arm and macos-15-intel) | `rake compile`, `scripts/check-exports.sh`, `rake test`, the upstream suite in strict mode, upstream's scripts, and a source gem install into an empty `GEM_HOME` |
 | TruffleRuby | the harness guard tests and the upstream suite in strict mode against the vendored backend |
 | OSV Scan (new findings), PRs only | OSV on the seven lockfiles at the base and the head; fails on a finding the PR adds or a scan that cannot finish |
 | GC Stress (Ruby 3.4, ubuntu-24.04) | the upstream tests in `test/upstream/gc_stress.txt` that pass, each under `GC.stress` with compaction, then `rake test` with `GC.auto_compact` |

@@ -38,7 +38,7 @@ A release is a merged release-please PR. Merging it tags `vX.Y.Z` and publishes 
 | check-versions: "locks mini_racer_rs at ..." | A release PR whose lockfiles were not synced | `scripts/sync-release-locks.sh` on the PR branch, commit, push |
 | `VIOLATION [glibc]` | The extension needs a newer glibc than `[release] glibc` | Find the symbol in the message; the Linux legs must build on `ubuntu-22.04` |
 | `VIOLATION [macos]` | The bundle's minimum macOS is above `[release] macos` | `MACOSX_DEPLOYMENT_TARGET` comes from that floor; a dependency built for a newer macOS raises it |
-| One install leg fails | That platform and Ruby cannot load its gem | Reproduce with "Native gem locally" and `release/smoke.rb` |
+| One install leg fails | That platform and Ruby cannot load its gem, or a suite fails on the released build | Reproduce with "Native gem locally" and `release/smoke.rb`; for a suite, copy the installed extension into `lib/mini_racer_rs/<minor>/`, run the failing suite, then delete that directory |
 | A size violation | A gem is over the budget in release/size-budget.toml | Find what grew; raising the budget, or passing 75 MB, is the owner's decision |
 | Publish failed part-way | Some gems are on RubyGems.org | Rerun the publish job: `scripts/publish-gems.sh` skips gems already there |
 | A broken gem was published | RubyGems.org never takes a version twice | `gem yank mini_racer_rs -v X.Y.Z --platform <platform>`, then a fix release |

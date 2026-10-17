@@ -93,7 +93,7 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | Dependency updates and advisory scans | `.github/dependabot.yml`, `.github/workflows/dependabot-auto-merge.yml`, `.github/workflows/osv-scan.yml`, `.github/workflows/ci.yml` (`osv`), `osv-scanner.toml` |
 | CI | `.github/workflows/ci.yml`, `.github/actions/setup/action.yml` |
 | Releases: the release PR, native and source gem builds, install tests, publishing | `.github/workflows/release-please.yml`, `.github/workflows/release.yml`, `release-please-config.json`, `.release-please-manifest.json` |
-| Gem packaging (one extension per Ruby minor in a native gem) and the installed-gem smoke test | `rakelib/package.rake`, `release/smoke.rb`, `tools/versions.toml` (`[release]`) |
+| Gem packaging (one extension per Ruby minor in a native gem), the installed-gem smoke test, and the suites run on the installed extension | `rakelib/package.rake`, `release/smoke.rb`, `tools/versions.toml` (`[release]`), `.github/workflows/release.yml` (`install`) |
 | Release checks: glibc and macOS floors, gem sizes, publish order, lockfiles after a version bump | `scripts/check-glibc-floor.sh`, `scripts/check-macos-minos.sh`, `scripts/check-gem-sizes.sh`, `scripts/publish-gems.sh`, `scripts/sync-release-locks.sh` |
 | Sanitizer runs (nightly, and on PRs labeled `sanitizers`) | `.github/workflows/nightly.yml`, `scripts/sanitizers.sh`, `.github/sanitizers/lsan.supp` |
 | Nightly fuzzing (15 minutes per target) and fresh-seed differential runs (30 minutes) | `.github/workflows/nightly.yml`, `scripts/fuzz-smoke.sh`, `test/diff/run.rb` (`--explore`) |
@@ -177,7 +177,7 @@ bundle exec rake package:source    # the source gem, into pkg/
 - Loom builds need `--cfg loom` in `RUSTFLAGS` and their own `--target-dir target/loom`; sharing the default target dir rebuilds everything on every switch.
 - The fuzz crate is its own workspace with its own `Cargo.lock` (checked by `cargo fetch --locked`, cargo deny and cargo audit); it builds only on the nightly pinned as `toolchains.fuzz` in `tools/versions.toml`, which `scripts/fuzz-smoke.sh` installs when missing.
 - `rake compile` builds the dev profile locally and release when `CI` is set (`RB_SYS_CARGO_PROFILE`).
-- A stale `lib/mini_racer_rs/mini_racer_rs.so` keeps loading after Rust edits until `rake compile` runs; `NATIVE_VERSION` only catches version mismatches.
+- A stale `lib/mini_racer_rs/mini_racer_rs.so` keeps loading after Rust edits until `rake compile` runs; `NATIVE_VERSION` only catches version mismatches. An extension copied into `lib/mini_racer_rs/<minor>/` (from a native gem) wins over that build until it is deleted.
 - Without the variables from `scripts/fetch-v8-archive.sh`, cargo downloads V8 itself and skips the pinned digest.
 - A dependency, toolchain or v8 change regenerates `THIRD_PARTY_NOTICES.md` (`scripts/update-notices.sh`); it downloads every pinned V8 archive and fails if one links source that `licenses/v8/components.tsv` does not list.
 - cargo-about installed from source needs `--features cli`; `bin/setup` passes it.
