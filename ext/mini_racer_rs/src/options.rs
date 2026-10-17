@@ -97,7 +97,6 @@ pub fn configure(
                 OptionValue::Snapshot(blob) => config.snapshot = (!blob.is_empty()).then_some(blob),
                 other => return Err(OptionError::SnapshotType(other.type_name())),
             },
-            // nil and false are what leaving it out means.
             // mini_racer turns it on for any value but nil and false.
             "verbose_exceptions" => {
                 config.verbose_exceptions = !matches!(value, OptionValue::Nil | OptionValue::False);
@@ -204,13 +203,6 @@ mod tests {
     }
 
     #[test]
-    fn default_values_of_unbuilt_options_are_accepted() {
-        assert!(configure_pairs(&[("snapshot", OptionValue::Nil)]).is_ok());
-        assert!(configure_pairs(&[("verbose_exceptions", OptionValue::False)]).is_ok());
-        assert!(configure_pairs(&[("verbose_exceptions", OptionValue::Nil)]).is_ok());
-    }
-
-    #[test]
     fn verbose_exceptions_is_any_value_but_nil_and_false() {
         for (value, verbose) in [
             (OptionValue::Nil, false),
@@ -225,7 +217,7 @@ mod tests {
     }
 
     #[test]
-    fn a_snapshot_must_be_one_and_an_empty_one_is_none() {
+    fn a_snapshot_must_be_one_and_nil_or_an_empty_one_is_none() {
         let config = configure_pairs(&[("snapshot", OptionValue::Snapshot(b"blob".to_vec()))]);
         assert_eq!(
             config.map(|config| config.snapshot),
@@ -233,6 +225,8 @@ mod tests {
         );
         let empty = configure_pairs(&[("snapshot", OptionValue::Snapshot(Vec::new()))]);
         assert_eq!(empty.map(|config| config.snapshot), Ok(None));
+        let nil = configure_pairs(&[("snapshot", OptionValue::Nil)]);
+        assert_eq!(nil.map(|config| config.snapshot), Ok(None));
         assert_eq!(
             configure_pairs(&[("snapshot", OptionValue::False)]).map(drop),
             Err(OptionError::SnapshotType("false".to_owned()))

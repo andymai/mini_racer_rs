@@ -53,6 +53,19 @@ class VerboseExceptionsTest < Minitest::Test
     assert_equal "", out
   end
 
+  # mini_racer serializes a result in a TryCatch of its own and rethrows from
+  # it, which V8 never reports.
+  def test_nothing_is_reported_while_a_result_serializes
+    out = reported(<<~RUBY)
+      c = MiniRacer::Context.new(verbose_exceptions: true)
+      c.eval("var n = 0; ({get a() { if (n++ == 0) throw new Error('once'); return 7 }})")
+      quietly { c.eval("({get a() { throw new Error('always') }})") }
+      quietly { c.eval("var o = {f() {}}; o.self = o; o") }
+    RUBY
+
+    assert_equal "", out
+  end
+
   def test_any_truthy_value_turns_it_on
     out = reported(<<~RUBY)
       c = MiniRacer::Context.new(verbose_exceptions: "yes")
