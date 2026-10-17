@@ -47,6 +47,16 @@ Dispatch identity preserves two important behaviors. A stop requested while the 
 
 A call into the same context from inside that callback runs as a nested dispatch within the dispatch that invoked the callback.
 
+## Promises and V8's tasks
+
+`Context#eval_await` and `Context#call_await` await a promise result through `await_promise` in `crates/mini_racer_engine/src/runner.rs`. The runner performs a microtask checkpoint and inspects the promise. While it remains pending, the runner executes due V8 tasks one at a time and sleeps until the next task is due. This continues until the promise settles or the dispatch is stopped, timed out, cancelled, or disposed. An await nested in a callback is refused with `nested call_await/eval_await is not supported`, because V8 runs no microtask checkpoint inside another.
+
+`Context#pump_message_loop` executes one due task, performs a microtask checkpoint if a task ran, and returns whether one ran. `Context#perform_microtask_checkpoint` executes the queued microtasks. The engine initializes V8 with `v8::new_custom_platform` in `crates/mini_racer_engine/src/process.rs`, which routes foreground tasks to Rust. Each isolate has a `TaskQueue` in `crates/mini_racer_sync/src/tasks.rs`. It preserves posting order, makes delayed tasks available when due, and runs non-nestable tasks only outside another task.
+
+A registry per forked process maps isolate addresses to queues in `crates/mini_racer_engine/src/process/tasks.rs`. The runner registers the queue after creating the isolate and removes it after the isolate is gone. Tasks posted during teardown are therefore dropped instead of reaching a later isolate at the same address. Tasks for isolates without a serving runner, including isolates used to build snapshots, are dropped when posted.
+
+Termination rings the queue, waking a runner sleeping in an await without posting a wakeup task. Such a runner holds its isolate but runs nothing in it, so a fork does not wait for it. An idle context taken over by a forked child keeps its queued tasks. The loom models in `crates/mini_racer_sync/tests/loom.rs` cover wakeup by stop, posting while a runner decides to sleep, and posting while a queue closes.
+
 ## Snapshots
 
 `MiniRacer::Snapshot` builds a V8 startup blob in an isolate created for that purpose. The implementation is in `crates/mini_racer_engine/src/snapshot.rs`, and a context can start from the resulting blob.
