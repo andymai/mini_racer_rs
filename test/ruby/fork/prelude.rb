@@ -4,7 +4,8 @@
 # block in the child and fails the case unless the child exits cleanly within
 # five seconds; `reap`, which waits that long for a child and kills it after;
 # `raised`, the message of the error a block raises; and `skip_case`, which
-# exits with the code ForkTest reports as a skip.
+# exits with the code ForkTest reports as a skip, or fails under CI so a leg
+# missing a prerequisite cannot drop the case without a word.
 
 $LOAD_PATH.unshift File.expand_path("../../../lib", __dir__)
 require "mini_racer"
@@ -45,7 +46,8 @@ SKIP_EXIT = 77
 
 def skip_case(reason)
   puts reason
-  exit! SKIP_EXIT
+  $stdout.flush
+  exit!(ENV["CI"] ? 1 : SKIP_EXIT)
 end
 
 def raised(klass)

@@ -10,7 +10,7 @@ Run:
 bin/setup
 ```
 
-This installs the pinned toolchains and tools, gems, npm packages, and V8 archive, then compiles the project. Source builds require Rust 1.91 or newer and libclang, supplied by the system or the `libclang` gem.
+This installs the pinned toolchains and tools, gems, npm packages, and V8 archive, then compiles the project. Source builds require Rust 1.91 or newer and libclang, supplied by the system or the `libclang` gem. Ruby 4.0 also requires libffi development headers (`libffi-dev` on Debian and Ubuntu or `libffi-devel` on Fedora) so `bundle install` can build the `fiddle` gem used by the fork tests.
 
 Use these commands while developing:
 

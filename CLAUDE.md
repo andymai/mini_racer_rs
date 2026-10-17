@@ -183,6 +183,7 @@ bundle exec rake package:source    # the source gem, into pkg/
 - cargo-about installed from source needs `--features cli`; `bin/setup` passes it.
 - V8's platform and flags are process-global and freeze at first use, so tests that set flags run in their own process.
 - `mini_racer_rs.gemspec` lists files by explicit globs; a new file outside them is missing from the gem.
+- On Ruby 4.0, `bundle install` builds the `fiddle` gem, which needs libffi's headers (`libffi-devel` on Fedora, `libffi-dev` on Debian and Ubuntu, or `PKG_CONFIG_PATH` at Homebrew's libffi); older Rubies use their default `fiddle`. The fork cases that call libc's `fork()` need it, and under `CI` a fork case that skips fails instead.
 - Source builds need libclang; with the `libclang` gem, `ext/mini_racer_rs/extconf.rb` also passes GCC's include directory to bindgen.
 - Each git worktree needs its own `npm ci` before the commit hooks can run, and `git submodule update --init` before the upstream suites or `rake test` (the ExecJS autodetect test) can run.
 - The upstream suites run from their submodule (`vendor/mini_racer` or `vendor/execjs`) with `BUNDLE_GEMFILE`, `RUBYOPT`, `MINI_RACER_RS_UPSTREAM_REPORT`, `MINI_RACER_RS_UPSTREAM_ROOT` and, for ExecJS, `EXECJS_RUNTIME` set by `test/upstream/run.rb`; run them through that script, not with `rake test` inside the submodule.
