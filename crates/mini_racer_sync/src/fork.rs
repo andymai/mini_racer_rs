@@ -1,5 +1,5 @@
 use crate::lock::{lock, wait};
-use crate::primitives::{AtomicU8, Condvar, Mutex, Ordering};
+use crate::primitives::{AtomicBool, AtomicU8, Condvar, Mutex, Ordering};
 
 /// Where a runner is, as a fork sees it. Only `Running` keeps a fork waiting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -8,8 +8,9 @@ pub enum Phase {
     Running = 0,
     /// Idle, with its isolate in the control block and no lock held.
     Deposited = 1,
-    /// Holding its isolate with no V8 call under way: inside a callback
-    /// waiting for Ruby, or awaiting a promise until a task is due.
+    /// Holding its isolate with no V8 call under way: waiting for a request,
+    /// inside a callback waiting for Ruby, or awaiting a promise until a task
+    /// is due.
     Parked = 2,
     /// Woken while a fork was pending, before touching its isolate, or
     /// interrupted in JavaScript to wait the fork out.
@@ -25,13 +26,17 @@ impl Default for RunnerPhase {
     }
 }
 
+// Both sides of the gate's handshake are read-modify-writes of the phase, so
+// whichever comes second in its order sees the other: ordering that rests on
+// a store and a load alone is beyond what loom checks.
 impl RunnerPhase {
     pub fn set(&self, phase: Phase) {
-        self.0.store(phase as u8, Ordering::SeqCst);
+        self.0.swap(phase as u8, Ordering::SeqCst);
     }
 
+    /// For a forker or a forked child; a runner knows its own phase.
     pub fn get(&self) -> Phase {
-        match self.0.load(Ordering::SeqCst) {
+        match self.0.fetch_add(0, Ordering::SeqCst) {
             1 => Phase::Deposited,
             2 => Phase::Parked,
             3 => Phase::ParkedForFork,
@@ -43,10 +48,13 @@ impl RunnerPhase {
 
 /// Holds runners back from their isolates while a fork is pending.
 ///
-/// A runner reads `pending` and publishes `Running` under one lock, which
-/// `begin` also takes, so a forker that then finds no runner `Running` knows
-/// none will touch an isolate until `end`.
+/// A runner publishes `Running` and then reads `begun`, and `begin` sets
+/// `begun` before the forker reads any phase, so either the runner sees the
+/// fork and waits or the forker sees it `Running` and waits for it. Every runner resumes before every request, so the
+/// common case takes no lock: one lock shared by all of a process's runners
+/// cost three quarters of the call rate of four busy threads.
 pub struct ForkGate {
+    begun: AtomicBool,
     pending: Mutex<bool>,
     released: Condvar,
 }
@@ -54,6 +62,7 @@ pub struct ForkGate {
 impl Default for ForkGate {
     fn default() -> Self {
         Self {
+            begun: AtomicBool::new(false),
             pending: Mutex::new(false),
             released: Condvar::new(),
         }
@@ -62,15 +71,25 @@ impl Default for ForkGate {
 
 impl ForkGate {
     pub fn begin(&self) {
-        *lock(&self.pending) = true;
+        let mut pending = lock(&self.pending);
+        *pending = true;
+        self.begun.store(true, Ordering::SeqCst);
+        drop(pending);
     }
 
     pub fn end(&self) {
-        *lock(&self.pending) = false;
+        let mut pending = lock(&self.pending);
+        *pending = false;
+        self.begun.store(false, Ordering::SeqCst);
+        drop(pending);
         self.released.notify_all();
     }
 
     pub fn resume(&self, phase: &RunnerPhase) {
+        phase.set(Phase::Running);
+        if !self.begun.load(Ordering::SeqCst) {
+            return;
+        }
         let mut pending = lock(&self.pending);
         while *pending {
             phase.set(Phase::ParkedForFork);

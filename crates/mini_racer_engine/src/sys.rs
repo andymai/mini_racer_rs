@@ -100,6 +100,112 @@ pub fn release_free_memory() {
 #[cfg(not(all(target_os = "linux", target_env = "gnu")))]
 pub const fn release_free_memory() {}
 
+// V8 names its worker threads "V8 DefaultWorkerThreadsTaskRunner WorkerThread"
+// and cuts every thread name to 15 bytes.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+const V8_WORKER: &[u8] = b"V8 DefaultWorke";
+
+/// V8's worker threads, and how many of them are asleep.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Workers {
+    pub total: usize,
+    pub asleep: usize,
+}
+
+/// V8's worker threads now, or `None` when the process cannot tell.
+#[cfg(target_os = "linux")]
+#[must_use]
+pub fn v8_workers() -> Option<Workers> {
+    let mut workers = Workers {
+        total: 0,
+        asleep: 0,
+    };
+    for task in std::fs::read_dir("/proc/self/task").ok()? {
+        let path = task.ok()?.path();
+        // A thread that has exited since the listing is skipped.
+        let Ok(name) = std::fs::read(path.join("comm")) else {
+            continue;
+        };
+        if !name.starts_with(V8_WORKER) {
+            continue;
+        }
+        let Ok(stat) = std::fs::read_to_string(path.join("stat")) else {
+            continue;
+        };
+        // The state follows the name, which is in parentheses and may hold any
+        // byte, so the last parenthesis ends it.
+        let state = stat
+            .rsplit_once(") ")
+            .and_then(|(_, rest)| rest.chars().next());
+        workers.total += 1;
+        workers.asleep += usize::from(state == Some('S'));
+    }
+    Some(workers)
+}
+
+/// V8's worker threads now, or `None` when the process cannot tell.
+#[cfg(target_os = "macos")]
+#[must_use]
+pub fn v8_workers() -> Option<Workers> {
+    // The proc_info flavor that lists a process's thread handles.
+    const PROC_PIDLISTTHREADS: libc::c_int = 6;
+    let pid = libc::pid_t::try_from(std::process::id()).ok()?;
+    let mut threads = vec![0_u64; 1024];
+    let capacity = libc::c_int::try_from(std::mem::size_of_val(threads.as_slice())).ok()?;
+    // SAFETY: the buffer has `capacity` writable bytes for the handles.
+    let written = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            PROC_PIDLISTTHREADS,
+            0,
+            threads.as_mut_ptr().cast(),
+            capacity,
+        )
+    };
+    // libproc reports a failure as 0.
+    let count =
+        usize::try_from(written).ok().filter(|&bytes| bytes > 0)? / std::mem::size_of::<u64>();
+    // A full buffer may have left threads out.
+    if count >= threads.len() {
+        return None;
+    }
+    let size = libc::c_int::try_from(std::mem::size_of::<libc::proc_threadinfo>()).ok()?;
+    let mut workers = Workers {
+        total: 0,
+        asleep: 0,
+    };
+    for &thread in threads.get(..count)? {
+        let mut info = libc::proc_threadinfo::default();
+        // SAFETY: `info` has room for one `proc_threadinfo`, `size` bytes.
+        let read = unsafe {
+            libc::proc_pidinfo(
+                pid,
+                libc::PROC_PIDTHREADINFO,
+                thread,
+                (&raw mut info).cast(),
+                size,
+            )
+        };
+        // A thread that has exited since the listing is skipped.
+        if read != size {
+            continue;
+        }
+        let name = info.pth_name.map(libc::c_char::cast_unsigned);
+        if name.starts_with(V8_WORKER) {
+            workers.total += 1;
+            workers.asleep += usize::from(info.pth_run_state == libc::TH_STATE_WAITING);
+        }
+    }
+    Some(workers)
+}
+
+/// V8's worker threads now, or `None` when the process cannot tell.
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[must_use]
+pub const fn v8_workers() -> Option<Workers> {
+    None
+}
+
 /// Runs the engine's fork handlers inside every `fork()` of the process.
 pub fn register_fork_handlers() {
     // SAFETY: the handlers are plain functions that live as long as the
@@ -124,5 +230,20 @@ extern "C" fn on_parent() {
 extern "C" fn on_child() {
     if std::panic::catch_unwind(crate::process::fork::child).is_err() {
         std::process::abort();
+    }
+}
+
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+mod tests {
+    // A V8 that renames its worker threads would turn the wait before a fork
+    // off without a word; this fails first.
+    #[test]
+    fn finds_v8s_worker_threads() {
+        crate::process::ensure_initialized();
+        let workers = super::v8_workers();
+        assert!(
+            workers.is_some_and(|workers| workers.total > 0),
+            "{workers:?}"
+        );
     }
 }

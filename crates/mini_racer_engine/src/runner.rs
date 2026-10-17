@@ -159,9 +159,7 @@ fn serve(
     snapshot: Option<Vec<u8>>,
 ) -> bool {
     // No isolate is made while a fork waits for every runner to be idle.
-    if platform::mode() == Mode::SingleThreaded {
-        generation.resume(block);
-    }
+    generation.resume(block);
     let from_snapshot = snapshot.is_some();
     let params = v8::CreateParams::default();
     let params = match snapshot {
@@ -278,20 +276,25 @@ fn serve_held(block: &ControlBlock, shared: &v8::SharedIsolate, runtime: &Arc<Ru
     let mut isolate = shared.lock();
     let mut collected = true;
     loop {
-        let message = match block.config.gc_after_idle {
-            Some(idle) if !collected => match receive_within(block, idle) {
-                Received::Message(message) => message,
-                // A collection for a context about to be torn down is wasted.
-                Received::Idle => {
-                    if !block.term.is_disposing() {
-                        isolate.low_memory_notification();
-                        sys::release_free_memory();
-                    }
-                    collected = true;
-                    continue;
+        // Between requests it holds its isolate but runs nothing in it, so a
+        // fork need not wait for it.
+        block.phase.set(Phase::Parked);
+        let received = match block.config.gc_after_idle {
+            Some(idle) if !collected => receive_within(block, idle),
+            _ => Received::Message(receive(block)),
+        };
+        runtime.generation.resume(block);
+        let message = match received {
+            Received::Message(message) => message,
+            // A collection for a context about to be torn down is wasted.
+            Received::Idle => {
+                if !block.term.is_disposing() {
+                    isolate.low_memory_notification();
+                    sys::release_free_memory();
                 }
-            },
-            _ => receive(block),
+                collected = true;
+                continue;
+            }
         };
         // mini_racer's context has sent nothing before its first request.
         if !matches!(message, Some(ToV8::Request(Request::Init { .. }))) {
@@ -771,13 +774,9 @@ fn await_promise<'s>(
 // Waiting, the runner holds its isolate but runs nothing in it, so a fork need
 // not wait for it.
 fn wait_for_task(runtime: &Runtime) {
-    if runtime.released {
-        runtime.block.phase.set(Phase::Parked);
-    }
+    runtime.block.phase.set(Phase::Parked);
     runtime.block.tasks.wait();
-    if runtime.released {
-        runtime.generation.resume(&runtime.block);
-    }
+    runtime.generation.resume(&runtime.block);
 }
 
 fn run_task(runtime: &Runtime, task: v8::Task) {
@@ -1027,13 +1026,9 @@ fn callback<'s>(
     }
     loop {
         // Waiting for Ruby, V8 is still: a fork need not wait for this.
-        if runtime.released {
-            runtime.block.phase.set(Phase::Parked);
-        }
+        runtime.block.phase.set(Phase::Parked);
         let message = receive(&runtime.block);
-        if runtime.released {
-            runtime.generation.resume(&runtime.block);
-        }
+        runtime.generation.resume(&runtime.block);
         let reply = match message {
             Some(ToV8::Reply(reply)) => reply,
             Some(ToV8::Request(request)) => {

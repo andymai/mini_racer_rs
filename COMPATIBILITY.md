@@ -4,7 +4,7 @@
 
 | Engine | Done | Planned | Deviation |
 |---|---|---|---|
-| CRuby | 54 | 0 | 22 |
+| CRuby | 54 | 0 | 23 |
 | TruffleRuby | 58 | 0 | 0 |
 
 ## Surface
@@ -131,6 +131,12 @@ Approved 2026-10-16.
 With the `:single_threaded` platform flag, mini_racer_rs waits up to 500 ms inside Ruby's `fork` or `Process.daemon` for every context's runner to become idle or parked. If another thread runs an operation V8 does not interrupt, such as `JSON.parse` of a large string, the child refuses every inherited context: calling an idle one raises `MiniRacer::RuntimeError` with `single-threaded runner: Device or resource busy`. New contexts created in the child work. mini_racer 0.22.1 does not wait for its runners. With `JSON.parse` of a 3,000,000-element array's JSON, its fork took 15 ms and its child's idle context returned `42`; mini_racer_rs took 523 ms and refused that context.
 
 Approved 2026-10-16.
+
+### `behavior:multi-threaded-fork-wait@ruby`
+
+With the default multi-threaded platform, mini_racer_rs waits up to 500 ms during marked Ruby forks for every context's runner to become idle or parked and for V8 workers to appear asleep on three consecutive polls, interrupting JavaScript after 50 ms. This narrows a race where a V8 lock held at `fork()` remains locked after its owning thread disappears, making the child's first new context wait forever on the worker task queue. In `test/stress/fork_busy.rb`, mini_racer 0.22.1's children hung within the first 50 forks, while mini_racer_rs's children all exited cleanly over 300 forks per run. With four evaluator threads, median fork time on one machine was 2.6 ms against 0.7 ms for mini_racer 0.22.1. mini_racer 0.22.1 waits for neither runners nor V8 workers. Delayed tasks can still wake a worker during the fork.
+
+Pending review.
 
 ### `behavior:multi-threaded-fork@ruby`
 

@@ -16,6 +16,8 @@ const QUIESCE: Duration = Duration::from_millis(500);
 const POLL: Duration = Duration::from_micros(200);
 // A runner still running after this is interrupted to park in JavaScript.
 const INTERRUPT_AFTER: Duration = Duration::from_millis(50);
+// Polls in a row that must find every one of V8's worker threads asleep.
+const SETTLED: u32 = 3;
 
 // Forks since the engine's fork handlers were registered, counted by the child
 // handler. A process is told apart from its ancestors by this, never by pid,
@@ -162,14 +164,17 @@ thread_local! {
 
 // pthread_atfork's prepare handler, on the forking thread inside fork() and
 // after every Ruby `_fork` hook, so no Ruby code runs while runners are held.
-// With a single-threaded V8 it waits until every runner is idle or parked, so
-// the child sees no isolate mid-change. No runner needs Ruby to get there:
-// one waiting on a callback already counts as parked. V8's worker threads are
-// left out: `--single-threaded` gives them no tasks.
+// It waits until every runner is idle or parked, then, with a multi-threaded
+// V8, until its worker threads sleep, so the child finds no isolate mid-change
+// and, but for a worker woken by a delayed task during the fork itself, no
+// lock of V8's held, such as the one on the worker threads' queue that the
+// child's first post to them would wait on forever. No runner needs Ruby to
+// get there: one waiting on a callback already counts as parked. Past the
+// bound the fork goes ahead anyway.
 pub(crate) fn prepare() {
     let intended = INTENDED.load(Ordering::SeqCst) != 0;
     FORK_INTENDED.store(intended, Ordering::SeqCst);
-    if !intended || platform::mode() != Mode::SingleThreaded {
+    if !intended {
         return;
     }
     let generation = current();
@@ -205,7 +210,30 @@ pub(crate) fn prepare() {
         }
         std::thread::sleep(POLL);
     };
-    generation.prepared.store(quiesced, Ordering::SeqCst);
+    let settled = !quiesced || platform::mode() == Mode::SingleThreaded || settle_workers(started);
+    generation
+        .prepared
+        .store(quiesced && settled, Ordering::SeqCst);
+}
+
+// With every runner parked V8's worker threads get no new tasks, so once all
+// of them sleep, only a delayed task coming due (V8's memory pool releases
+// pages every eight seconds) wakes one to take their queue's lock before the
+// fork. Returns whether they settled; with no worker found it cannot tell.
+fn settle_workers(started: Instant) -> bool {
+    let mut asleep = 0;
+    while started.elapsed() < QUIESCE {
+        match crate::sys::v8_workers() {
+            Some(workers) if workers.total > 0 && workers.asleep == workers.total => asleep += 1,
+            Some(workers) if workers.total > 0 => asleep = 0,
+            _ => return false,
+        }
+        if asleep == SETTLED {
+            return true;
+        }
+        std::thread::sleep(POLL);
+    }
+    false
 }
 
 // pthread_atfork's parent handler, whether or not the fork succeeded.
