@@ -23,6 +23,7 @@ A change gets a test at the lowest layer that can see it, and the suites above i
 | Values or programs against the real gem | a case in `test/diff/corpus/curated.json` | `bundle exec ruby test/diff/run.rb --strict` |
 | A real library | `DiffConsumers::WORKLOADS` in `test/consumers/workloads.rb` | `bundle exec ruby test/diff/run.rb --set consumers --strict` |
 | Memory or lifecycle over minutes | a script in `test/stress/` | reference.md |
+| A README example | a fenced `ruby check` block in `README.md`; every `# =>` value is asserted | `bundle exec ruby -Itest/ruby test/ruby/readme_test.rb` |
 
 V8's flags and platform mode freeze at first use, once per process. `cargo test`, which `scripts/sanitizers.sh` uses, runs a binary's tests in one process, so a flag-dependent assertion joins `flags_apply_before_initialization` in `crates/mini_racer_engine/tests/flags.rs` or gets its own test file, as `crates/mini_racer_engine/tests/teardown_single_threaded.rs` does. Ruby code that sets flags runs through `run_ruby` (`include RubyProcess`, from `test/ruby/test_helper.rb`), which starts a fresh Ruby.
 
