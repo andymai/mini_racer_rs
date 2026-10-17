@@ -83,8 +83,11 @@ pub fn configure(
                 fixnum(&value)?;
             }
             "ensure_gc_after_idle" => {
-                within(&value, "ensure_gc_after_idle", 0..=INT32_MAX)?;
-                return Err(OptionError::Unsupported(key));
+                let ms = within(&value, "ensure_gc_after_idle", 0..=INT32_MAX)?;
+                config.gc_after_idle = u64::try_from(ms)
+                    .ok()
+                    .filter(|ms| *ms > 0)
+                    .map(Duration::from_millis);
             }
             "max_memory" => {
                 let bytes = within(&value, "max_memory", 0..UINT32_MAX)?;
@@ -173,6 +176,17 @@ mod tests {
     }
 
     #[test]
+    fn ensure_gc_after_idle_is_milliseconds_and_zero_means_none() {
+        let config = configure_pairs(&[("ensure_gc_after_idle", OptionValue::Fixnum(25))]);
+        assert_eq!(
+            config.map(|c| c.gc_after_idle),
+            Ok(Some(Duration::from_millis(25)))
+        );
+        let config = configure_pairs(&[("ensure_gc_after_idle", OptionValue::Fixnum(0))]);
+        assert_eq!(config.map(|c| c.gc_after_idle), Ok(None));
+    }
+
+    #[test]
     fn keys_are_checked_last_to_first() {
         let pairs = [
             ("timeout", OptionValue::Other("String".to_owned())),
@@ -221,17 +235,12 @@ mod tests {
 
     #[test]
     fn options_not_built_yet_say_so() {
-        for pairs in [
-            [("ensure_gc_after_idle", OptionValue::Fixnum(1))],
-            [(
+        assert!(matches!(
+            configure_pairs(&[(
                 "verbose_exceptions",
                 OptionValue::Other("TrueClass".to_owned()),
-            )],
-        ] {
-            assert!(matches!(
-                configure_pairs(&pairs),
-                Err(OptionError::Unsupported(_))
-            ));
-        }
+            )]),
+            Err(OptionError::Unsupported(_))
+        ));
     }
 }

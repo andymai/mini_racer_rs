@@ -291,9 +291,6 @@ status = "upstream-skip"
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_ensure_gc"]
-status = "xfail:M3"
-
-[tests."test/mini_racer_test.rb#MiniRacerTest#test_ensure_gc".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_error_on_return_val"]

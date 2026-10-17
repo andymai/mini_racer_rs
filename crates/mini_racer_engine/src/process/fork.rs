@@ -8,6 +8,7 @@ use mini_racer_sync::{ForkGate, Phase, lock};
 use crate::control::ControlBlock;
 use crate::process::platform::{self, Mode};
 use crate::process::tasks::TaskRegistry;
+use crate::process::watchdog::Watchdog;
 
 // Long enough for any runner to answer and go idle, short enough that a fork
 // that cannot be quiesced is merely slow.
@@ -44,6 +45,7 @@ pub struct Generation {
     // Per process, as V8's worker threads post from the parent only, and one
     // may have held this lock at the fork.
     tasks: TaskRegistry,
+    watchdog: Mutex<Option<Arc<Watchdog>>>,
     next: OnceLock<Box<Self>>,
 }
 
@@ -59,6 +61,7 @@ impl Generation {
             forking: Mutex::new(()),
             blocks: Mutex::new(Vec::new()),
             tasks: TaskRegistry::default(),
+            watchdog: Mutex::new(None),
             next: OnceLock::new(),
         }
     }
@@ -69,6 +72,10 @@ impl Generation {
 
     pub(crate) const fn tasks(&self) -> &TaskRegistry {
         &self.tasks
+    }
+
+    pub(crate) const fn watchdog(&self) -> &Mutex<Option<Arc<Watchdog>>> {
+        &self.watchdog
     }
 
     pub fn register(&self, block: &Arc<ControlBlock>) {

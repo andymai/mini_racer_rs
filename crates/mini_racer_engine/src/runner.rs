@@ -12,6 +12,7 @@ use v8::ValueDeserializerHelper;
 use crate::control::{CallbackReply, ControlBlock, Depth, IsolateTerminator, JsText, Request};
 use crate::process::fork::Generation;
 use crate::process::platform::{self, Mode};
+use crate::process::watchdog;
 use crate::serialize::{self, Filter, Tc};
 use crate::spin::spin_until;
 use crate::{EngineError, JsError, JsErrorKind};
@@ -267,10 +268,31 @@ enum Served {
     Stop { disposed: bool },
 }
 
+// With `gc_after_idle`, mini_racer's runner asks V8 for a full collection
+// once it has waited that long after a request, and not again until the next.
 fn serve_held(block: &ControlBlock, shared: &v8::SharedIsolate, runtime: &Arc<Runtime>) -> bool {
     let mut isolate = shared.lock();
+    let mut collected = true;
     loop {
-        if let Served::Stop { disposed } = serve_one(&mut isolate, block, runtime, receive(block)) {
+        let message = match block.config.gc_after_idle {
+            Some(idle) if !collected => match receive_within(block, idle) {
+                Received::Message(message) => message,
+                // A collection for a context about to be torn down is wasted.
+                Received::Idle => {
+                    if !block.term.is_disposing() {
+                        isolate.low_memory_notification();
+                    }
+                    collected = true;
+                    continue;
+                }
+            },
+            _ => receive(block),
+        };
+        // mini_racer's context has sent nothing before its first request.
+        if !matches!(message, Some(ToV8::Request(Request::Init { .. }))) {
+            collected = false;
+        }
+        if let Served::Stop { disposed } = serve_one(&mut isolate, block, runtime, message) {
             return disposed;
         }
     }
@@ -353,6 +375,29 @@ fn respond(block: &ControlBlock, response: Result<Vec<u8>, EngineError>) -> Serv
         Served::Next
     } else {
         Served::Stop { disposed: false }
+    }
+}
+
+enum Received {
+    Message(Option<ToV8<crate::control::Wire>>),
+    Idle,
+}
+
+fn receive_within(block: &ControlBlock, idle: Duration) -> Received {
+    let deadline = std::time::Instant::now().checked_add(idle);
+    spin_until(IDLE_SPIN.min(idle), || block.channel.ready(Side::V8));
+    loop {
+        // As mini_racer's runner: once the deadline has passed it collects
+        // before it looks for a request, which then waits in the channel.
+        let left = deadline.map(|at| at.saturating_duration_since(std::time::Instant::now()));
+        if left.is_some_and(|left| left.is_zero()) {
+            return Received::Idle;
+        }
+        match block.channel.recv_v8() {
+            Ok(Some(message)) => return Received::Message(Some(message)),
+            Ok(None) => block.channel.park(Side::V8, left),
+            Err(_) => return Received::Message(None),
+        }
     }
 }
 
@@ -483,7 +528,9 @@ fn script(
 ) -> Result<Vec<u8>, EngineError> {
     let term = &runtime.block.term;
     v8::tc_scope!(let tc, scope);
-    let result = if term.check(kind).is_some() {
+    let result = if let Err(error) = arm_timeout(runtime, depth, kind) {
+        Err(error)
+    } else if term.check(kind).is_some() {
         Err(EngineError::Internal("halted without a cause".to_owned()))
     } else {
         run(tc)
@@ -506,6 +553,19 @@ fn script(
         }));
     }
     halt.map_or(result, |halt| Err(halted(halt)))
+}
+
+// mini_racer starts a script's watchdog on its V8 thread as it takes the
+// request, so time spent waiting for the runner, such as behind a collection
+// after `ensure_gc_after_idle`, never counts against the timeout. Setup and
+// maintenance are never timed.
+fn arm_timeout(runtime: &Runtime, depth: Depth, kind: DispatchKind) -> Result<(), EngineError> {
+    match (depth, kind, runtime.block.config.timeout) {
+        (Depth::Outermost(dispatch), DispatchKind::Script, Some(timeout)) => {
+            watchdog::schedule(timeout, &runtime.block, dispatch)
+        }
+        _ => Ok(()),
+    }
 }
 
 fn escaped(tc: &Tc<'_, '_, '_, '_>, runtime: &Runtime) -> bool {

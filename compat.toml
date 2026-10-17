@@ -268,7 +268,7 @@ status = "done"
 status = "done"
 
 [ids."kwarg:MiniRacer::Context#initialize:ensure_gc_after_idle"]
-status = "todo:M3"
+status = "done"
 
 [ids."kwarg:MiniRacer::Context#initialize:isolate@truffleruby"]
 status = "done"

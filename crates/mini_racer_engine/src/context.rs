@@ -578,13 +578,6 @@ impl ContextHandle {
             TermError::Disposing => EngineError::Disposed,
             TermError::AlreadyArmed => EngineError::Busy,
         })?;
-        // mini_racer times only scripts, never setup or maintenance.
-        if let (DispatchKind::Script, Some(timeout)) = (kind, block.config.timeout)
-            && let Err(error) = watchdog::schedule(timeout, block, dispatch)
-        {
-            block.term.end(dispatch);
-            return Err(error);
-        }
         self.session.owner.store(thread, Ordering::Release);
         let owning = Owning(&self.session.owner);
         let wait = WaitHandle::new(block);
