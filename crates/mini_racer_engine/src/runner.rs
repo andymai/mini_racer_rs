@@ -813,11 +813,9 @@ fn callback<'s>(
                 return;
             }
         };
-        let terminating = scope.is_execution_terminating();
         // A nested dispatch that was halted leaves its termination to unwind
-        // this script too. Throwing would replace it with a catchable error,
-        // so the termination is renewed instead, as mini_racer restores it.
-        let halted = terminating || runtime.block.term.check(DispatchKind::Script).is_some();
+        // this script too, as mini_racer restores it.
+        let terminating = scope.is_execution_terminating();
         match reply {
             // As mini_racer answers a cancelled callback: the throw stops the
             // script at once, and the termination takes over at V8's next
@@ -829,7 +827,25 @@ fn callback<'s>(
                 }
                 scope.terminate_execution();
             }
-            _ if halted => {
+            // mini_racer throws a raising callback's exception even with a
+            // cause pending, or a nested script's termination restored:
+            // escaping the script, it takes precedence, and the termination
+            // takes over if the script catches it.
+            CallbackReply::Raised(message) => {
+                if terminating {
+                    scope.cancel_terminate_execution();
+                }
+                let exception = error(scope, &message);
+                *lock(&runtime.raised) = Some(v8::Global::new(scope, exception));
+                scope.throw_exception(exception);
+                if terminating {
+                    scope.terminate_execution();
+                }
+            }
+            _ if terminating => {
+                scope.terminate_execution();
+            }
+            _ if runtime.block.term.check(DispatchKind::Script).is_some() => {
                 scope.terminate_execution();
             }
             CallbackReply::Value(bytes) => {
@@ -840,11 +856,6 @@ fn callback<'s>(
                 {
                     rv.set(value);
                 }
-            }
-            CallbackReply::Raised(message) => {
-                let exception = error(scope, &message);
-                *lock(&runtime.raised) = Some(v8::Global::new(scope, exception));
-                scope.throw_exception(exception);
             }
         }
         return;

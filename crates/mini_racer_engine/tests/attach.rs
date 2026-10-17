@@ -437,3 +437,72 @@ fn a_dispose_while_a_nested_result_serializes_fails_it() {
     assert!(matches!(nested, Some(Err(_))), "{nested:?}");
     context.dispose(&mut adding()).expect("dispose");
 }
+
+// mini_racer throws a raising callback's exception even with a stop pending:
+// the exception escaping the script takes precedence, and the stop takes over
+// once a script catches it.
+#[test]
+fn a_callback_raising_under_a_pending_stop_still_throws() {
+    let context = spawn();
+    context
+        .attach(name_and_id("fails", 0), &mut adding())
+        .expect("attach");
+    let mut host = Answering(|_args: &[i64], _id| {
+        context.stop().expect("live context");
+        CallbackReply::Raised(JsText::from("x"))
+    });
+
+    let escaped = eval(&context, "fails(); 5", &mut host);
+    assert!(
+        matches!(escaped, Err(EngineError::Js(ref js)) if js.kind == JsErrorKind::HostException),
+        "{escaped:?}"
+    );
+    let caught = eval(&context, "try { fails() } catch (e) { 7 }", &mut host);
+    assert!(
+        matches!(caught, Err(EngineError::Js(ref js)) if js.kind == JsErrorKind::Terminated(TerminationCause::Stop)),
+        "{caught:?}"
+    );
+    assert_eq!(eval(&context, "1 + 1", &mut adding()).expect("eval"), [2]);
+}
+
+// mini_racer lifts a nested script's termination before its callback goes
+// on, and only asks for it again, so the exception the callback then raises
+// is still thrown: escaping, it is raised; caught, the timeout takes over.
+#[test]
+fn a_callback_raising_after_its_nested_script_was_terminated_still_throws() {
+    let context = ContextHandle::spawn(
+        ContextConfig {
+            timeout: Some(Duration::from_millis(50)),
+            ..ContextConfig::default()
+        },
+        &mut adding(),
+    )
+    .expect("spawn");
+    context
+        .attach(name_and_id("work", 0), &mut adding())
+        .expect("attach");
+    let mut nested = Vec::new();
+    let mut host = Answering(|_args: &[i64], _id| {
+        nested.push(
+            context
+                .eval("<eval>", "for (;;) {}", &mut adding())
+                .map(drop),
+        );
+        CallbackReply::Raised(JsText::from("wrapped"))
+    });
+
+    let escaped = eval(&context, "work(); 5", &mut host);
+    let caught = eval(&context, "try { work() } catch (e) { 7 }", &mut host);
+    assert!(
+        matches!(escaped, Err(EngineError::Js(ref js)) if js.kind == JsErrorKind::HostException),
+        "{escaped:?}"
+    );
+    assert!(
+        matches!(caught, Err(EngineError::Js(ref js)) if js.kind == JsErrorKind::Terminated(TerminationCause::Timeout)),
+        "{caught:?}"
+    );
+    assert!(nested.iter().all(|nested| matches!(
+        nested,
+        Err(EngineError::Js(js)) if js.kind == JsErrorKind::Terminated(TerminationCause::Timeout)
+    )));
+}
