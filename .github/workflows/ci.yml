@@ -552,12 +552,11 @@ jobs:
           MINI_RACER_RS_AUTO_COMPACT: "1"
         run: bundle exec rake test
 
-  # !cancelled() rather than always(): a run superseded by a newer push must
-  # not report a failing gate for its commit.
   # Fails on findings the PR adds, or when either scan cannot finish: the
   # reusable workflow scans the base and the head and compares them, so an
   # advisory against a version already on main fails osv-scan.yml's runs
-  # instead. A fork's token cannot upload SARIF.
+  # instead. Only PRs from this repository upload SARIF, since a fork's PR runs
+  # with a read-only token.
   osv:
     name: OSV Scan (new findings)
     if: github.event_name == 'pull_request'
@@ -580,6 +579,8 @@ jobs:
       contents: read
       security-events: write
 
+  # !cancelled() rather than always(): a run superseded by a newer push must
+  # not report a failing gate for its commit.
   ci-pass:
     name: CI Pass
     if: ${{ !cancelled() }}
