@@ -478,6 +478,7 @@ fn a_timeout_while_the_result_serializes_leaves_the_result() {
         ContextConfig {
             timeout: Some(Duration::from_millis(5)),
             snapshot: Some(blob),
+            ..ContextConfig::default()
         },
         &mut Parking,
     )
@@ -491,5 +492,60 @@ fn a_timeout_while_the_result_serializes_leaves_the_result() {
         started.elapsed() > Duration::from_millis(5),
         "serializing outlasted the timeout"
     );
+    assert_eq!(eval(&context, "1 + 1").expect("usable"), Out::Int(2));
+}
+
+#[test]
+fn a_heap_past_max_memory_ends_the_script_out_of_memory() {
+    let context = ContextHandle::spawn(
+        ContextConfig {
+            max_memory: Some(50_000_000),
+            ..ContextConfig::default()
+        },
+        &mut Parking,
+    )
+    .expect("spawn");
+    let grown = eval(
+        &context,
+        "let a = []; while (true) { a.push(new Array(10000).fill(0)) }",
+    );
+    match grown {
+        Err(EngineError::Js(js)) => {
+            assert_eq!(
+                js.kind,
+                JsErrorKind::Terminated(TerminationCause::MaxMemory)
+            );
+            assert_eq!(js.message, "out of memory");
+        }
+        other => panic!("expected out of memory, got {other:?}"),
+    }
+    assert_eq!(eval(&context, "1 + 1").expect("usable"), Out::Int(2));
+}
+
+// A collection outside any script leaves the memory cause for the next one,
+// which mini_racer reports; a pump consumes it without reporting.
+#[test]
+fn a_collection_past_max_memory_ends_the_next_script() {
+    let context = ContextHandle::spawn(
+        ContextConfig {
+            max_memory: Some(100_000),
+            ..ContextConfig::default()
+        },
+        &mut Parking,
+    )
+    .expect("spawn");
+    context
+        .low_memory_notification(&mut Parking)
+        .expect("collection");
+    assert!(matches!(
+        eval(&context, "1"),
+        Err(EngineError::Js(js)) if js.kind == JsErrorKind::Terminated(TerminationCause::MaxMemory)
+    ));
+    assert_eq!(eval(&context, "1 + 1").expect("usable"), Out::Int(2));
+
+    context
+        .low_memory_notification(&mut Parking)
+        .expect("collection");
+    context.pump_message_loop(&mut Parking).expect("pump");
     assert_eq!(eval(&context, "1 + 1").expect("usable"), Out::Int(2));
 }

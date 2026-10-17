@@ -128,6 +128,9 @@ pub struct ContextConfig {
     /// A blob from `ContextHandle::create_snapshot` the isolate starts from;
     /// the runner takes it, so V8 holds the only copy.
     pub snapshot: Option<Vec<u8>>,
+    /// The used heap size, in bytes, past which a garbage collection ends the
+    /// running script out of memory, as `mini_racer`'s `max_memory:` does.
+    pub max_memory: Option<u64>,
 }
 
 /// The context's pending timeout and the earliest deadline the watchdog holds

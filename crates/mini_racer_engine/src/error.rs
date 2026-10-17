@@ -31,9 +31,15 @@ pub struct JsError {
 
 impl JsError {
     pub(crate) fn terminated(cause: TerminationCause) -> Self {
+        let message = match cause {
+            TerminationCause::MaxMemory | TerminationCause::HeapExhausted => "out of memory",
+            TerminationCause::Stop | TerminationCause::Timeout | TerminationCause::Cancelled => {
+                "terminated"
+            }
+        };
         Self {
             kind: JsErrorKind::Terminated(cause),
-            message: "terminated".to_owned(),
+            message: message.to_owned(),
         }
     }
 }

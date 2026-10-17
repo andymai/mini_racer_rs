@@ -102,7 +102,7 @@ status = "pass"
 status = "upstream-skip"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_eval_await_preserves_max_memory_error"]
-status = "xfail:M3"
+status = "pass"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_eval_await_preserves_max_memory_error".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
@@ -439,7 +439,7 @@ status = "upstream-skip"
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_max_memory"]
-status = "xfail:M3"
+status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_max_memory".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
@@ -448,7 +448,7 @@ status = "upstream-skip"
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_max_memory_for_call"]
-status = "xfail:M3"
+status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_max_memory_for_call".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
@@ -622,7 +622,7 @@ status = "pass"
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_timeout"]
-status = "xfail:M3"
+status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_timeout".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
