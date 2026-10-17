@@ -521,3 +521,31 @@ fn a_heap_past_max_memory_ends_the_script_out_of_memory() {
     }
     assert_eq!(eval(&context, "1 + 1").expect("usable"), Out::Int(2));
 }
+
+// A collection outside any script leaves the memory cause for the next one,
+// which mini_racer reports; a pump consumes it without reporting.
+#[test]
+fn a_collection_past_max_memory_ends_the_next_script() {
+    let context = ContextHandle::spawn(
+        ContextConfig {
+            max_memory: Some(100_000),
+            ..ContextConfig::default()
+        },
+        &mut Parking,
+    )
+    .expect("spawn");
+    context
+        .low_memory_notification(&mut Parking)
+        .expect("collection");
+    assert!(matches!(
+        eval(&context, "1"),
+        Err(EngineError::Js(js)) if js.kind == JsErrorKind::Terminated(TerminationCause::MaxMemory)
+    ));
+    assert_eq!(eval(&context, "1 + 1").expect("usable"), Out::Int(2));
+
+    context
+        .low_memory_notification(&mut Parking)
+        .expect("collection");
+    context.pump_message_loop(&mut Parking).expect("pump");
+    assert_eq!(eval(&context, "1 + 1").expect("usable"), Out::Int(2));
+}

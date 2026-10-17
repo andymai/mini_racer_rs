@@ -5,7 +5,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use mini_racer_sync::{
-    Channel, ChannelError, DispatchKind, Interrupt, Phase, Side, TermError, ToRuby, lock,
+    Channel, ChannelError, DispatchKind, Inherited, Interrupt, Phase, Side, TermError, ToRuby, lock,
 };
 
 use crate::control::{CallbackReply, ContextConfig, ControlBlock, Depth, JsText, Request, Wire};
@@ -487,7 +487,7 @@ impl ContextHandle {
                         || block
                             .term
                             .inherited()
-                            .is_some_and(|(_, disposing)| disposing)
+                            .is_some_and(|inherited| inherited.disposing)
                 }
                 Held::Disposed => true,
                 Held::Orphaned(orphan) => orphan.disposed(),
@@ -518,10 +518,10 @@ impl ContextHandle {
         let held = match inherited {
             Held::Block(block) if block.channel.is_closed() => Held::Disposed,
             Held::Block(block) => match block.term.inherited() {
-                Some((_, true)) => Held::Disposed,
+                Some(inherited) if inherited.disposing => Held::Disposed,
                 // A parent thread may have claimed the context and not sent yet.
-                Some((stop, false)) if self.session.owner.load(Ordering::Acquire) == 0 => {
-                    adopt(block, stop)
+                Some(inherited) if self.session.owner.load(Ordering::Acquire) == 0 => {
+                    adopt(block, inherited)
                 }
                 _ => orphaned(true, false),
             },
@@ -741,8 +741,9 @@ fn start(
 
 // A forked child takes over a context whose runner was idle, with nothing in
 // flight, at a fork that waited for every runner; any other stays the parent's.
-// A stop requested before the fork carries over, as in mini_racer.
-fn adopt(inherited: &ControlBlock, stop: bool) -> Held {
+// A stop or memory cause left for the next script carries over, as in
+// mini_racer.
+fn adopt(inherited: &ControlBlock, carried: Inherited) -> Held {
     if inherited.phase.get() != Phase::Deposited || !inherited.channel.idle() {
         return orphaned(true, false);
     }
@@ -763,8 +764,8 @@ fn adopt(inherited: &ControlBlock, stop: bool) -> Held {
     };
     let block = Arc::new(ControlBlock::with_tasks(inherited.config.clone(), tasks));
     *lock(&block.custody) = Some(isolate);
-    if stop {
-        block.term.request(Interrupt::Stop);
+    for interrupt in carried.pending() {
+        block.term.request(interrupt);
     }
     match start(&block, generation, Start::Adopted) {
         Ok(()) => Held::Block(block),

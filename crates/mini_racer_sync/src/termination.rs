@@ -148,6 +148,27 @@ impl Interrupt {
     }
 }
 
+/// What a forked child takes over with a context's termination state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Inherited {
+    pending: CauseSet,
+    pub disposing: bool,
+}
+
+impl Inherited {
+    /// The causes left for the next script: a stop, or a memory cause.
+    pub fn pending(self) -> impl Iterator<Item = Interrupt> {
+        [
+            (TerminationCause::Stop, Interrupt::Stop),
+            (TerminationCause::MaxMemory, Interrupt::MaxMemory),
+            (TerminationCause::HeapExhausted, Interrupt::HeapExhausted),
+        ]
+        .into_iter()
+        .filter(move |(cause, _)| self.pending.contains(*cause))
+        .map(|(_, interrupt)| interrupt)
+    }
+}
+
 /// Why a dispatch must not report its own result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Halt {
@@ -306,16 +327,16 @@ impl<T: Terminator> TermCell<T> {
         true
     }
 
-    /// What a forked child takes over with the context: whether a stop is
-    /// pending, and whether a dispose had begun. `None` while the lock is
-    /// held, which in a child means by a thread that is gone.
+    /// What a forked child takes over with the context: the causes pending
+    /// for the next script, and whether a dispose had begun. `None` while the
+    /// lock is held, which in a child means by a thread that is gone.
     #[must_use]
-    pub fn inherited(&self) -> Option<(bool, bool)> {
+    pub fn inherited(&self) -> Option<Inherited> {
         let state = self.state.try_lock().ok()?;
-        Some((
-            state.causes.contains(TerminationCause::Stop),
-            state.disposing,
-        ))
+        Some(Inherited {
+            pending: state.causes.intersect(CauseSet::PENDING),
+            disposing: state.disposing,
+        })
     }
 
     /// Marks the context as disposing: the armed dispatch, if any, is
@@ -844,6 +865,24 @@ mod tests {
         assert_eq!(cell.time_nested(), None);
         assert_eq!(cell.end(id), None);
         assert_eq!(cell.time_nested(), None);
+    }
+
+    #[test]
+    fn a_child_takes_over_a_stop_and_a_memory_cause_but_no_timeout() {
+        let (idle, _) = cell();
+        idle.request(Interrupt::Stop);
+        idle.request(Interrupt::MaxMemory);
+        let inherited = idle.inherited().expect("unlocked");
+        assert!(!inherited.disposing);
+        assert_eq!(
+            inherited.pending().collect::<Vec<_>>(),
+            [Interrupt::Stop, Interrupt::MaxMemory]
+        );
+
+        let (timed, _) = cell();
+        let id = timed.begin(DispatchKind::Script).expect("nothing armed");
+        timed.request(Interrupt::Timeout(id));
+        assert_eq!(timed.inherited().expect("unlocked").pending().count(), 0);
     }
 
     #[test]
