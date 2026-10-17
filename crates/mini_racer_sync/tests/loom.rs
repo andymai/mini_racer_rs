@@ -571,3 +571,23 @@ fn a_nested_timeout_racing_its_end_leaves_the_outer_dispatch_running() {
         assert_eq!(cell.end(pump), None);
     });
 }
+
+// Model 15: a timeout landing while a settled dispatch serializes its result
+// neither replaces that result nor terminates the next dispatch.
+#[test]
+fn a_timeout_while_serializing_leaves_the_result_and_the_next_dispatch() {
+    loom::model(|| {
+        let (cell, isolate) = term_cell(None);
+        let first = cell.begin(DispatchKind::Script).expect("nothing armed");
+        assert_eq!(cell.settle(first), None);
+        let watchdog_cell = Arc::clone(&cell);
+        let watchdog = thread::spawn(move || watchdog_cell.request(Interrupt::Timeout(first)));
+
+        assert_eq!(cell.finish(first), None);
+        let second = cell.begin(DispatchKind::Script).expect("nothing armed");
+        watchdog.join().expect("watchdog thread");
+
+        assert!(!isolate.terminating());
+        assert_eq!(cell.end(second), None);
+    });
+}

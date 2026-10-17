@@ -114,7 +114,7 @@ status = "pass"
 status = "upstream-skip"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_late_watchdog_does_not_terminate_next_eval"]
-status = "xfail:M4"
+status = "pass"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_late_watchdog_does_not_terminate_next_eval".overrides."ruby-3.3-macos-arm64"]
 status = "flaky:flaky-test_late_watchdog_does_not_terminate_next_eval"

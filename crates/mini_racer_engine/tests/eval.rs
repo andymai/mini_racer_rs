@@ -4,8 +4,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use mini_racer_engine::{
-    ContextConfig, ContextHandle, EngineError, Host, JsErrorKind, TerminationCause, WaitHandle,
-    WaitOutcome,
+    ContextConfig, ContextHandle, EngineError, Host, JsErrorKind, JsText, TerminationCause,
+    WaitHandle, WaitOutcome,
 };
 use mini_racer_wire::{Begun, Container, Limits, Scalar, Visitor, decode_value};
 
@@ -460,4 +460,36 @@ fn an_await_after_dispose_is_refused() {
         context.pump_message_loop(&mut Parking),
         Err(EngineError::Disposed)
     ));
+}
+
+// mini_racer's last termination check comes before the result is serialized,
+// so a timeout that fires while a large string is copied out leaves the
+// result, and the next script.
+#[test]
+fn a_timeout_while_the_result_serializes_leaves_the_result() {
+    let length = 64 << 20;
+    let blob = ContextHandle::create_snapshot(
+        JsText::from(format!("var value = 'x'.repeat({length})")),
+        None,
+        &mut Parking,
+    )
+    .expect("snapshot");
+    let context = ContextHandle::spawn(
+        ContextConfig {
+            timeout: Some(Duration::from_millis(5)),
+            snapshot: Some(blob),
+        },
+        &mut Parking,
+    )
+    .expect("spawn");
+    let started = Instant::now();
+    let bytes = context
+        .eval("<eval>", "value", &mut Parking)
+        .expect("the result");
+    assert!(bytes.len() > length);
+    assert!(
+        started.elapsed() > Duration::from_millis(5),
+        "serializing outlasted the timeout"
+    );
+    assert_eq!(eval(&context, "1 + 1").expect("usable"), Out::Int(2));
 }
