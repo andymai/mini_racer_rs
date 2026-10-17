@@ -199,10 +199,10 @@ status = "done"
 status = "done"
 
 [ids."imethod:MiniRacer::Context#heap_snapshot@ruby"]
-status = "todo:M3"
+status = "done"
 
 [ids."imethod:MiniRacer::Context#heap_stats"]
-status = "todo:M3"
+status = "done"
 
 [ids."imethod:MiniRacer::Context#isolate@truffleruby"]
 status = "done"
@@ -223,8 +223,7 @@ status = "done"
 status = "done"
 
 [ids."imethod:MiniRacer::Context#write_heap_snapshot"]
-depends_on = ["imethod:MiniRacer::Context#heap_snapshot@ruby"]
-status = "todo:M3"
+status = "done"
 
 [ids."imethod:MiniRacer::FailedV8Conversion#info@truffleruby"]
 status = "done"

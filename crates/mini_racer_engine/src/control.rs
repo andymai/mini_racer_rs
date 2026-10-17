@@ -81,6 +81,14 @@ pub enum Request {
     MicrotaskCheckpoint {
         depth: Depth,
     },
+    /// The response is a wire object of numbers, under `mini_racer`'s names.
+    HeapStats {
+        depth: Depth,
+    },
+    /// The response is the JSON V8 writes, not wire bytes.
+    HeapSnapshot {
+        depth: Depth,
+    },
     /// Runs one due task; the response is one byte, 1 if a task ran.
     PumpMessageLoop {
         depth: Depth,

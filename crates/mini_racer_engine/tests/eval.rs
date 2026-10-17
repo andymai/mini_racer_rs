@@ -553,3 +553,53 @@ fn a_collection_past_max_memory_ends_the_next_script() {
     context.pump_message_loop(&mut Parking).expect("pump");
     assert_eq!(eval(&context, "1 + 1").expect("usable"), Out::Int(2));
 }
+
+#[test]
+fn heap_stats_carry_mini_racers_thirteen_statistics() {
+    let context = spawn();
+    let bytes = context.heap_stats(&mut Parking).expect("heap stats");
+    for name in [
+        "total_heap_size",
+        "total_heap_size_executable",
+        "total_physical_size",
+        "total_available_size",
+        "total_global_handles_size",
+        "used_global_handles_size",
+        "used_heap_size",
+        "heap_size_limit",
+        "malloced_memory",
+        "external_memory",
+        "peak_malloced_memory",
+        "number_of_native_contexts",
+        "number_of_detached_contexts",
+    ] {
+        let quoted = [
+            &[u8::try_from(name.len()).expect("short")][..],
+            name.as_bytes(),
+        ]
+        .concat();
+        assert!(
+            bytes
+                .windows(quoted.len())
+                .any(|window| window == quoted.as_slice()),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn a_heap_snapshot_is_the_json_v8_writes() {
+    let context = spawn();
+    let json = context.heap_snapshot(&mut Parking).expect("heap snapshot");
+    assert!(
+        json.starts_with(b"{\"snapshot\":"),
+        "{:?}",
+        &json[..json.len().min(40)]
+    );
+    context.begin_dispose();
+    context.dispose(&mut Parking).expect("dispose");
+    assert!(matches!(
+        context.heap_stats(&mut Parking),
+        Err(EngineError::Disposed)
+    ));
+}

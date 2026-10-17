@@ -4,7 +4,7 @@
 
 | Engine | Done | Planned | Deviation |
 |---|---|---|---|
-| CRuby | 49 | 5 | 21 |
+| CRuby | 52 | 2 | 21 |
 | TruffleRuby | 58 | 0 | 0 |
 
 ## Surface
@@ -45,15 +45,15 @@
 | `imethod:MiniRacer::Context#eval` | done | done |
 | `imethod:MiniRacer::Context#eval_await` | done | done |
 | `imethod:MiniRacer::Context#eval_in_context` | n/a | done |
-| `imethod:MiniRacer::Context#heap_snapshot` | planned (M3) | n/a |
-| `imethod:MiniRacer::Context#heap_stats` | planned (M3) | done |
+| `imethod:MiniRacer::Context#heap_snapshot` | done | n/a |
+| `imethod:MiniRacer::Context#heap_stats` | done | done |
 | `imethod:MiniRacer::Context#isolate` | n/a | done |
 | `imethod:MiniRacer::Context#load` | done | done |
 | `imethod:MiniRacer::Context#low_memory_notification` | done | done |
 | `imethod:MiniRacer::Context#perform_microtask_checkpoint` | done | n/a |
 | `imethod:MiniRacer::Context#pump_message_loop` | done | n/a |
 | `imethod:MiniRacer::Context#stop` | done | done |
-| `imethod:MiniRacer::Context#write_heap_snapshot` | planned (M3) | done |
+| `imethod:MiniRacer::Context#write_heap_snapshot` | done | done |
 | `imethod:MiniRacer::FailedV8Conversion#info` | n/a | done |
 | `imethod:MiniRacer::Isolate#init_with_snapshot` | n/a | done |
 | `imethod:MiniRacer::JavaScriptFunction#to_s` | n/a | done |
