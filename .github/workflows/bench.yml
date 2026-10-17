@@ -36,6 +36,8 @@ jobs:
         working-directory: tools/reference
         run: BUNDLE_PATH=vendor/bundle bundle install
       - run: bundle exec rake compile
+      - name: Build the consumer bundles the workloads load
+        run: (cd test/consumers/js && npm ci && npm run build)
       - name: Benchmark
         run: |
           set -o pipefail

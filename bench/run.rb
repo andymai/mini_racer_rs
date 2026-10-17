@@ -38,14 +38,14 @@ METRICS = {
   "Ruby to JS (MB/s)" => [->(r) { number(r["ruby_to_js_mbps"]) }, :higher],
   "idle CPU, 50 contexts (% of a core)" => [->(r) { number(r["idle_cpu_percent"]) }, :lower, 1.0],
 }.freeze
-# Workloads by what an application does, in the order the table lists them.
 WORKLOADS = {
   "babel_transform" => ["Babel transform of a 3 KB JSX component, through ExecJS (ms)", 1e6],
   "terser_minify" => ["Terser minify of a 78 KB library, through ExecJS (ms)", 1e6],
-  "react_first_render" => ["React: load the bundle into a new context and render (ms)", 1e6],
-  "react_render" => ["React server render of 1,000 items (17 KB of HTML), through ExecJS (ms)", 1e6],
+  "react_render" => ["React server render of 1,000 items (17 KB of HTML), through ExecJS (us)", 1e3],
+  "react_first_render" => ["React in a new context: load the bundle and render 1,000 items, through ExecJS (ms)", 1e6],
   "handlebars_render" => ["Handlebars render of 50 rows, through Context#call (us)", 1e3],
 }.freeze
+TERSER_INPUT = File.join(ROOT, "test", "consumers", "js", "node_modules", "handlebars", "dist", "handlebars.runtime.js")
 # More spread than this between runs means something else was using the machine.
 NOISE = 0.10
 
@@ -60,7 +60,14 @@ OptionParser.new do |opts|
     options[:workloads] = on
   end
 end.parse!
-DiffConsumers.cases if options[:workloads]
+if options[:workloads]
+  begin
+    DiffConsumers.cases
+  rescue RuntimeError => e
+    abort "bench: #{e.message}"
+  end
+  abort "bench: #{TERSER_INPUT} is missing; run `npm ci` in test/consumers/js" unless File.exist?(TERSER_INPUT)
+end
 
 # The serde suite reads these too, and an exported one would change its
 # workload without a word in the table.
@@ -92,7 +99,9 @@ def serde(role, options)
 end
 
 def workloads(role, options)
-  launch(role, options, "workloads.rb", *(options[:quick] ? ["--quick"] : [])) || {}
+  WORKLOADS.keys.to_h do |key|
+    [key, launch(role, options, "workloads.rb", key, *(options[:quick] ? ["--quick"] : [])) || {}]
+  end
 end
 
 def median(values) = values.sort[values.size / 2]
@@ -111,9 +120,10 @@ end
 
 broken = METRICS.filter_map { |name, (read, _)| name if raw["reference"].any? { |result| read.call(result).nil? } }
 abort "bench: the real mini_racer could not run #{broken.join(", ")}; see tmp/bench" unless broken.empty?
-reference_gem, candidate_gem = ROLES.map do |role|
-  [raw, workloads_raw].filter_map { |runs| runs[role].first&.fetch("gem", nil) }.first
+reference_gem, candidate_gem = ROLES.zip(%w[mini_racer mini_racer_rs]).map do |role, plain|
+  [raw[role].first, *workloads_raw[role].first&.values].filter_map { |result| result&.fetch("gem", nil) }.first || plain
 end
+engines = ROLES.map { |role| workloads_raw[role].first&.values&.filter_map { |result| result["engine"] }&.first }
 
 digests = ROLES.to_h { |role| [role, raw[role].filter_map { |result| result["payload_digest"] }.uniq] }
 mismatch = !digests["candidate"].empty? && digests["candidate"] != digests["reference"]
@@ -126,7 +136,7 @@ end
 puts "#{reference_gem} against #{candidate_gem}, Ruby #{RUBY_VERSION}, " \
      "#{options[:runs]} run(s), medians, governor #{governor}, " \
      "#{options[:cpus] ? "CPUs #{options[:cpus]}" : "not pinned"}"
-puts
+puts "Engines: #{engines.join(" against ")}" if engines.all?
 # Ratios of near-zero values say nothing, so with either value below the
 # floor none is given.
 def row(name, values, direction, floor: nil, wrong: false)
@@ -148,6 +158,7 @@ end
 
 summary = {}
 if options[:micro]
+  puts
   puts "| Metric | mini_racer | mini_racer_rs | Ratio | Note |"
   puts "|---|---|---|---|---|"
   summary = METRICS.to_h do |name, (read, direction, floor)|
@@ -165,10 +176,12 @@ if options[:workloads]
   puts "|---|---|---|---|---|"
   workloads_summary = WORKLOADS.to_h do |key, (label, unit)|
     values = ROLES.to_h do |role|
-      [role, workloads_raw[role].map { |run| number(run.dig("workloads", key, "ns"))&./(unit) }]
+      [role, workloads_raw[role].map { |run| number(run.dig(key, "result", "ns"))&./(unit) }]
     end
-    digests = ROLES.map { |role| workloads_raw[role].map { |run| run.dig("workloads", key, "digest") }.uniq }
-    [label, row(label, values, :lower, wrong: digests.uniq.size > 1)]
+    reference, candidate = ROLES.map do |role|
+      workloads_raw[role].filter_map { |run| run.dig(key, "result", "digest") }.uniq
+    end
+    [label, row(label, values, :lower, wrong: !candidate.empty? && candidate != reference)]
   end
 end
 

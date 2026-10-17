@@ -149,7 +149,7 @@ bundle exec ruby test/diff/run.rb --twin --strict   # the real gem and this one 
 bundle exec ruby test/diff/run.rb --set consumers --twin --strict   # real libraries (npm run build in test/consumers/js first)
 bundle exec ruby test/diff/run.rb --explore --shrink --seed 42 --js 1500 --ruby 1500   # a fresh seed, no ledger, no shared objects
 BUNDLE_GEMFILE=$PWD/test/consumers/transitive/Gemfile bundle exec ruby test/consumers/transitive/check.rb
-bundle exec ruby bench/run.rb     # medians against the real gem; --quick for a smoke run
+bundle exec ruby bench/run.rb     # medians against the real gem (needs the consumer bundles); --quick for a smoke run
 bundle exec ruby -Ilib test/stress/round_trips.rb multi   # 1M evals after a 500k warm-up; fails on RSS growth over 5% (also: single)
 bundle exec ruby -Ilib test/stress/churn.rb multi 8 600   # 8 threads churning contexts for 10 min; fails over 256 bytes of RSS per context plus 32 MB (also: single)
 bundle exec ruby -Ilib test/stress/fork_loop.rb    # 500 forks with idle contexts, 100 during an eval loop, single-threaded

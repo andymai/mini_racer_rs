@@ -83,7 +83,7 @@ Locally, write runs into a fresh directory with `--out <dir>/<name>.jsonl` (one 
 | A fresh seed, no ledger | `bundle exec ruby test/diff/run.rb --explore --shrink --seed <n>`: its cases share no object, so it accepts none of the `behavior:object-ids@ruby` divergences, and any divergence the other accepted ones miss, or a crash, fails the run; the nightly workflow runs fresh seeds for 30 minutes |
 | Real libraries instead of generated values | `npm ci && npm run build` in `test/consumers/js`, then `bundle exec ruby test/diff/run.rb --set consumers --twin --strict` (ledger `test/consumers/candidate.status.toml`) |
 | A gem that depends on mini_racer resolves to this one | `BUNDLE_GEMFILE=$PWD/test/consumers/transitive/Gemfile bundle exec ruby test/consumers/transitive/check.rb` (rtlcss's own status is in `test/consumers/transitive/status.toml`) |
-| Numbers against the real gem | `bundle exec ruby bench/run.rb` (informational; `--quick` for a smoke run) |
+| Numbers against the real gem | `bundle exec ruby bench/run.rb` (informational; needs `npm ci && npm run build` in `test/consumers/js` for the workloads; `--quick` for a smoke run) |
 
 Each worker first reports the gem it loaded, so a broken reference bundle aborts the run instead of matching itself. `test/diff/candidate.status.toml` holds `same`, `accepted:<divergence>`, `xfail:<milestone>` (diverges) or `crash:<milestone>` (the candidate crashes or hangs) per case. An accepted divergence lives in `test/diff/divergences.toml`, matches one step, and must name a `compat.toml` deviation. Results and worker logs land in `tmp/diff/`.
 
