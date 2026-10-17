@@ -514,3 +514,50 @@ fn a_callback_raising_after_its_nested_script_was_terminated_still_throws() {
         Err(EngineError::Js(js)) if js.kind == JsErrorKind::Terminated(TerminationCause::Timeout)
     )));
 }
+
+// mini_racer's attach never asks whether a termination is pending, so under a
+// stop it fails as an internal error whose text is V8's termination exception;
+// the stop stays for the next script, outermost or nested.
+#[test]
+fn attach_under_a_pending_stop_is_an_internal_error_and_leaves_the_stop() {
+    let context = spawn();
+    context.stop().expect("live context");
+    match context.attach(name_and_id("f", 0), &mut adding()) {
+        Err(EngineError::Js(js)) => {
+            assert_eq!(js.kind, JsErrorKind::Internal);
+            assert_eq!(js.message, "null");
+        }
+        other => panic!("expected an internal error, got {other:?}"),
+    }
+    assert!(matches!(
+        eval(&context, "1", &mut adding()),
+        Err(EngineError::Js(js)) if js.kind == JsErrorKind::Terminated(TerminationCause::Stop)
+    ));
+    assert!(matches!(
+        eval(&context, "f()", &mut adding()),
+        Err(EngineError::Js(js)) if js.kind == JsErrorKind::Runtime
+    ));
+
+    context
+        .attach(name_and_id("nest", 0), &mut adding())
+        .expect("attach");
+    let mut nested = None;
+    let mut host = Answering(|_args: &[i64], _id| {
+        context.stop().expect("live context");
+        nested = Some(context.attach(name_and_id("g", 1), &mut adding()));
+        CallbackReply::Value(integer(0))
+    });
+    let outer = eval(&context, "nest(); 1", &mut host);
+    assert!(
+        matches!(
+            nested,
+            Some(Err(EngineError::Js(ref js))) if js.kind == JsErrorKind::Internal && js.message == "null"
+        ),
+        "{nested:?}"
+    );
+    assert!(matches!(
+        outer,
+        Err(EngineError::Js(js)) if js.kind == JsErrorKind::Terminated(TerminationCause::Stop)
+    ));
+    assert_eq!(eval(&context, "1 + 1", &mut adding()).expect("eval"), [2]);
+}
