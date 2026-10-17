@@ -350,10 +350,12 @@ fn a_nested_await_under_a_pending_stop_reports_the_refusal_as_terminated() {
 
 // mini_racer's last termination check for a script nested in a callback also
 // comes before its result is serialized: the outer script's timeout firing
-// while a large nested result is copied out leaves that result.
+// while a large nested result is copied out leaves that result. The callback
+// starts about 5 ms before the timeout; copying 128 MiB took about 20 ms on
+// the fastest CI runner measured.
 #[test]
 fn a_timeout_while_a_nested_result_serializes_leaves_the_result() {
-    let length = 64 << 20;
+    let length = 128 << 20;
     let blob = ContextHandle::create_snapshot(
         JsText::from(format!("var value = 'x'.repeat({length})")),
         None,
@@ -384,24 +386,29 @@ fn a_timeout_while_a_nested_result_serializes_leaves_the_result() {
 
     let outer = eval(
         &context,
-        "const end = Date.now() + 40; while (Date.now() < end) {} grab(); 1",
+        "const end = Date.now() + 45; while (Date.now() < end) {} grab(); 1",
         &mut host,
     );
     assert!(
         matches!(nested, Some(Ok(bytes)) if bytes > length),
         "{nested:?}"
     );
-    assert!(matches!(
-        outer,
-        Err(EngineError::Js(js)) if js.kind == JsErrorKind::Terminated(TerminationCause::Timeout)
-    ));
+    assert!(
+        matches!(
+            outer,
+            Err(EngineError::Js(ref js)) if js.kind == JsErrorKind::Terminated(TerminationCause::Timeout)
+        ),
+        "{outer:?}"
+    );
 }
 
 // A dispose cancels mini_racer's wait for a nested script, so one landing
-// while the nested result serializes still fails it.
+// while the nested result serializes still fails it. Copying 128 MiB took
+// about 20 ms on the fastest CI runner measured, past the 5 ms the dispose
+// waits.
 #[test]
 fn a_dispose_while_a_nested_result_serializes_fails_it() {
-    let length = 64 << 20;
+    let length = 128 << 20;
     let blob = ContextHandle::create_snapshot(
         JsText::from(format!("var value = 'x'.repeat({length})")),
         None,
