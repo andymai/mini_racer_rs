@@ -625,3 +625,86 @@ fn a_nested_attach_spending_the_stop_lets_the_outer_script_run_on() {
     );
     assert_eq!(eval(&context, "z", &mut adding()).expect("eval"), [1]);
 }
+
+fn stopper_and_raiser(context: &ContextHandle) {
+    context
+        .attach(name_and_id("stopper", 0), &mut adding())
+        .expect("attach");
+    context
+        .attach(name_and_id("raiser", 1), &mut adding())
+        .expect("attach");
+}
+
+fn stopping(context: &ContextHandle) -> Answering<impl FnMut(&[i64], i64) -> CallbackReply + '_> {
+    Answering(move |_args: &[i64], id| {
+        context.stop().expect("live context");
+        if id == 1 {
+            CallbackReply::Raised(JsText::from("boom"))
+        } else {
+            CallbackReply::Value(integer(1))
+        }
+    })
+}
+
+fn stopped(result: Result<Vec<i64>, EngineError>) -> bool {
+    matches!(result, Err(EngineError::Js(js)) if js.kind == JsErrorKind::Terminated(TerminationCause::Stop))
+}
+
+// A terminated script's leftover microtasks run as mini_racer's reply runs
+// them. A stop V8 acts on there is carried, spent: the next script runs, then
+// reports it.
+#[test]
+fn a_stop_acted_on_in_leftover_microtasks_carries_to_the_next_script() {
+    let context = spawn();
+    stopper_and_raiser(&context);
+    let source = "Promise.resolve().then(() => { stopper() }); stopper(); 0";
+    assert!(stopped(eval(&context, source, &mut stopping(&context))));
+    assert!(stopped(eval(
+        &context,
+        "globalThis.x = 1; 1",
+        &mut adding()
+    )));
+    assert_eq!(eval(&context, "x", &mut adding()).expect("eval"), [1]);
+}
+
+// One still pending when they finish fails mini_racer's reply, and its retry
+// reports the stop with the terminated script.
+#[test]
+fn a_stop_pending_after_leftover_microtasks_ends_with_the_script() {
+    let context = spawn();
+    stopper_and_raiser(&context);
+    let source = "Promise.resolve().then(() => { raiser() }); stopper(); 0";
+    assert!(stopped(eval(&context, source, &mut stopping(&context))));
+    assert_eq!(eval(&context, "1 + 1", &mut adding()).expect("eval"), [2]);
+}
+
+// A deadline that has not fired yet bounds them, as mini_racer's watchdog
+// does, rather than a fresh one.
+#[test]
+fn leftover_microtasks_of_a_stopped_script_keep_its_deadline() {
+    let context = ContextHandle::spawn(
+        ContextConfig {
+            timeout: Some(Duration::from_millis(300)),
+            ..ContextConfig::default()
+        },
+        &mut adding(),
+    )
+    .expect("spawn");
+    stopper_and_raiser(&context);
+    let busy = |ms: u32| format!("{{ const t = Date.now(); while (Date.now() - t < {ms}) {{}} }}");
+    let source = format!(
+        "Promise.resolve().then(() => {{ {}; globalThis.after = 1 }}); {}; stopper(); 0",
+        busy(250),
+        busy(200)
+    );
+    assert!(stopped(eval(&context, &source, &mut stopping(&context))));
+    assert_eq!(
+        eval(
+            &context,
+            "globalThis.after === undefined ? 0 : 1",
+            &mut adding()
+        )
+        .expect("eval"),
+        [0]
+    );
+}

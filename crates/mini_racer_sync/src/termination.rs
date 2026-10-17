@@ -358,14 +358,16 @@ impl<T: Terminator> TermCell<T> {
         RequestMark(lock(&self.state).requests)
     }
 
-    /// V8 used up a termination during a dispatch that started at `since`,
-    /// as `mini_racer`'s attach or a microtask does with its one-shot
-    /// interrupt: a carried stop or memory cause is left for the next script
-    /// to report, and that script runs. A request since `since` keeps its
-    /// own termination. For a dispatch nested in a callback, the termination
-    /// is lifted so the script around it runs on, as in `mini_racer`, unless
-    /// a request arrived since, a dispose began, or the heap is exhausted,
-    /// which `mini_racer` has no counterpart for. Returns whether it lifted.
+    /// V8 used up a termination during work that ended at `since`, as
+    /// `mini_racer`'s attach or a microtask does with its one-shot interrupt:
+    /// a carried stop or memory cause is left for the next script to report,
+    /// and that script runs. A request after `since` keeps its own
+    /// termination. For a dispatch nested in a callback, the termination is
+    /// lifted so the script around it runs on, as in `mini_racer`, unless a
+    /// request arrived after `since`, a dispose began, the heap is exhausted,
+    /// which `mini_racer` has no counterpart for, or the script around it has
+    /// its verdict and only its leftover microtasks run, which the lift would
+    /// leave unbounded. Returns whether it lifted.
     pub fn spend(&self, since: RequestMark, nested: bool) -> bool {
         let mut state = lock(&self.state);
         if state.requests != since.0 {
@@ -374,8 +376,10 @@ impl<T: Terminator> TermCell<T> {
         if !state.causes.carried().is_empty() {
             state.spent = true;
         }
-        let lift =
-            nested && !state.disposing && !state.causes.contains(TerminationCause::HeapExhausted);
+        let lift = nested
+            && !state.disposing
+            && !state.causes.contains(TerminationCause::HeapExhausted)
+            && state.armed.is_some_and(|armed| !armed.settled);
         if lift {
             state.cancel_armed();
         }
@@ -521,6 +525,13 @@ impl<T: Terminator> TermCell<T> {
     #[must_use]
     pub fn is_disposing(&self) -> bool {
         lock(&self.state).disposing
+    }
+
+    /// Whether the armed dispatch has its verdict (`settle`) and is finishing
+    /// its reply.
+    #[must_use]
+    pub fn is_settled(&self) -> bool {
+        lock(&self.state).armed.is_some_and(|armed| armed.settled)
     }
 
     /// The armed dispatch, for a cancellation from a nested wait.
@@ -1078,6 +1089,21 @@ mod tests {
         assert_eq!(cell.check(DispatchKind::Script), STOPPED);
         assert_eq!(cell.end(outer), STOPPED);
         assert_eq!(calls.cancel.get(), 1);
+    }
+
+    #[test]
+    fn a_settled_dispatch_is_never_lifted() {
+        let (cell, calls) = cell();
+        let outer = cell.begin(DispatchKind::Script).expect("nothing armed");
+        cell.request(Interrupt::Stop);
+        assert_eq!(cell.settle(outer), STOPPED);
+        assert!(cell.is_settled());
+        cell.request(Interrupt::Stop);
+        let cancels = calls.cancel.get();
+        assert!(!cell.spend(cell.mark(), true));
+        assert_eq!(calls.cancel.get(), cancels);
+        assert_eq!(cell.finish(outer), None);
+        assert!(!cell.is_settled());
     }
 
     #[test]

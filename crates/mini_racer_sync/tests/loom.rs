@@ -591,6 +591,7 @@ fn a_stop_racing_a_nested_lift_is_never_lost() {
     loom::model(|| {
         let (cell, isolate) = term_cell(None);
         let outer = cell.begin(DispatchKind::Script).expect("nothing armed");
+        cell.request(Interrupt::Stop);
         let since = cell.mark();
         let stopper_cell = Arc::clone(&cell);
         let stopper = thread::spawn(move || stopper_cell.request(Interrupt::Stop));

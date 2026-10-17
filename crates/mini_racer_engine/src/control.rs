@@ -22,8 +22,8 @@ pub enum CallbackReply {
     /// outermost or nested dispatch it escapes ends with
     /// `JsErrorKind::HostException`.
     Raised(JsText),
-    /// The caller abandoned the dispatch: V8 throws `Error: terminated` and
-    /// terminates the script.
+    /// The caller abandoned the dispatch: V8 throws `Error: terminated` and,
+    /// unless the script already has its verdict, terminates it.
     Abort,
 }
 

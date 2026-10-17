@@ -66,7 +66,7 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | Wire fuzz targets | `crates/mini_racer_wire/fuzz/fuzz_targets/`, `scripts/fuzz-smoke.sh` |
 | Mutex poison policy | `crates/mini_racer_sync/src/lock.rs` |
 | Turn-taking channel between a Ruby thread and a runner, parking, notifiers for waiters that sleep elsewhere | `crates/mini_racer_sync/src/channel.rs`, `crates/mini_racer_sync/src/parker.rs` |
-| Termination causes, stop consumption, a stop whose one-shot V8 interrupt is spent (`spend`, `renew`, `relocked`), timeout scoping, and their tests against mini_racer's behavior | `crates/mini_racer_sync/src/termination.rs`, `test/ruby/pending_termination_test.rb`, `test/ruby/spent_termination_test.rb` |
+| Termination causes, stop consumption, a stop whose one-shot V8 interrupt is spent (`spend`, `renew`, `relocked`), timeout scoping, and their tests against mini_racer's behavior | `crates/mini_racer_sync/src/termination.rs`, `test/ruby/pending_termination_test.rb`, `test/ruby/spent_termination_test.rb`, `test/ruby/leftover_microtasks_test.rb` |
 | Runner phases and the gate that holds runners back during a fork | `crates/mini_racer_sync/src/fork.rs` |
 | std or loom primitives for protocol code | `crates/mini_racer_sync/src/primitives.rs` |
 | Loom models | `crates/mini_racer_sync/tests/loom.rs` |
