@@ -774,23 +774,20 @@ impl v8::ValueDeserializerImpl for Reader {}
 fn read_request<'s>(
     tc: &Tc<'s, '_, '_, '_>,
     request: &[u8],
-) -> Result<(v8::Local<'s, v8::Object>, String), EngineError> {
+) -> Option<(v8::Local<'s, v8::Object>, String)> {
     let context = tc.get_current_context();
-    let internal = |tc: &Tc<'_, '_, '_, '_>| failure(tc, JsErrorKind::Internal);
     let deserializer = v8::ValueDeserializer::new(tc, Box::new(Reader), request);
     if deserializer.read_header(context) != Some(true) {
-        return Err(internal(tc));
+        return None;
     }
     let request = deserializer
         .read_value(context)
-        .and_then(|request| request.to_object(tc))
-        .ok_or_else(|| internal(tc))?;
+        .and_then(|request| request.to_object(tc))?;
     let path = request
         .get_index(tc, 0)
-        .and_then(|name| name.to_string(tc))
-        .ok_or_else(|| internal(tc))?
+        .and_then(|name| name.to_string(tc))?
         .to_rust_string_lossy(tc);
-    Ok((request, path))
+    Some((request, path))
 }
 
 // mini_racer's order: everything from the path walk on fails as a runtime
@@ -804,7 +801,8 @@ fn invoke(
 ) -> Result<Vec<u8>, EngineError> {
     let context = tc.get_current_context();
     let failed = |tc: &Tc<'_, '_, '_, '_>| failure(tc, JsErrorKind::Runtime);
-    let (request, path) = read_request(tc, request)?;
+    let (request, path) =
+        read_request(tc, request).ok_or_else(|| failure(tc, JsErrorKind::Internal))?;
     let mut receiver = context.global(tc);
     let mut keys = path.split('.').peekable();
     let mut function = None;
@@ -841,13 +839,15 @@ fn invoke(
     serialize::reply(tc, &runtime.filter, value).ok_or_else(|| failed(tc))
 }
 
-// mini_racer's attach: any failure is an internal error. Each dotted segment
-// but the last that is not an object or function becomes a new object, and
-// the callback is set on the last.
+// mini_racer's attach: any failure is an internal error, even under a pending
+// termination, which attach never checks for; the message is then V8's
+// termination exception, "null". Each dotted segment but the last that is not
+// an object or function becomes a new object, and the callback is set on the
+// last.
 fn attach(tc: &Tc<'_, '_, '_, '_>, request: &[u8]) -> Result<Vec<u8>, EngineError> {
     let context = tc.get_current_context();
-    let internal = |tc: &Tc<'_, '_, '_, '_>| failure(tc, JsErrorKind::Internal);
-    let (request, path) = read_request(tc, request)?;
+    let internal = |tc: &Tc<'_, '_, '_, '_>| described(tc, JsErrorKind::Internal);
+    let (request, path) = read_request(tc, request).ok_or_else(|| internal(tc))?;
     let id = request
         .get_index(tc, 1)
         .filter(|id| id.is_int32())
@@ -1019,12 +1019,18 @@ fn error<'s>(scope: &v8::PinScope<'s, '_>, message: &JsText) -> v8::Local<'s, v8
     v8::Exception::error(scope, message)
 }
 
-// The message mini_racer builds for each kind: a parse error with where it
-// happened, a runtime error with its stack when the exception has one.
+// mini_racer's suspend_termination: a failure under a pending termination is
+// reported as the termination.
 fn failure(tc: &Tc<'_, '_, '_, '_>, kind: JsErrorKind) -> EngineError {
     if tc.has_terminated() {
         return EngineError::from(JsError::terminated(TerminationCause::Stop));
     }
+    described(tc, kind)
+}
+
+// The message mini_racer builds for each kind: a parse error with where it
+// happened, a runtime error with its stack when the exception has one.
+fn described(tc: &Tc<'_, '_, '_, '_>, kind: JsErrorKind) -> EngineError {
     let message = match kind {
         JsErrorKind::Parse => parse_message(tc),
         JsErrorKind::Runtime
