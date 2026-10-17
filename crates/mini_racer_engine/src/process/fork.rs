@@ -6,7 +6,6 @@ use std::time::{Duration, Instant};
 use mini_racer_sync::{ForkGate, Phase, lock, wait, wait_timeout};
 
 use crate::control::ControlBlock;
-use crate::process::platform::{self, Mode};
 use crate::process::tasks::TaskRegistry;
 use crate::process::watchdog::Watchdog;
 
@@ -168,9 +167,9 @@ thread_local! {
 
 // pthread_atfork's prepare handler, on the forking thread inside fork() and
 // after every Ruby `_fork` hook, so no Ruby code runs while runners are held.
-// It waits until every runner is idle or parked, then, with a multi-threaded
-// V8, until each of V8's worker threads runs a task of the fork's that holds
-// it until the parent handler, so the child finds no isolate mid-change and
+// It waits until every runner is idle or parked, then until each of V8's
+// worker threads runs a task of the fork's that holds it until the parent
+// handler, so the child finds no isolate mid-change and
 // V8's worker queue neither locked nor waited on. No runner needs Ruby to get
 // there: one waiting on a callback already counts as parked. Past the bounds
 // the fork goes ahead anyway.
@@ -213,8 +212,7 @@ pub(crate) fn prepare() {
         }
         std::thread::sleep(POLL);
     };
-    let held =
-        platform::mode() == Mode::SingleThreaded || generation.workers.hold(Instant::now() + HOLD);
+    let held = generation.workers.hold(Instant::now() + HOLD);
     generation
         .prepared
         .store(quiesced && held, Ordering::SeqCst);

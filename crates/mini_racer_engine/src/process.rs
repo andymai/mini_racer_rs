@@ -31,7 +31,9 @@ pub fn ensure_initialized() {
         // Unprotected: on PKU-capable CPUs the protected platform requires every
         // V8 thread to descend from the initializing thread, which Ruby threads
         // and per-context runners do not.
-        // `--single-threaded` gives the workers no tasks, so one is enough.
+        // rusty_v8 runs at least one worker, and under `--single-threaded`
+        // the scavenger still hands its job to it, one participant at a
+        // time, so one is enough; a fork has to hold it.
         let workers = match platform::mode() {
             platform::Mode::SingleThreaded => 1,
             platform::Mode::MultiThreaded => 0,
