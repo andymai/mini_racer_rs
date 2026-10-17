@@ -552,6 +552,63 @@ fn a_stop_is_reported_exactly_once() {
     });
 }
 
+// Model 16: a maintenance dispatch spending a termination never loses a stop
+// that races it: the stop is reported by exactly one script, and no
+// termination is left behind.
+#[test]
+fn a_stop_racing_a_spent_termination_is_reported_exactly_once() {
+    loom::model(|| {
+        let (cell, isolate) = term_cell(None);
+        cell.request(Interrupt::Stop);
+        let stopper_cell = Arc::clone(&cell);
+        let stopper = thread::spawn(move || stopper_cell.request(Interrupt::Stop));
+
+        let since = cell.mark();
+        let attach = cell
+            .begin(DispatchKind::Maintenance)
+            .expect("nothing armed");
+        cell.spend(since, false);
+        let attached = cell.end(attach);
+        let first = run(&cell, DispatchKind::Script);
+        stopper.join().expect("stopper thread");
+        let second = run(&cell, DispatchKind::Script);
+        let third = run(&cell, DispatchKind::Script);
+
+        let stopped = Some(Halt::Terminated(TerminationCause::Stop));
+        assert_eq!(attached, None);
+        assert_eq!(first, stopped);
+        assert!(second.is_none() || second == stopped);
+        assert_eq!(third, None);
+        assert!(!isolate.terminating());
+    });
+}
+
+// Model 17: a nested dispatch lifting the termination it used up never lifts
+// a stop that races it: the stop keeps the script around terminated and is
+// reported when it ends.
+#[test]
+fn a_stop_racing_a_nested_lift_is_never_lost() {
+    loom::model(|| {
+        let (cell, isolate) = term_cell(None);
+        let outer = cell.begin(DispatchKind::Script).expect("nothing armed");
+        cell.request(Interrupt::Stop);
+        let since = cell.mark();
+        let stopper_cell = Arc::clone(&cell);
+        let stopper = thread::spawn(move || stopper_cell.request(Interrupt::Stop));
+
+        cell.spend(since, true);
+        stopper.join().expect("stopper thread");
+
+        assert!(isolate.terminating());
+        assert!(cell.refuses(DispatchKind::Script));
+        assert_eq!(
+            cell.end(outer),
+            Some(Halt::Terminated(TerminationCause::Stop))
+        );
+        assert!(!isolate.terminating());
+    });
+}
+
 // Model 14: a nested script's own timeout firing as the script ends never
 // leaves the untimed dispatch around it terminated.
 #[test]

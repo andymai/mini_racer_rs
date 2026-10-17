@@ -561,3 +561,150 @@ fn attach_under_a_pending_stop_is_an_internal_error_and_leaves_the_stop() {
     ));
     assert_eq!(eval(&context, "1 + 1", &mut adding()).expect("eval"), [2]);
 }
+
+// mini_racer's stop is a one-shot interrupt plus a flag the next script
+// reports when it ends. A failed attach uses up the interrupt, so a second
+// attach succeeds and the next script runs before it reports the stop.
+#[test]
+fn a_failed_attach_spends_the_stop_and_the_next_script_runs() {
+    let context = spawn();
+    context.stop().expect("live context");
+    assert!(context.attach(name_and_id("f", 0), &mut adding()).is_err());
+    context
+        .attach(name_and_id("g", 1), &mut adding())
+        .expect("the interrupt is spent");
+    assert!(matches!(
+        eval(&context, "globalThis.x = 1; 1", &mut adding()),
+        Err(EngineError::Js(js)) if js.kind == JsErrorKind::Terminated(TerminationCause::Stop)
+    ));
+    assert_eq!(
+        eval(&context, "x + g(2)", &mut adding()).expect("eval"),
+        [3]
+    );
+}
+
+// As mini_racer reads a callback's reply: a stop requested during the
+// callback ends the script as it returns, before the next statement.
+#[test]
+fn a_stop_from_a_callback_ends_the_script_as_the_callback_returns() {
+    let context = spawn();
+    context
+        .attach(name_and_id("stops", 0), &mut adding())
+        .expect("attach");
+    let mut host = Answering(|_args: &[i64], _id| {
+        context.stop().expect("live context");
+        CallbackReply::Value(integer(5))
+    });
+    assert!(matches!(
+        eval(&context, "globalThis.z = 0; stops(); globalThis.z = 1; 1", &mut host),
+        Err(EngineError::Js(js)) if js.kind == JsErrorKind::Terminated(TerminationCause::Stop)
+    ));
+    assert_eq!(eval(&context, "z", &mut adding()).expect("eval"), [0]);
+}
+
+// A nested attach that fails under the stop uses up its interrupt, and the
+// script around it runs on and reports the stop when it ends.
+#[test]
+fn a_nested_attach_spending_the_stop_lets_the_outer_script_run_on() {
+    let context = spawn();
+    context
+        .attach(name_and_id("nest", 0), &mut adding())
+        .expect("attach");
+    let mut nested = None;
+    let mut host = Answering(|_args: &[i64], _id| {
+        context.stop().expect("live context");
+        nested = Some(context.attach(name_and_id("g", 1), &mut adding()));
+        CallbackReply::Value(integer(5))
+    });
+    assert!(matches!(
+        eval(&context, "globalThis.z = 0; nest(); globalThis.z = 1; 1", &mut host),
+        Err(EngineError::Js(js)) if js.kind == JsErrorKind::Terminated(TerminationCause::Stop)
+    ));
+    assert!(
+        matches!(nested, Some(Err(EngineError::Js(ref js))) if js.kind == JsErrorKind::Internal)
+    );
+    assert_eq!(eval(&context, "z", &mut adding()).expect("eval"), [1]);
+}
+
+fn stopper_and_raiser(context: &ContextHandle) {
+    context
+        .attach(name_and_id("stopper", 0), &mut adding())
+        .expect("attach");
+    context
+        .attach(name_and_id("raiser", 1), &mut adding())
+        .expect("attach");
+}
+
+fn stopping(context: &ContextHandle) -> Answering<impl FnMut(&[i64], i64) -> CallbackReply + '_> {
+    Answering(move |_args: &[i64], id| {
+        context.stop().expect("live context");
+        if id == 1 {
+            CallbackReply::Raised(JsText::from("boom"))
+        } else {
+            CallbackReply::Value(integer(1))
+        }
+    })
+}
+
+fn stopped(result: Result<Vec<i64>, EngineError>) -> bool {
+    matches!(result, Err(EngineError::Js(js)) if js.kind == JsErrorKind::Terminated(TerminationCause::Stop))
+}
+
+// A terminated script's leftover microtasks run as mini_racer's reply runs
+// them. A stop V8 acts on there is carried, spent: the next script runs, then
+// reports it.
+#[test]
+fn a_stop_acted_on_in_leftover_microtasks_carries_to_the_next_script() {
+    let context = spawn();
+    stopper_and_raiser(&context);
+    let source = "Promise.resolve().then(() => { stopper() }); stopper(); 0";
+    assert!(stopped(eval(&context, source, &mut stopping(&context))));
+    assert!(stopped(eval(
+        &context,
+        "globalThis.x = 1; 1",
+        &mut adding()
+    )));
+    assert_eq!(eval(&context, "x", &mut adding()).expect("eval"), [1]);
+}
+
+// One still pending when they finish fails mini_racer's reply, and its retry
+// reports the stop with the terminated script.
+#[test]
+fn a_stop_pending_after_leftover_microtasks_ends_with_the_script() {
+    let context = spawn();
+    stopper_and_raiser(&context);
+    let source = "Promise.resolve().then(() => { raiser() }); stopper(); 0";
+    assert!(stopped(eval(&context, source, &mut stopping(&context))));
+    assert_eq!(eval(&context, "1 + 1", &mut adding()).expect("eval"), [2]);
+}
+
+// A deadline that has not fired yet bounds them, as mini_racer's watchdog
+// does, rather than a fresh one.
+#[test]
+fn leftover_microtasks_of_a_stopped_script_keep_its_deadline() {
+    let context = ContextHandle::spawn(
+        ContextConfig {
+            timeout: Some(Duration::from_millis(500)),
+            ..ContextConfig::default()
+        },
+        &mut adding(),
+    )
+    .expect("spawn");
+    stopper_and_raiser(&context);
+    let busy = |ms: u32| format!("{{ const t = Date.now(); while (Date.now() - t < {ms}) {{}} }}");
+    let source = format!(
+        "Promise.resolve().then(() => {{ {}; globalThis.after = 1 }}); {}; stopper(); 0",
+        busy(600),
+        busy(100)
+    );
+    assert!(stopped(eval(&context, &source, &mut stopping(&context))));
+    assert_eq!(
+        eval(
+            &context,
+            "globalThis.after === undefined ? 0 : 1",
+            &mut adding()
+        )
+        .expect("eval"),
+        [0]
+    );
+}

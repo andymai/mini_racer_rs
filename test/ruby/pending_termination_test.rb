@@ -33,6 +33,28 @@ class PendingTerminationTest < Minitest::Test
     assert_equal 2, @context.eval("1 + 1")
   end
 
+  # mini_racer's stop is a one-shot interrupt plus a flag the next script
+  # reports when it ends. A failed attach uses up the interrupt.
+  def test_after_a_failed_attach_the_next_script_runs_then_reports_the_stop
+    @context.stop
+    assert_raises(MiniRacer::InternalError) { @context.attach("f", proc { 1 }) }
+    @context.attach("g", proc { 2 })
+    assert_raises(MiniRacer::ScriptTerminatedError) { @context.eval("globalThis.x = 1") }
+    assert_equal 3, @context.eval("x + g()")
+  end
+
+  def test_a_stop_from_a_callback_ends_the_script_as_the_callback_returns
+    stops = proc do
+      @context.stop
+      5
+    end
+    @context.attach("stops", stops)
+    assert_raises(MiniRacer::ScriptTerminatedError) do
+      @context.eval("globalThis.z = 0; stops(); globalThis.z = 1")
+    end
+    assert_equal 0, @context.eval("z")
+  end
+
   def test_attach_under_a_pending_memory_cause_raises_internal_error_null
     context = MiniRacer::Context.new(max_memory: 20_000_000)
     assert_raises(MiniRacer::V8OutOfMemoryError) do

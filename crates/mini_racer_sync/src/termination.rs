@@ -45,6 +45,10 @@ impl CauseSet {
             | TerminationCause::HeapExhausted.bit(),
     );
 
+    // The causes upstream records in its request flag beside the one-shot
+    // interrupt, which V8 can use up while the flag stays.
+    const SPENDABLE: Self = Self(TerminationCause::Stop.bit() | TerminationCause::MaxMemory.bit());
+
     const fn with(self, cause: TerminationCause) -> Self {
         Self(self.0 | cause.bit())
     }
@@ -63,6 +67,10 @@ impl CauseSet {
 
     const fn intersect(self, other: Self) -> Self {
         Self(self.0 & other.0)
+    }
+
+    const fn minus(self, other: Self) -> Self {
+        Self(self.0 & !other.0)
     }
 
     // What outlives a dispatch that does not report it: a stop or memory
@@ -155,19 +163,10 @@ pub struct Inherited {
     pub disposing: bool,
 }
 
-impl Inherited {
-    /// The causes left for the next script: a stop, or a memory cause.
-    pub fn pending(self) -> impl Iterator<Item = Interrupt> {
-        [
-            (TerminationCause::Stop, Interrupt::Stop),
-            (TerminationCause::MaxMemory, Interrupt::MaxMemory),
-            (TerminationCause::HeapExhausted, Interrupt::HeapExhausted),
-        ]
-        .into_iter()
-        .filter(move |(cause, _)| self.pending.contains(*cause))
-        .map(|(_, interrupt)| interrupt)
-    }
-}
+/// How many requests a cell had seen, taken as a dispatch's own work ends, so
+/// `spend` leaves alone any that arrived after.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RequestMark(u64);
 
 /// Why a dispatch must not report its own result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -205,6 +204,12 @@ struct State<T> {
     handle: Option<T>,
     armed: Option<Armed>,
     causes: CauseSet,
+    // A carried stop or memory cause is still to be reported, but V8 no
+    // longer holds its termination: mini_racer's request flag stays set
+    // after its one-shot interrupt is used up or dropped, so the next script
+    // runs and reports the cause when it ends.
+    spent: bool,
+    requests: u64,
     disposing: bool,
     suspended: bool,
     // A script nested in an untimed dispatch, timed on its own.
@@ -213,6 +218,39 @@ struct State<T> {
 }
 
 impl<T: Terminator> State<T> {
+    fn finish(&mut self, id: DispatchId) -> Option<Halt> {
+        match self.armed {
+            Some(armed) if armed.id == id && armed.settled => {}
+            _ => return self.end(id),
+        }
+        self.cancel_armed();
+        self.suspended = false;
+        self.nested_timer = None;
+        self.armed = None;
+        if self.disposing {
+            return Some(Halt::Disposed);
+        }
+        let causes = self.causes.carried();
+        self.set_causes(causes);
+        None
+    }
+
+    // The causes V8 still has a termination for.
+    const fn live(&self) -> CauseSet {
+        if self.spent {
+            self.causes.minus(CauseSet::SPENDABLE)
+        } else {
+            self.causes
+        }
+    }
+
+    const fn set_causes(&mut self, causes: CauseSet) {
+        self.causes = causes;
+        if causes.carried().is_empty() {
+            self.spent = false;
+        }
+    }
+
     fn terminate_armed(&mut self) {
         if self.suspended {
             return;
@@ -244,7 +282,7 @@ impl<T: Terminator> State<T> {
             return Some(Halt::Disposed);
         }
         let causes = self.causes;
-        self.causes = armed.kind.remaining(causes);
+        self.set_causes(armed.kind.remaining(causes));
         armed.kind.report(causes).map(Halt::Terminated)
     }
 }
@@ -266,6 +304,8 @@ impl<T> Default for TermCell<T> {
                 handle: None,
                 armed: None,
                 causes: CauseSet::default(),
+                spent: false,
+                requests: 0,
                 disposing: false,
                 suspended: false,
                 nested_timer: None,
@@ -288,7 +328,8 @@ impl<T: Terminator> TermCell<T> {
 
     /// Arms an outermost dispatch; nested dispatches run inside it. A cause
     /// still pending terminates it at once, as upstream's queued termination
-    /// kills the next entry into JavaScript of any kind.
+    /// kills the next entry into JavaScript of any kind, unless that
+    /// termination is spent.
     pub fn begin(&self, kind: DispatchKind) -> Result<DispatchId, TermError> {
         let mut state = lock(&self.state);
         if state.disposing {
@@ -305,7 +346,7 @@ impl<T: Terminator> TermCell<T> {
             terminated: false,
             settled: false,
         });
-        if !state.causes.is_empty() {
+        if !state.live().is_empty() {
             state.terminate_armed();
         }
         drop(state);
@@ -323,8 +364,78 @@ impl<T: Terminator> TermCell<T> {
             return false;
         }
         state.causes = state.causes.with(interrupt.cause());
+        state.spent = false;
+        state.requests = state.requests.wrapping_add(1);
         state.terminate_armed();
         true
+    }
+
+    #[must_use]
+    pub fn mark(&self) -> RequestMark {
+        RequestMark(lock(&self.state).requests)
+    }
+
+    /// V8 used up a termination during work that ended at `since`, as
+    /// `mini_racer`'s attach or a microtask does with its one-shot interrupt:
+    /// a carried stop or memory cause is left for the next script to report,
+    /// and that script runs. A request after `since` keeps its own
+    /// termination. For a dispatch nested in a callback, the termination is
+    /// lifted so the script around it runs on, as in `mini_racer`, unless a
+    /// request arrived after `since`, a dispose began, the heap is exhausted,
+    /// which `mini_racer` has no counterpart for, or a timeout ended a script
+    /// that has its verdict: its leftover microtasks would then run with no
+    /// limit. Returns whether it lifted.
+    pub fn spend(&self, since: RequestMark, nested: bool) -> bool {
+        let mut state = lock(&self.state);
+        if state.requests != since.0 {
+            return false;
+        }
+        if !state.causes.carried().is_empty() {
+            state.spent = true;
+        }
+        let lift = nested
+            && !state.disposing
+            && !state.causes.contains(TerminationCause::HeapExhausted)
+            && (!state.causes.contains(TerminationCause::Timeout)
+                || state.armed.is_none_or(|armed| !armed.settled));
+        if lift {
+            state.cancel_armed();
+        }
+        lift
+    }
+
+    /// A single-threaded runner has locked its isolate again for a request,
+    /// and V8 drops every termination it had not acted on: the carried
+    /// causes are spent, as they are when `mini_racer` enters its locker.
+    pub fn relocked(&self) {
+        let mut state = lock(&self.state);
+        if !state.causes.carried().is_empty() {
+            state.spent = true;
+        }
+    }
+
+    /// A nested script that reports a cause hands the termination back to the
+    /// dispatch around it, as `mini_racer`'s `restore_termination` does, even
+    /// one an earlier dispatch had spent.
+    pub fn renew(&self) {
+        let mut state = lock(&self.state);
+        if !state.causes.is_empty() {
+            state.spent = false;
+            state.terminate_armed();
+        }
+    }
+
+    /// Whether a dispatch of `kind` must not start: V8 would end it at its
+    /// first step, or a dispose has begun. A spent cause lets it run.
+    #[must_use]
+    pub fn refuses(&self, kind: DispatchKind) -> bool {
+        let state = lock(&self.state);
+        state.disposing || kind.report(state.live()).is_some()
+    }
+
+    /// Takes over what a context's cell held in the parent of a fork.
+    pub fn adopt(&self, inherited: Inherited) {
+        lock(&self.state).causes = inherited.pending;
     }
 
     /// What a forked child takes over with the context: the causes pending
@@ -405,7 +516,8 @@ impl<T: Terminator> TermCell<T> {
         }
         state.nested_timer = None;
         if state.causes.contains(TerminationCause::Timeout) {
-            state.causes = state.causes.without(TerminationCause::Timeout);
+            let causes = state.causes.without(TerminationCause::Timeout);
+            state.set_causes(causes);
             if state.causes.is_empty() && !state.disposing {
                 state.cancel_armed();
             }
@@ -431,6 +543,13 @@ impl<T: Terminator> TermCell<T> {
     #[must_use]
     pub fn is_disposing(&self) -> bool {
         lock(&self.state).disposing
+    }
+
+    /// Whether the armed dispatch has its verdict (`settle`) and is finishing
+    /// its reply.
+    #[must_use]
+    pub fn is_settled(&self) -> bool {
+        lock(&self.state).armed.is_some_and(|armed| armed.settled)
     }
 
     /// The armed dispatch, for a cancellation from a nested wait.
@@ -459,7 +578,7 @@ impl<T: Terminator> TermCell<T> {
         }
         state.cancel_armed();
         let causes = state.causes;
-        state.causes = armed.kind.remaining(causes);
+        state.set_causes(armed.kind.remaining(causes));
         if let Some(armed) = &mut state.armed {
             armed.settled = true;
         }
@@ -473,20 +592,20 @@ impl<T: Terminator> TermCell<T> {
     /// cause waits for the next script, as `mini_racer` leaves them. A dispatch
     /// that was never settled ends as `end` ends it.
     pub fn finish(&self, id: DispatchId) -> Option<Halt> {
+        lock(&self.state).finish(id)
+    }
+
+    /// Disarms `id` once the leftover microtasks of its terminated script ran
+    /// without V8 acting on a cause. One still live fails `mini_racer`'s reply,
+    /// whose retry reports it with this script, as `end` does; with none, a
+    /// spent stop or memory cause is carried, as `finish` leaves it.
+    pub fn end_drained(&self, id: DispatchId) -> Option<Halt> {
         let mut state = lock(&self.state);
-        match state.armed {
-            Some(armed) if armed.id == id && armed.settled => {}
-            _ => return state.end(id),
+        if state.live().is_empty() {
+            state.finish(id)
+        } else {
+            state.end(id)
         }
-        state.cancel_armed();
-        state.suspended = false;
-        state.nested_timer = None;
-        state.armed = None;
-        if state.disposing {
-            return Some(Halt::Disposed);
-        }
-        state.causes = state.causes.carried();
-        None
     }
 }
 
@@ -874,15 +993,231 @@ mod tests {
         idle.request(Interrupt::MaxMemory);
         let inherited = idle.inherited().expect("unlocked");
         assert!(!inherited.disposing);
+        let (child, calls) = cell();
+        child.adopt(inherited);
+        assert!(child.refuses(DispatchKind::Script));
         assert_eq!(
-            inherited.pending().collect::<Vec<_>>(),
-            [Interrupt::Stop, Interrupt::MaxMemory]
+            run(&child, DispatchKind::Script),
+            Some(Halt::Terminated(TerminationCause::MaxMemory))
         );
+        assert_eq!(calls.terminate.get(), 1);
+        assert_eq!(run(&child, DispatchKind::Script), None);
 
         let (timed, _) = cell();
         let id = timed.begin(DispatchKind::Script).expect("nothing armed");
         timed.request(Interrupt::Timeout(id));
-        assert_eq!(timed.inherited().expect("unlocked").pending().count(), 0);
+        let (child, _) = cell();
+        child.adopt(timed.inherited().expect("unlocked"));
+        assert_eq!(run(&child, DispatchKind::Script), None);
+    }
+
+    #[test]
+    fn a_child_spends_an_inherited_stop_when_it_locks_its_isolate() {
+        let (parent, _) = cell();
+        parent.request(Interrupt::Stop);
+        let (child, calls) = cell();
+        child.adopt(parent.inherited().expect("unlocked"));
+        child.relocked();
+        assert!(!child.refuses(DispatchKind::Script));
+        assert_eq!(run(&child, DispatchKind::Script), STOPPED);
+        assert_eq!(calls.terminate.get(), 0);
+    }
+
+    #[test]
+    fn a_dispose_or_an_exhausted_heap_is_never_lifted() {
+        let (exhausted, calls) = cell();
+        exhausted.request(Interrupt::Stop);
+        exhausted.request(Interrupt::HeapExhausted);
+        let outer = exhausted
+            .begin(DispatchKind::Script)
+            .expect("nothing armed");
+        assert!(!exhausted.spend(exhausted.mark(), true));
+        assert!(exhausted.refuses(DispatchKind::Script));
+        assert_eq!(calls.cancel.get(), 0);
+        assert!(exhausted.end(outer).is_some());
+
+        let (disposed, calls) = cell();
+        let outer = disposed.begin(DispatchKind::Script).expect("nothing armed");
+        assert!(disposed.dispose());
+        assert!(!disposed.spend(disposed.mark(), true));
+        assert_eq!(calls.cancel.get(), 0);
+        assert_eq!(disposed.end(outer), Some(Halt::Disposed));
+    }
+
+    // mini_racer's attach uses up the one-shot interrupt a stop left, and its
+    // request flag makes the next script report the stop when it ends.
+    #[test]
+    fn a_spent_stop_lets_the_next_script_run_and_report_it() {
+        let (cell, calls) = cell();
+        cell.request(Interrupt::Stop);
+        let since = cell.mark();
+        let attach = cell
+            .begin(DispatchKind::Maintenance)
+            .expect("nothing armed");
+        assert_eq!(calls.terminate.get(), 1);
+        assert!(!cell.spend(since, false));
+        assert_eq!(cell.end(attach), None);
+
+        assert!(!cell.refuses(DispatchKind::Maintenance));
+        assert_eq!(run(&cell, DispatchKind::Maintenance), None);
+        assert!(!cell.refuses(DispatchKind::Script));
+        let script = cell.begin(DispatchKind::Script).expect("nothing armed");
+        assert_eq!(calls.terminate.get(), 1);
+        assert_eq!(cell.settle(script), STOPPED);
+        assert_eq!(cell.finish(script), None);
+        assert_eq!(run(&cell, DispatchKind::Script), None);
+    }
+
+    #[test]
+    fn a_stop_after_a_spent_one_terminates_the_next_dispatch() {
+        let (cell, calls) = cell();
+        cell.request(Interrupt::Stop);
+        cell.spend(cell.mark(), false);
+        cell.request(Interrupt::Stop);
+        assert!(cell.refuses(DispatchKind::Script));
+        assert_eq!(run(&cell, DispatchKind::Script), STOPPED);
+        assert_eq!(calls.terminate.get(), 1);
+    }
+
+    // A request that lands while the dispatch runs keeps its own termination,
+    // as upstream's later TerminateExecution stays pending.
+    #[test]
+    fn a_request_since_the_mark_is_neither_spent_nor_lifted() {
+        let (cell, calls) = cell();
+        let outer = cell.begin(DispatchKind::Script).expect("nothing armed");
+        let since = cell.mark();
+        cell.request(Interrupt::Stop);
+        assert!(!cell.spend(since, true));
+        assert!(cell.refuses(DispatchKind::Script));
+        assert_eq!(calls.cancel.get(), 0);
+        assert_eq!(cell.end(outer), STOPPED);
+    }
+
+    // Inside a callback the termination a nested dispatch used up is lifted,
+    // so the script around it runs on and reports the cause when it ends.
+    #[test]
+    fn a_nested_spend_lifts_the_termination_for_the_script_around() {
+        let (cell, calls) = cell();
+        let outer = cell.begin(DispatchKind::Script).expect("nothing armed");
+        cell.request(Interrupt::Stop);
+        assert!(cell.spend(cell.mark(), true));
+        assert_eq!(calls.cancel.get(), 1);
+        assert!(!cell.refuses(DispatchKind::Script));
+        assert_eq!(cell.check(DispatchKind::Script), STOPPED);
+        assert_eq!(cell.end(outer), STOPPED);
+        assert_eq!(calls.cancel.get(), 1);
+    }
+
+    #[test]
+    fn a_settled_dispatch_with_a_timeout_is_never_lifted() {
+        let (cell, calls) = cell();
+        let outer = cell.begin(DispatchKind::Script).expect("nothing armed");
+        cell.request(Interrupt::Timeout(outer));
+        assert_eq!(
+            cell.settle(outer),
+            Some(Halt::Terminated(TerminationCause::Timeout))
+        );
+        assert!(cell.is_settled());
+        cell.request(Interrupt::Timeout(outer));
+        let cancels = calls.cancel.get();
+        assert!(!cell.spend(cell.mark(), true));
+        assert_eq!(calls.cancel.get(), cancels);
+        assert_eq!(cell.finish(outer), None);
+        assert!(!cell.is_settled());
+    }
+
+    // A getter running while a finished script's result serializes, or a
+    // leftover microtask, runs on in mini_racer once a nested attach uses up
+    // a stop, and the next script reports it.
+    #[test]
+    fn a_settled_dispatch_lifts_a_spent_stop() {
+        let (cell, calls) = cell();
+        let outer = cell.begin(DispatchKind::Script).expect("nothing armed");
+        assert_eq!(cell.settle(outer), None);
+        cell.request(Interrupt::Stop);
+        assert!(cell.spend(cell.mark(), true));
+        assert_eq!(calls.cancel.get(), 1);
+        assert_eq!(cell.finish(outer), None);
+        assert!(!cell.refuses(DispatchKind::Script));
+        assert_eq!(run(&cell, DispatchKind::Script), STOPPED);
+    }
+
+    #[test]
+    fn a_drained_script_carries_a_spent_stop_and_reports_a_live_one() {
+        let (cell, _) = cell();
+        let outer = cell.begin(DispatchKind::Script).expect("nothing armed");
+        cell.request(Interrupt::Stop);
+        assert_eq!(cell.settle(outer), STOPPED);
+        cell.request(Interrupt::Stop);
+        cell.spend(cell.mark(), true);
+        assert_eq!(cell.end_drained(outer), None);
+        assert_eq!(run(&cell, DispatchKind::Script), STOPPED);
+
+        let outer = cell.begin(DispatchKind::Script).expect("nothing armed");
+        cell.request(Interrupt::Stop);
+        assert_eq!(cell.settle(outer), STOPPED);
+        cell.request(Interrupt::Stop);
+        assert_eq!(cell.end_drained(outer), STOPPED);
+        assert_eq!(run(&cell, DispatchKind::Script), None);
+    }
+
+    #[test]
+    fn a_nested_spend_lifts_a_timeout_and_keeps_reporting_it() {
+        let (cell, calls) = cell();
+        let outer = cell.begin(DispatchKind::Script).expect("nothing armed");
+        cell.request(Interrupt::Timeout(outer));
+        assert!(cell.spend(cell.mark(), true));
+        assert_eq!(calls.cancel.get(), 1);
+        assert_eq!(
+            cell.end(outer),
+            Some(Halt::Terminated(TerminationCause::Timeout))
+        );
+    }
+
+    // V8 drops every termination it had not acted on when a single-threaded
+    // runner locks its isolate again, however the cause arrived.
+    #[test]
+    fn relocking_spends_every_carried_stop_or_memory_cause() {
+        let (cell, calls) = cell();
+        cell.request(Interrupt::Stop);
+        cell.relocked();
+        assert!(!cell.refuses(DispatchKind::Script));
+        assert_eq!(run(&cell, DispatchKind::Script), STOPPED);
+        assert_eq!(calls.terminate.get(), 0);
+
+        let heap = cell
+            .begin(DispatchKind::Maintenance)
+            .expect("nothing armed");
+        cell.request(Interrupt::MaxMemory);
+        assert_eq!(calls.terminate.get(), 1);
+        assert_eq!(cell.end(heap), None);
+        cell.relocked();
+        assert!(!cell.refuses(DispatchKind::Script));
+        assert_eq!(
+            run(&cell, DispatchKind::Script),
+            Some(Halt::Terminated(TerminationCause::MaxMemory))
+        );
+
+        cell.request(Interrupt::HeapExhausted);
+        cell.relocked();
+        assert!(cell.refuses(DispatchKind::Script));
+    }
+
+    // mini_racer's restore_termination: a nested script that reports a stop
+    // terminates the script around it again.
+    #[test]
+    fn renew_hands_a_spent_stop_back_to_the_dispatch_around() {
+        let (cell, calls) = cell();
+        cell.request(Interrupt::Stop);
+        cell.spend(cell.mark(), false);
+        let outer = cell.begin(DispatchKind::Script).expect("nothing armed");
+        assert_eq!(calls.terminate.get(), 0);
+        assert_eq!(cell.check(DispatchKind::Script), STOPPED);
+        cell.renew();
+        assert_eq!(calls.terminate.get(), 1);
+        assert!(cell.refuses(DispatchKind::Script));
+        assert_eq!(cell.end(outer), STOPPED);
+        assert_eq!(calls.cancel.get(), 1);
     }
 
     #[test]

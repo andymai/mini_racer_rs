@@ -776,9 +776,7 @@ fn adopt(inherited: &ControlBlock, carried: Inherited) -> Held {
     };
     let block = Arc::new(ControlBlock::with_tasks(inherited.config.clone(), tasks));
     *lock(&block.custody) = Some(isolate);
-    for interrupt in carried.pending() {
-        block.term.request(interrupt);
-    }
+    block.term.adopt(carried);
     match start(&block, generation, Start::Adopted) {
         Ok(()) => Held::Block(block),
         Err(_) => orphaned(true, false),

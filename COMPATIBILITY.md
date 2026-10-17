@@ -4,7 +4,7 @@
 
 | Engine | Done | Planned | Deviation |
 |---|---|---|---|
-| CRuby | 54 | 0 | 21 |
+| CRuby | 54 | 0 | 22 |
 | TruffleRuby | 58 | 0 | 0 |
 
 ## Surface
@@ -167,6 +167,12 @@ Approved 2026-10-16.
 mini_racer_rs returns the same filtered results from a snapshot-based context as from a context without a snapshot. In a context made from `MiniRacer::Snapshot.new("Object.getOwnPropertyDescriptors = () => ({})")`, `({a: 1, f() {}})` returns `{"a" => 1}`, and `[1, function() {}]` returns `[1]`. mini_racer 0.22.1 returns `nil` for both. Both gems copy results that V8 refuses to serialize as is through a filter in a separate safe context. mini_racer_rs keeps an untouched context in each snapshot blob and uses it for that filter, while mini_racer 0.22.1 builds the safe context from the snapshot, exposing the filter's built-ins to snapshot code. User code still sees the replacement in both gems: `Object.getOwnPropertyDescriptors({a: 1})` returns `{}`.
 
 Approved 2026-10-16.
+
+### `behavior:timeout-bounds-leftover-microtasks@ruby`
+
+mini_racer_rs applies the context’s timeout once more while running microtasks left by a script that reached its own timeout. Both gems run leftover microtasks before returning, but mini_racer 0.22.1's watchdog has already fired for that call, so it runs them without a time limit. For example, with `timeout: 200`, evaluating `Promise.resolve().then(() => { while (true) {} }); while (true) {}` never returns in mini_racer. In mini_racer_rs it raises `MiniRacer::ScriptTerminatedError` after about 400 ms, and the context remains usable. This also means mini_racer_rs cuts short a finite leftover microtask that needs more than the second 200 ms, while mini_racer finishes it. Microtasks left by a script ended another way, such as by `stop`, a memory limit, or an interrupt, keep the original deadline in both gems. Without `timeout:`, both run leftover microtasks without a limit. mini_racer_rs differs because `timeout:` often bounds untrusted JavaScript, and an endless microtask should not remove that bound.
+
+Pending review.
 
 ### `behavior:timeout-watchdog@ruby`
 

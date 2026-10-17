@@ -106,6 +106,22 @@ pub fn schedule(
     Ok(())
 }
 
+/// Bounds work `dispatch` does after its timeout fired with the timeout again.
+/// A deadline that has not fired yet already bounds it.
+pub fn rearm_if_fired(
+    after: Duration,
+    block: &Arc<ControlBlock>,
+    dispatch: DispatchId,
+) -> Result<(), EngineError> {
+    let pending = lock(&block.timer)
+        .due
+        .is_some_and(|(_, due)| due == dispatch);
+    if pending {
+        return Ok(());
+    }
+    schedule(after, block, dispatch)
+}
+
 /// Forgets the context's pending timeout once its dispatch is over.
 pub fn clear(block: &ControlBlock, dispatch: DispatchId) {
     let mut timer = lock(&block.timer);

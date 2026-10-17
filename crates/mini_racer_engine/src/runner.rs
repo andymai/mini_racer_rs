@@ -314,7 +314,10 @@ fn serve_released(
         let Some(shared) = lock(&block.custody).take() else {
             return (false, None);
         };
-        let served = serve_one(&mut shared.lock(), block, runtime, message);
+        let mut locked = shared.lock();
+        block.term.relocked();
+        let served = serve_one(&mut locked, block, runtime, message);
+        drop(locked);
         held = Some(shared);
         if let Served::Stop { disposed } = served {
             return (disposed, held);
@@ -531,21 +534,71 @@ fn script(
     tc.set_verbose(runtime.block.config.verbose_exceptions);
     let result = if let Err(error) = arm_timeout(runtime, depth, kind) {
         Err(error)
-    } else if term.check(kind).is_some() {
+    } else if term.refuses(kind) {
         Err(EngineError::Internal("halted without a cause".to_owned()))
     } else {
         run(tc)
     };
+    let since = term.mark();
+    // mini_racer's maintenance never cancels a termination it meets, so the
+    // interrupt is used up while the cause waits for the next script. Inside
+    // a callback, the termination caught here would otherwise unwind the
+    // script around it, which in mini_racer runs on and reports the cause
+    // when it ends.
+    if kind == DispatchKind::Maintenance
+        && tc.has_terminated()
+        && term.spend(since, matches!(depth, Depth::Nested))
+    {
+        // Lifted, the termination this caught must not be rethrown as the
+        // scope closes.
+        tc.reset();
+    }
     let raised = result.is_err() && kind == DispatchKind::Script && escaped(tc, runtime);
     let halt = match depth {
         Depth::Outermost(dispatch) if result.is_ok() => term.finish(dispatch),
+        // mini_racer replies to a terminated script with its termination
+        // cancelled, and V8 runs the microtasks the script left then, still
+        // within the dispatch. A cause V8 acts on there is carried, spent, to
+        // the next script; one still pending when they finish fails the
+        // reply, and mini_racer's retry reports it with this script. When the
+        // script's own timeout ended it, mini_racer runs them with no limit;
+        // the timeout bounds them again here.
+        Depth::Outermost(dispatch) if kind == DispatchKind::Script && tc.has_terminated() => {
+            let verdict = term.settle(dispatch);
+            let drains = verdict.is_some_and(|halt| halt != Halt::Disposed)
+                && rearm_timeout(runtime, dispatch).is_ok();
+            if drains {
+                tc.reset();
+                tc.perform_microtask_checkpoint();
+            }
+            if drains && (tc.has_terminated() || tc.is_execution_terminating()) {
+                term.spend(term.mark(), false);
+                match term.finish(dispatch) {
+                    Some(Halt::Disposed) => Some(Halt::Disposed),
+                    _ => verdict,
+                }
+            } else if drains {
+                term.end_drained(dispatch).or(verdict)
+            } else {
+                match term.end(dispatch) {
+                    Some(Halt::Disposed) => Some(Halt::Disposed),
+                    _ => verdict,
+                }
+            }
+        }
         Depth::Outermost(dispatch) => term.end(dispatch),
         // Its verdict came before it serialized, but a dispose still cancels
         // the wait for it, as in mini_racer.
         Depth::Nested if result.is_ok() && kind == DispatchKind::Script => {
             term.is_disposing().then_some(Halt::Disposed)
         }
-        Depth::Nested => term.check(kind),
+        Depth::Nested => {
+            let halt = term.check(kind);
+            if kind == DispatchKind::Script && matches!(halt, Some(Halt::Terminated(_))) {
+                term.renew();
+            }
+            halt
+        }
     };
     if raised {
         return Err(EngineError::from(JsError {
@@ -567,6 +620,12 @@ fn arm_timeout(runtime: &Runtime, depth: Depth, kind: DispatchKind) -> Result<()
         }
         _ => Ok(()),
     }
+}
+
+fn rearm_timeout(runtime: &Runtime, dispatch: DispatchId) -> Result<(), EngineError> {
+    runtime.block.config.timeout.map_or(Ok(()), |timeout| {
+        watchdog::rearm_if_fired(timeout, &runtime.block, dispatch)
+    })
 }
 
 fn escaped(tc: &Tc<'_, '_, '_, '_>, runtime: &Runtime) -> bool {
@@ -631,7 +690,11 @@ fn refuse_nested_await(
     let exception = v8::Exception::error(tc, message);
     tc.throw_exception(exception);
     let refused = failed(tc);
-    let halt = runtime.block.term.check(DispatchKind::Script).map(halted);
+    let halt = runtime.block.term.check(DispatchKind::Script);
+    if matches!(halt, Some(Halt::Terminated(_))) {
+        runtime.block.term.renew();
+    }
+    let halt = halt.map(halted);
     Err(match (halt, refused) {
         (Some(EngineError::Js(halt)), EngineError::Js(refused)) => EngineError::from(JsError {
             kind: halt.kind,
@@ -969,13 +1032,16 @@ fn callback<'s>(
         match reply {
             // As mini_racer answers a cancelled callback: the throw stops the
             // script at once, and the termination takes over at V8's next
-            // interrupt check.
+            // interrupt check. Once the script's verdict is in, mini_racer
+            // only throws to the microtasks it left.
             CallbackReply::Abort => {
                 if !terminating {
                     let exception = error(scope, &JsText::from("terminated"));
                     scope.throw_exception(exception);
                 }
-                scope.terminate_execution();
+                if !runtime.block.term.is_settled() {
+                    scope.terminate_execution();
+                }
             }
             // mini_racer throws a raising callback's exception even with a
             // cause pending, or a nested script's termination restored:
@@ -995,9 +1061,8 @@ fn callback<'s>(
             _ if terminating => {
                 scope.terminate_execution();
             }
-            _ if runtime.block.term.check(DispatchKind::Script).is_some() => {
-                scope.terminate_execution();
-            }
+            // As mini_racer reads the reply: a termination pending for this
+            // script makes the read throw it, and the script ends here.
             CallbackReply::Value(bytes) => {
                 let context = scope.get_current_context();
                 let deserializer = v8::ValueDeserializer::new(scope, Box::new(Reader), &bytes);
