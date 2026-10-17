@@ -2,6 +2,7 @@
 
 require "test_helper"
 require "mini_racer"
+require "timeout"
 
 # mini_racer's stop is a one-shot V8 interrupt plus a flag the next script
 # reports when it ends; these are the ways the interrupt is used up or dropped
@@ -73,6 +74,20 @@ class SpentTerminationTest < Minitest::Test
     @context.perform_microtask_checkpoint
     assert_raises(MiniRacer::ScriptTerminatedError) { @context.eval("globalThis.x = 1") }
     assert_equal %w[number undefined], @context.eval("[typeof m, typeof x]")
+  end
+
+  # Deviation behavior:timeout-bounds-leftover-microtasks@ruby: mini_racer runs
+  # a timed-out script's leftover microtasks with no limit and hangs here.
+  def test_a_timeout_bounds_the_microtasks_a_timed_out_script_left
+    context = MiniRacer::Context.new(timeout: 100)
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    assert_raises(MiniRacer::ScriptTerminatedError) do
+      Timeout.timeout(5) { context.eval("Promise.resolve().then(() => { while (true) {} }); while (true) {}") }
+    end
+    assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 2
+    assert_equal 2, context.eval("1 + 1")
+  ensure
+    context&.dispose
   end
 
   # The stop is consumed with the terminated script, as mini_racer's reply

@@ -559,10 +559,13 @@ fn script(
         // mini_racer replies to a terminated script with its termination
         // cancelled, and V8 runs the microtasks the script left then, still
         // within the dispatch. A cause landing meanwhile fails the reply, and
-        // mini_racer's retry consumes it with this script.
+        // mini_racer's retry consumes it with this script. mini_racer runs
+        // them with no time limit; a context's timeout bounds them again here.
         Depth::Outermost(dispatch) if kind == DispatchKind::Script && tc.has_terminated() => {
             let verdict = term.settle(dispatch);
-            if verdict.is_some_and(|halt| halt != Halt::Disposed) {
+            if verdict.is_some_and(|halt| halt != Halt::Disposed)
+                && arm_timeout(runtime, depth, kind).is_ok()
+            {
                 tc.perform_microtask_checkpoint();
             }
             match term.end(dispatch) {

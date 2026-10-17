@@ -4,7 +4,7 @@
 
 | Engine | Done | Planned | Deviation |
 |---|---|---|---|
-| CRuby | 54 | 0 | 21 |
+| CRuby | 54 | 0 | 22 |
 | TruffleRuby | 58 | 0 | 0 |
 
 ## Surface
@@ -167,6 +167,12 @@ Approved 2026-10-16.
 mini_racer_rs returns the same filtered results from a snapshot-based context as from a context without a snapshot. In a context made from `MiniRacer::Snapshot.new("Object.getOwnPropertyDescriptors = () => ({})")`, `({a: 1, f() {}})` returns `{"a" => 1}`, and `[1, function() {}]` returns `[1]`. mini_racer 0.22.1 returns `nil` for both. Both gems copy results that V8 refuses to serialize as is through a filter in a separate safe context. mini_racer_rs keeps an untouched context in each snapshot blob and uses it for that filter, while mini_racer 0.22.1 builds the safe context from the snapshot, exposing the filter's built-ins to snapshot code. User code still sees the replacement in both gems: `Object.getOwnPropertyDescriptors({a: 1})` returns `{}`.
 
 Approved 2026-10-16.
+
+### `behavior:timeout-bounds-leftover-microtasks@ruby`
+
+mini_racer_rs reapplies a context's timeout while running microtasks left by a terminated script, so an endless microtask cannot remove the bound on untrusted JavaScript. For example, with `Context.new(timeout: 200)`, a script that queues `Promise.resolve().then(() => { while (true) {} })` and then loops forever first reaches the timeout. Both gems then run the queued microtask. mini_racer 0.22.1 runs it while building its reply, without a time limit because its watchdog has already fired for that call, so `eval` never returns. mini_racer_rs applies the 200 ms timeout again, raises `MiniRacer::ScriptTerminatedError` after about 400 ms total, and leaves the context usable. Without `timeout:`, both gems run leftover microtasks without a limit, like any other script.
+
+Pending review.
 
 ### `behavior:timeout-watchdog@ruby`
 
