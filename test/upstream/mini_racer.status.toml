@@ -114,16 +114,7 @@ status = "pass"
 status = "upstream-skip"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_late_watchdog_does_not_terminate_next_eval"]
-status = "xfail:M4"
-
-[tests."test/async_test.rb#MiniRacerAsyncTest#test_late_watchdog_does_not_terminate_next_eval".overrides."ruby-3.3-macos-arm64"]
-status = "flaky:flaky-test_late_watchdog_does_not_terminate_next_eval"
-
-[tests."test/async_test.rb#MiniRacerAsyncTest#test_late_watchdog_does_not_terminate_next_eval".overrides."ruby-3.4-macos-arm64"]
-status = "flaky:flaky-test_late_watchdog_does_not_terminate_next_eval"
-
-[tests."test/async_test.rb#MiniRacerAsyncTest#test_late_watchdog_does_not_terminate_next_eval".overrides."ruby-4.0-macos-arm64"]
-status = "flaky:flaky-test_late_watchdog_does_not_terminate_next_eval"
+status = "pass"
 
 [tests."test/async_test.rb#MiniRacerAsyncTest#test_late_watchdog_does_not_terminate_next_eval".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"

@@ -372,14 +372,14 @@ fn handle(
             depth,
             awaited,
         } => script(scope, runtime, depth, DispatchKind::Script, |tc| {
-            evaluate(tc, runtime, (&filename, &source), awaited)
+            evaluate(tc, runtime, (&filename, &source), (depth, awaited))
         }),
         Request::Call {
             request,
             depth,
             awaited,
         } => script(scope, runtime, depth, DispatchKind::Script, |tc| {
-            invoke(tc, runtime, &request, awaited)
+            invoke(tc, runtime, &request, (depth, awaited))
         }),
         Request::Attach { request, depth } => {
             script(scope, runtime, depth, DispatchKind::Maintenance, |tc| {
@@ -435,11 +435,13 @@ fn halted(halt: Halt) -> EngineError {
     }
 }
 
-// Runs a dispatch: nothing starts once it is halted, and serializing runs
-// getters, so an outermost dispatch stays armed through `run`; the verdict then
-// replaces whatever the script produced. A nested dispatch reports a halt but
-// leaves its cause to the dispatch it runs in. An exception that escapes as
-// the one a raising callback threw takes precedence, as in mini_racer.
+// Runs a dispatch: nothing starts once it is halted. A script takes its
+// verdict before serializing its result (`verdict`) and stays armed through
+// it, as serializing runs getters: a cause that stops the serializing is
+// reported, and one that lands without stopping it leaves the reply. A nested
+// dispatch reports a halt but leaves its cause to the dispatch it runs in. An
+// exception that escapes as the one a raising callback threw takes
+// precedence, as in mini_racer.
 fn script(
     scope: &mut v8::PinScope<'_, '_>,
     runtime: &Runtime,
@@ -456,7 +458,13 @@ fn script(
     };
     let raised = result.is_err() && kind == DispatchKind::Script && escaped(tc, runtime);
     let halt = match depth {
+        Depth::Outermost(dispatch) if result.is_ok() => term.finish(dispatch),
         Depth::Outermost(dispatch) => term.end(dispatch),
+        // Its verdict came before it serialized, but a dispose still cancels
+        // the wait for it, as in mini_racer.
+        Depth::Nested if result.is_ok() && kind == DispatchKind::Script => {
+            term.is_disposing().then_some(Halt::Disposed)
+        }
         Depth::Nested => term.check(kind),
     };
     if raised {
@@ -481,7 +489,7 @@ fn evaluate(
     tc: &mut Tc<'_, '_, '_, '_>,
     runtime: &Runtime,
     (filename, source): (&JsText, &JsText),
-    awaited: bool,
+    (depth, awaited): (Depth, bool),
 ) -> Result<Vec<u8>, EngineError> {
     let too_large = || EngineError::Internal("source too large".to_owned());
     let source = string(tc, source).ok_or_else(too_large)?;
@@ -493,12 +501,25 @@ fn evaluate(
         .run(tc)
         .ok_or_else(|| failure(tc, JsErrorKind::Runtime))?;
     let value = if awaited {
-        settle(tc, runtime, value)?
+        await_promise(tc, runtime, value)?
     } else {
         value
     };
     let value = serialize::sanitize(tc, value);
+    verdict(runtime, depth)?;
     serialize::reply(tc, &runtime.filter, value).ok_or_else(|| failure(tc, JsErrorKind::Runtime))
+}
+
+// mini_racer's last termination check, before a script's result is
+// serialized. A nested script reads the causes and leaves them to the
+// dispatch around it.
+fn verdict(runtime: &Runtime, depth: Depth) -> Result<(), EngineError> {
+    let term = &runtime.block.term;
+    let halt = match depth {
+        Depth::Outermost(dispatch) => term.settle(dispatch),
+        Depth::Nested => term.check(DispatchKind::Script),
+    };
+    halt.map_or(Ok(()), |halt| Err(halted(halt)))
 }
 
 // V8 runs no microtask checkpoint inside another, so an await nested in a
@@ -529,7 +550,7 @@ fn refuse_nested_await(
 // mini_racer's await: run the microtasks, then look at the promise. While it
 // is pending, run due tasks one at a time, sleeping until one is due, until
 // the promise settles or the dispatch is halted.
-fn settle<'s>(
+fn await_promise<'s>(
     tc: &mut Tc<'s, '_, '_, '_>,
     runtime: &Runtime,
     value: v8::Local<'s, v8::Value>,
@@ -629,7 +650,7 @@ fn invoke(
     tc: &mut Tc<'_, '_, '_, '_>,
     runtime: &Runtime,
     request: &[u8],
-    awaited: bool,
+    (depth, awaited): (Depth, bool),
 ) -> Result<Vec<u8>, EngineError> {
     let context = tc.get_current_context();
     let failed = |tc: &Tc<'_, '_, '_, '_>| failure(tc, JsErrorKind::Runtime);
@@ -661,11 +682,12 @@ fn invoke(
         .call(tc, receiver.into(), &args)
         .ok_or_else(|| failed(tc))?;
     let value = if awaited {
-        settle(tc, runtime, value)?
+        await_promise(tc, runtime, value)?
     } else {
         value
     };
     let value = serialize::sanitize(tc, value);
+    verdict(runtime, depth)?;
     serialize::reply(tc, &runtime.filter, value).ok_or_else(|| failed(tc))
 }
 

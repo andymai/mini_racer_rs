@@ -65,6 +65,16 @@ impl CauseSet {
         Self(self.0 & other.0)
     }
 
+    // What outlives a dispatch that does not report it: a stop or memory
+    // cause, unless a cancel cleared everything, as upstream's cancel path
+    // stores zero.
+    const fn carried(self) -> Self {
+        if self.contains(TerminationCause::Cancelled) {
+            return Self(0);
+        }
+        self.intersect(Self::PENDING)
+    }
+
     fn first(self) -> Option<TerminationCause> {
         TerminationCause::BY_PRIORITY
             .into_iter()
@@ -98,15 +108,12 @@ impl DispatchKind {
         }
     }
 
-    // A cancelled dispatch clears everything, as upstream's cancel path
-    // stores zero, so an abandoned wait leaves no stale termination behind.
-    fn remaining(self, causes: CauseSet) -> CauseSet {
-        if causes.contains(TerminationCause::Cancelled) {
-            return CauseSet::default();
-        }
+    // A cancelled dispatch clears everything, so an abandoned wait leaves no
+    // stale termination behind.
+    const fn remaining(self, causes: CauseSet) -> CauseSet {
         match self {
-            Self::Script | Self::Pump => CauseSet::default(),
-            Self::Maintenance => causes.intersect(CauseSet::PENDING),
+            Self::Script | Self::Pump => CauseSet(0),
+            Self::Maintenance => causes.carried(),
         }
     }
 }
@@ -169,6 +176,8 @@ struct Armed {
     id: DispatchId,
     kind: DispatchKind,
     terminated: bool,
+    // `settle` has given the verdict, and the result is being serialized.
+    settled: bool,
 }
 
 struct State<T> {
@@ -200,6 +209,22 @@ impl<T: Terminator> State<T> {
             handle.cancel();
             armed.terminated = false;
         }
+    }
+
+    fn end(&mut self, id: DispatchId) -> Option<Halt> {
+        if self.armed.map(|armed| armed.id) != Some(id) {
+            return None;
+        }
+        self.cancel_armed();
+        self.suspended = false;
+        self.nested_timer = None;
+        let armed = self.armed.take()?;
+        if self.disposing {
+            return Some(Halt::Disposed);
+        }
+        let causes = self.causes;
+        self.causes = armed.kind.remaining(causes);
+        armed.kind.report(causes).map(Halt::Terminated)
     }
 }
 
@@ -257,6 +282,7 @@ impl<T: Terminator> TermCell<T> {
             id,
             kind,
             terminated: false,
+            settled: false,
         });
         if !state.causes.is_empty() {
             state.terminate_armed();
@@ -393,25 +419,53 @@ impl<T: Terminator> TermCell<T> {
     }
 
     /// Disarms `id` and settles its outcome. The runner calls it after the
-    /// dispatch's last V8 work, serializing the result included, and a halt it
-    /// returns replaces that result; a cause arriving later waits for the next
-    /// dispatch. A no-op returning `None` when `id` is not armed.
+    /// dispatch's last V8 work, and a halt it returns replaces that work's
+    /// result; a cause arriving later waits for the next dispatch. A no-op
+    /// returning `None` when `id` is not armed.
     pub fn end(&self, id: DispatchId) -> Option<Halt> {
+        lock(&self.state).end(id)
+    }
+
+    /// `mini_racer`'s last check before an outermost dispatch serializes its
+    /// result: reports and consumes the causes so far, as `end` would, and
+    /// lifts the termination so the result can be serialized. The dispatch
+    /// stays armed, so a cause that lands meanwhile still stops a getter.
+    pub fn settle(&self, id: DispatchId) -> Option<Halt> {
         let mut state = lock(&self.state);
-        if state.armed.map(|armed| armed.id) != Some(id) {
-            return None;
+        let armed = state.armed.filter(|armed| armed.id == id)?;
+        if state.disposing {
+            return Some(Halt::Disposed);
+        }
+        state.cancel_armed();
+        let causes = state.causes;
+        state.causes = armed.kind.remaining(causes);
+        if let Some(armed) = &mut state.armed {
+            armed.settled = true;
+        }
+        drop(state);
+        armed.kind.report(causes).map(Halt::Terminated)
+    }
+
+    /// Disarms `id` once its reply is complete. After `settle`, a cause that
+    /// landed while the result serialized, without stopping it, leaves the
+    /// result alone: a timeout or cancel is dropped, and a stop or memory
+    /// cause waits for the next script, as `mini_racer` leaves them. A dispatch
+    /// that was never settled ends as `end` ends it.
+    pub fn finish(&self, id: DispatchId) -> Option<Halt> {
+        let mut state = lock(&self.state);
+        match state.armed {
+            Some(armed) if armed.id == id && armed.settled => {}
+            _ => return state.end(id),
         }
         state.cancel_armed();
         state.suspended = false;
         state.nested_timer = None;
-        let armed = state.armed.take()?;
+        state.armed = None;
         if state.disposing {
             return Some(Halt::Disposed);
         }
-        let causes = state.causes;
-        state.causes = armed.kind.remaining(causes);
-        drop(state);
-        armed.kind.report(causes).map(Halt::Terminated)
+        state.causes = state.causes.carried();
+        None
     }
 }
 
@@ -673,6 +727,77 @@ mod tests {
         run(&cell, DispatchKind::Script);
 
         assert_eq!(calls.cancel.get(), 0);
+    }
+
+    #[test]
+    fn settling_reports_and_consumes_what_came_before_serializing() {
+        let (cell, calls) = cell();
+        let id = cell.begin(DispatchKind::Script).expect("nothing armed");
+        cell.request(Interrupt::Stop);
+
+        assert_eq!(cell.settle(id), STOPPED);
+        assert_eq!(calls.cancel.get(), 1);
+        assert_eq!(cell.armed(), Some(id));
+        assert_eq!(cell.end(id), None);
+        assert_eq!(run(&cell, DispatchKind::Script), None);
+    }
+
+    #[test]
+    fn a_timeout_while_serializing_leaves_the_result_and_the_next_dispatch() {
+        let (cell, calls) = cell();
+        let id = cell.begin(DispatchKind::Script).expect("nothing armed");
+        assert_eq!(cell.settle(id), None);
+        assert!(cell.request(Interrupt::Timeout(id)));
+        assert_eq!(calls.terminate.get(), 1);
+
+        assert_eq!(cell.finish(id), None);
+        assert_eq!(calls.cancel.get(), 1);
+        assert_eq!(run(&cell, DispatchKind::Script), None);
+    }
+
+    #[test]
+    fn a_stop_while_serializing_is_reported_by_the_next_script() {
+        let (cell, _) = cell();
+        let id = cell.begin(DispatchKind::Script).expect("nothing armed");
+        assert_eq!(cell.settle(id), None);
+        cell.request(Interrupt::Stop);
+
+        assert_eq!(cell.finish(id), None);
+        assert_eq!(run(&cell, DispatchKind::Script), STOPPED);
+    }
+
+    #[test]
+    fn a_cause_that_stops_the_serializing_is_reported_by_end() {
+        let (cell, _) = cell();
+        let id = cell.begin(DispatchKind::Script).expect("nothing armed");
+        assert_eq!(cell.settle(id), None);
+        cell.request(Interrupt::Timeout(id));
+
+        assert_eq!(
+            cell.end(id),
+            Some(Halt::Terminated(TerminationCause::Timeout))
+        );
+        assert_eq!(run(&cell, DispatchKind::Script), None);
+    }
+
+    #[test]
+    fn a_dispose_while_serializing_still_halts_the_dispatch() {
+        let (cell, _) = cell();
+        let id = cell.begin(DispatchKind::Script).expect("nothing armed");
+        assert_eq!(cell.settle(id), None);
+        cell.dispose();
+
+        assert_eq!(cell.finish(id), Some(Halt::Disposed));
+    }
+
+    #[test]
+    fn finishing_an_unsettled_dispatch_ends_it() {
+        let (cell, _) = cell();
+        cell.request(Interrupt::Stop);
+        let id = cell.begin(DispatchKind::Pump).expect("nothing armed");
+
+        assert_eq!(cell.finish(id), None);
+        assert_eq!(run(&cell, DispatchKind::Script), None);
     }
 
     #[test]
