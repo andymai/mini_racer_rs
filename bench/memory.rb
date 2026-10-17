@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
 # One memory scenario, as JSON on stdout for bench/run.rb: resident memory
-# from the kernel, read after collections, a pause and one more collection.
-# Contexts the collector released finish tearing down on their own threads
-# during the pause, and Ruby's full collection afterwards trims what malloc
-# freed back to the system. run.rb starts a fresh process per scenario, so
-# every one starts from the same heap.
+# from the kernel, read after collections, a pause and one more collection,
+# so contexts the collector released have finished tearing down on their own
+# threads. Memory malloc keeps after a free still counts, as it does for an
+# application. run.rb starts a fresh process per scenario, so every one
+# starts from the same heap.
 
 require "json"
 require_relative "external"
