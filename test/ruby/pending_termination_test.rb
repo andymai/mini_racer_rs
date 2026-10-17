@@ -3,7 +3,7 @@
 require "test_helper"
 require "mini_racer"
 
-class StopTest < Minitest::Test
+class PendingTerminationTest < Minitest::Test
   def setup
     @context = MiniRacer::Context.new
   end
@@ -31,5 +31,19 @@ class StopTest < Minitest::Test
     error = assert_raises(MiniRacer::InternalError) { @context.eval("nest(); 1") }
     assert_equal "null", error.message
     assert_equal 2, @context.eval("1 + 1")
+  end
+
+  def test_attach_under_a_pending_memory_cause_raises_internal_error_null
+    context = MiniRacer::Context.new(max_memory: 20_000_000)
+    assert_raises(MiniRacer::V8OutOfMemoryError) do
+      context.eval("globalThis.big = []; for (let i = 0; i < 40; i++) big.push(new Array(100000).fill(i))")
+    end
+    context.low_memory_notification
+    error = assert_raises(MiniRacer::InternalError) { context.attach("f", proc { 1 }) }
+    assert_equal "null", error.message
+    assert_raises(MiniRacer::V8OutOfMemoryError) { context.eval("big.length") }
+    assert_equal 2, context.eval("big = null; 2")
+  ensure
+    context&.dispose
   end
 end

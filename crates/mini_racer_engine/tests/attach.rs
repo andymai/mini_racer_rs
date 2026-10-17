@@ -517,7 +517,7 @@ fn a_callback_raising_after_its_nested_script_was_terminated_still_throws() {
 
 // mini_racer's attach never asks whether a termination is pending, so under a
 // stop it fails as an internal error whose text is V8's termination exception;
-// the stop stays for the next script, outermost or nested.
+// the next script, outermost or nested, still reports the stop.
 #[test]
 fn attach_under_a_pending_stop_is_an_internal_error_and_leaves_the_stop() {
     let context = spawn();
