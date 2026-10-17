@@ -47,12 +47,14 @@ end
 class FiberSchedulerTest < Minitest::Test
   include SchedulerContexts
 
-  # One core is left for the Ruby thread, so the ticker is not starved. Run
+  # Two cores are left where there are four or more, one for the Ruby thread
+  # and one for the rest of a shared CI runner, so the ticker is not starved
+  # (with three busy contexts, a 4-vCPU macOS Intel runner ticked twice). Run
   # one after another, the calls would take count * 100 ms and the ticker
   # would tick about once between each.
   def test_contexts_run_concurrently_from_fibers_of_one_thread
-    count = [4, Etc.nprocessors - 1].min
-    skip "needs at least three cores" if count < 2
+    skip "needs at least three cores" if Etc.nprocessors < 3
+    count = (Etc.nprocessors - 2).clamp(2, 4)
     contexts = Array.new(count) { busy_context }
     elapsed = nil
     Sync do |task|
