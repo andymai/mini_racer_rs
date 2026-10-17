@@ -52,7 +52,7 @@ Never skip a hook. If one fails on breakage you did not cause, stop and report i
 | Job or message | Fix |
 |---|---|
 | `VIOLATION [<tag>]` from a check script | See `.claude/skills/layer-boundaries/reference.md` for each tag |
-| Check exports: allowlist differs | Intended change: `scripts/check-exports.sh --write` on Linux; for macOS copy the list from the job's "Built exports" log group into `ext/mini_racer_rs/exports.allow.macos` |
+| Check exports: allowlist differs | Intended change: `scripts/check-exports.sh --write` on Linux; for macOS commit the `exports.allow.macos` from the failing leg's `exports-macos-15-ruby-<version>` artifact |
 | Gem Contents: missing or unexpected files | Adjust the globs in `mini_racer_rs.gemspec` |
 | MSRV | Raise it on purpose in `Cargo.toml`, `tools/versions.toml`, and `MINIMUM_RUST` in `ext/mini_racer_rs/extconf.rb` together; `scripts/check-versions.sh` compares them |
 | TOML Format | `taplo fmt` |
