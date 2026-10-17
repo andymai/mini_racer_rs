@@ -552,12 +552,39 @@ jobs:
           MINI_RACER_RS_AUTO_COMPACT: "1"
         run: bundle exec rake test
 
+  # Fails on findings the PR adds, or when either scan cannot finish: the
+  # reusable workflow scans the base and the head and compares them, so an
+  # advisory against a version already on main fails osv-scan.yml's runs
+  # instead. Only PRs from this repository upload SARIF, since a fork's PR runs
+  # with a read-only token.
+  osv:
+    name: OSV Scan (new findings)
+    if: github.event_name == 'pull_request'
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@a345acffa64b0eaede81a3d9aae6141214d9c8fc # v2.6.0
+    with:
+      scan-args: |-
+        --config=osv-scanner.toml
+        --lockfile=Cargo.lock
+        --lockfile=crates/mini_racer_wire/fuzz/Cargo.lock
+        --lockfile=Gemfile.lock
+        --lockfile=package-lock.json
+        --lockfile=tools/reference/Gemfile.lock
+        --lockfile=test/consumers/js/package-lock.json
+        --lockfile=test/consumers/transitive/Gemfile.lock
+      upload-sarif: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    # A caller must grant every permission the called workflow declares, or the
+    # run fails at startup.
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
   # !cancelled() rather than always(): a run superseded by a newer push must
   # not report a failing gate for its commit.
   ci-pass:
     name: CI Pass
     if: ${{ !cancelled() }}
-    needs: [changes, fmt, taplo, rubocop, machete, deny, audit, notices, boundaries, repo-checks, msrv, rustdoc, clippy, rust-test, loom, fuzz-smoke, gem-verify, ruby, truffleruby, gc-stress]
+    needs: [changes, fmt, taplo, rubocop, machete, deny, audit, notices, boundaries, repo-checks, msrv, rustdoc, clippy, rust-test, loom, fuzz-smoke, gem-verify, ruby, truffleruby, gc-stress, osv]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

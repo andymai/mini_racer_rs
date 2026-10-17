@@ -90,7 +90,7 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | Export allowlists | `ext/mini_racer_rs/exports.allow.linux`, `ext/mini_racer_rs/exports.allow.macos` |
 | V8 archive pins | `ext/mini_racer_rs/v8-archives.sha256`, `scripts/fetch-v8-archive.sh`, `scripts/update-v8-archives.sh` |
 | Third-party notices: Rust crates, the Rust standard library, and the code in the V8 archives | `THIRD_PARTY_NOTICES.md`, `about.toml`, `about.hbs`, `licenses/v8/`, `licenses/rust/`, `scripts/update-notices.sh` |
-| Dependency updates and advisory scans | `.github/dependabot.yml`, `.github/workflows/dependabot-auto-merge.yml`, `.github/workflows/osv-scan.yml`, `osv-scanner.toml` |
+| Dependency updates and advisory scans | `.github/dependabot.yml`, `.github/workflows/dependabot-auto-merge.yml`, `.github/workflows/osv-scan.yml`, `.github/workflows/ci.yml` (`osv`), `osv-scanner.toml` |
 | CI | `.github/workflows/ci.yml`, `.github/actions/setup/action.yml` |
 | Releases: the release PR, native and source gem builds, install tests, publishing | `.github/workflows/release-please.yml`, `.github/workflows/release.yml`, `release-please-config.json`, `.release-please-manifest.json` |
 | Gem packaging (one extension per Ruby minor in a native gem) and the installed-gem smoke test | `rakelib/package.rake`, `release/smoke.rb`, `tools/versions.toml` (`[release]`) |
