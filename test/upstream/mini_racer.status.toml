@@ -311,9 +311,6 @@ status = "upstream-skip"
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_estimated_size_when_disposed"]
 status = "pass"
 
-[tests."test/mini_racer_test.rb#MiniRacerTest#test_estimated_size_when_disposed".overrides."truffleruby-40.0-linux-x86_64"]
-status = "pass"
-
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_eval_returns_unfrozen_string"]
 status = "pass"
 
