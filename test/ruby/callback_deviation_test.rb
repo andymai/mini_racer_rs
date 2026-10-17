@@ -40,9 +40,23 @@ class CallbackDeviationTest < Minitest::Test
       require "mini_racer"
       context = MiniRacer::Context.new
       trapped = nil
-      Signal.trap("USR1") { trapped = (context.eval("1") rescue $!.class) }
-      context.attach("waits", proc { context.eval("const t = Date.now(); while (Date.now() - t < 200) {}; 7") })
-      Thread.new { sleep 0.05; Process.kill("USR1", Process.pid) }
+      waiting = false
+      Signal.trap("USR1") { trapped ||= (context.eval("1") rescue $!.class) }
+      context.attach("waits", proc {
+        waiting = true
+        context.eval("const t = Date.now(); while (Date.now() - t < 1000) {}; 7")
+      })
+      # A trap that ran in the callback's own Ruby code would be a legitimate
+      # reentry, so signals start once the callback is waiting, and repeat in
+      # case one is delivered late.
+      Thread.new do
+        sleep 0.01 until waiting
+        sleep 0.05
+        until trapped
+          Process.kill("USR1", Process.pid)
+          sleep 0.05
+        end
+      end
       p [context.eval("waits()"), trapped, context.eval("2 + 2")]
     RUBY
 
