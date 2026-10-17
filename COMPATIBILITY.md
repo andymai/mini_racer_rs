@@ -4,7 +4,7 @@
 
 | Engine | Done | Planned | Deviation |
 |---|---|---|---|
-| CRuby | 49 | 5 | 20 |
+| CRuby | 49 | 5 | 21 |
 | TruffleRuby | 58 | 0 | 0 |
 
 ## Surface
@@ -107,6 +107,12 @@ Approved 2026-10-16.
 Both gems allow an attached callback to call `eval`, `call`, or `attach` on its own context, running the nested call inside the script that invoked the callback. mini_racer_rs accepts the call only from the fiber running the callback. A call from another fiber on the same thread, such as code inside `Enumerator#next`, raises `ThreadError` (`deadlock; lock already owned by another fiber belonging to the same thread`). mini_racer 0.22.1 accepts it: `Enumerator.new { |y| y << context.eval("1") }.next` inside a callback returns `1`. A signal trap that calls the context while a callback waits on a nested `eval` gets `ThreadError` in mini_racer_rs; when rescued, the script completes. With mini_racer 0.22.1, the same program hangs until killed. mini_racer_rs refuses these calls because each nested call must finish before its callback replies, preventing out-of-order replies from being paired with the wrong callback.
 
 Approved 2026-10-16.
+
+### `behavior:dispose-in-flight@ruby`
+
+`mini_racer_rs`’s `MiniRacer::Context#dispose` waits until the runner finishes work in flight and destroys the isolate, while `mini_racer` 0.22.1 returns once its V8 thread takes the request, then finishes its current work and frees the isolate. In both gems, disposal from another thread terminates the running JavaScript, and the eval or call raises `MiniRacer::ContextDisposedError` ("disposed context"). With a 64 MiB string result from a snapshot being serialized when `dispose` was called 10 ms into an eval, `mini_racer` 0.22.1 returned at 10 ms, while `mini_racer_rs` returned after about 60 ms, when serialization finished. For a busy loop, which termination stops immediately, both returned within 1 ms. This makes disposal final: isolate memory and runner-thread resources are released before it returns, as checked by teardown tests under the leak checker.
+
+Pending review.
 
 ### `behavior:fiber-scheduler@ruby`
 

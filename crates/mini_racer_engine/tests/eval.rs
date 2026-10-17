@@ -293,6 +293,8 @@ fn dispose_is_final_and_repeatable() {
         .expect("a second dispose is a no-op");
 }
 
+// mini_racer cancels the wait of a script a dispose catches running, which
+// raises its disposed error.
 #[test]
 fn dispose_terminates_a_script_running_on_another_thread() {
     let context = spawn();
@@ -300,10 +302,10 @@ fn dispose_terminates_a_script_running_on_another_thread() {
         let running = scope.spawn(|| eval(&context, "while (true) {}"));
         std::thread::sleep(Duration::from_millis(50));
         context.begin_dispose();
-        assert_eq!(
-            terminated_by(running.join().expect("eval thread")),
-            TerminationCause::Stop
-        );
+        assert!(matches!(
+            running.join().expect("eval thread"),
+            Err(EngineError::Disposed)
+        ));
     });
     context.dispose(&mut Parking).expect("dispose");
     assert!(matches!(eval(&context, "1"), Err(EngineError::Disposed)));

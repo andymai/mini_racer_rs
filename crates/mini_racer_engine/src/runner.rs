@@ -450,8 +450,9 @@ fn ended(runtime: &Runtime, dispatch: DispatchId) -> Result<Vec<u8>, EngineError
 fn halted(halt: Halt) -> EngineError {
     match halt {
         Halt::Terminated(cause) => EngineError::from(JsError::terminated(cause)),
-        // mini_racer terminates a dispatch caught by dispose exactly as stop does.
-        Halt::Disposed => EngineError::from(JsError::terminated(TerminationCause::Stop)),
+        // mini_racer cancels the wait of a dispatch a dispose catches in
+        // flight, which raises its disposed error.
+        Halt::Disposed => EngineError::Disposed,
     }
 }
 
