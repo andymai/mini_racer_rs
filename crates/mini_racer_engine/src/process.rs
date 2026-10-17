@@ -1,3 +1,4 @@
+pub mod code_cache;
 pub mod fork;
 pub mod platform;
 pub(crate) mod tasks;

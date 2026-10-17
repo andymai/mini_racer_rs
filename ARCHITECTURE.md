@@ -61,6 +61,12 @@ Termination rings the queue, waking a runner sleeping in an await without postin
 
 `MiniRacer::Snapshot` builds a V8 startup blob in an isolate created for that purpose. The implementation is in `crates/mini_racer_engine/src/snapshot.rs`, and a context can start from the resulting blob.
 
+## Code cache
+
+Contexts in one process share a V8 code cache for evaluated sources of 1 MiB or more (for a source held as UTF-16, half that many code units). The first sighting digests source samples. At the second sighting with the same file name and startup snapshot, the runner digests the whole source with a key chosen at random per process and, if the eval succeeds, builds the cache once the dispatch is over and before the eval returns. The keyed digest protects against V8's length-only cache check. Building is outside `timeout:` but delays return. A `Context#stop` or Ruby `Timeout` arriving during the build applies to the next script. A fork immediately after return finds the context idle.
+
+Later evals compile from cached code. Simultaneous loaders build one entry while others compile from source. V8 rejects entries from other flags, versions, or startup snapshots, so the runner drops them and compiles from source. The cache holds at most eight entries and 256 MiB, evicts least recently used entries first, and neither keeps nor rebuilds an entry larger than 256 MiB. An entry stays found however many other large scripts are seen after it, and forked children inherit entries. On one machine, a 44 MB production rendering bundle loaded in about 200 ms from cache, versus about 1,000 ms from source and with mini_racer 0.22.1. The implementation is in `crates/mini_racer_engine/src/process/code_cache.rs` and `crates/mini_racer_engine/src/runner.rs`.
+
 ## Forks
 
 With the `:single_threaded` platform flag, a runner serves its isolate as a `v8::SharedIsolate`. Between requests, the isolate remains unlocked in its control block.
