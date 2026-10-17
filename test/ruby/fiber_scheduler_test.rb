@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require "etc"
 require "test_helper"
 require "mini_racer"
 
@@ -13,7 +12,9 @@ end
 # Under a fiber scheduler, waiting for a context parks only the waiting fiber,
 # so other fibers of the same thread keep running.
 module SchedulerContexts
-  BUSY = "globalThis.busy = (ms) => { const end = Date.now() + ms; while (Date.now() < end) {} return ms }"
+  # `busy` spins the runner's core; `nap` blocks the runner without using one.
+  BUSY = "globalThis.busy = (ms) => { const end = Date.now() + ms; while (Date.now() < end) {} return ms };" \
+         "globalThis.nap = (ms) => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); return ms }"
 
   def setup
     skip "needs CRuby and the async gem" unless RUBY_ENGINE == "ruby" && defined?(Async)
@@ -47,20 +48,18 @@ end
 class FiberSchedulerTest < Minitest::Test
   include SchedulerContexts
 
-  # Two cores are left where there are four or more, one for the Ruby thread
-  # and one for the rest of a shared CI runner, so the ticker is not starved
-  # (with three busy contexts, a 4-vCPU macOS Intel runner ticked twice). Run
-  # one after another, the calls would take count * 100 ms and the ticker
-  # would tick about once between each.
+  # The runners nap rather than spin, so they leave the CPU to the Ruby thread
+  # and the ticker on any number of cores. Run one after another, the calls
+  # would take count * 100 ms and the ticker would tick about once between
+  # each.
   def test_contexts_run_concurrently_from_fibers_of_one_thread
-    skip "needs at least three cores" if Etc.nprocessors < 3
-    count = (Etc.nprocessors - 2).clamp(2, 4)
+    count = 4
     contexts = Array.new(count) { busy_context }
     elapsed = nil
     Sync do |task|
       ticking = ticker(task, 0.01)
       started = now
-      contexts.map { |context| task.async { context.call("busy", 100) } }.each(&:wait)
+      contexts.map { |context| task.async { context.call("nap", 100) } }.each(&:wait)
       elapsed = now - started
       ticking.stop
     end
