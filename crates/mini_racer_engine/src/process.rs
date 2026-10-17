@@ -41,6 +41,13 @@ pub fn ensure_initialized() {
     });
 }
 
+/// Tasks V8 posted for an isolate no runner had registered, dropped unrun.
+/// Snapshot builds post some; a context's isolate should never get one.
+#[must_use]
+pub fn unserved_tasks() -> u64 {
+    tasks::unserved()
+}
+
 #[must_use]
 pub fn v8_version() -> &'static str {
     v8::V8::get_version()
