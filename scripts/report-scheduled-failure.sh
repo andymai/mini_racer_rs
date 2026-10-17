@@ -12,7 +12,7 @@ run=$(gh api "repos/{owner}/{repo}/actions/runs/$RUN_ID")
 url=$(jq -r .html_url <<<"$run")
 sha=$(jq -r .head_sha <<<"$run")
 jobs=$(gh api --paginate "repos/{owner}/{repo}/actions/runs/$RUN_ID/jobs" \
-  --jq '.jobs[] | select(.conclusion == "failure" or .conclusion == "timed_out") | "- [\(.name)](\(.html_url))"')
+  --jq '.jobs[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "cancelled") | "- [\(.name)](\(.html_url))"')
 title="Scheduled $WORKFLOW run failed"
 body=$(printf 'Run: %s\nCommit: %s\n\nFailed jobs:\n%s\n' "$url" "$sha" "${jobs:-- none reported}")
 open=$(gh issue list --state open --search "\"$title\" in:title" --json number,title |

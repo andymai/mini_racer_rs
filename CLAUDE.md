@@ -116,7 +116,7 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | Generated from compat.toml (never edit) | `COMPATIBILITY.md`, the README compat table |
 | Public docs (written through codex-write, approved by Andy) and GitHub templates | `README.md`, `ARCHITECTURE.md`, `SECURITY.md`, `STABILITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1, verbatim), `.github/ISSUE_TEMPLATE/`, `.github/pull_request_template.md` |
 | Weekly issue when RubyGems.org lists a newer mini_racer than the target | `.github/workflows/upstream-watch.yml`, `.github/upstream-release.md` |
-| An issue per workflow whose scheduled run fails; later failures comment on the open one | `.github/workflows/scheduled-failures.yml`, `scripts/report-scheduled-failure.sh` |
+| An issue per workflow whose scheduled run fails or times out; later failures comment on the open one; every scheduled workflow must be on its list | `.github/workflows/scheduled-failures.yml`, `scripts/report-scheduled-failure.sh`, `scripts/check-scheduled-watch.sh` |
 
 Skills: `.claude/skills/pr-workflow` (branch to merge), `.claude/skills/layer-boundaries` (dependencies, fences, check failures), `.claude/skills/parity-suite` (upstream suite and ledger), `.claude/skills/release-flow` (releases, packaging, publishing), `.claude/skills/v8-bump` (moving the pinned V8).
 

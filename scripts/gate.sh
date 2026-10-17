@@ -34,6 +34,7 @@ step scripts/check-gc-roots.sh
 step scripts/check-statics.sh
 step scripts/check-prose.sh
 step scripts/check-action-pins.sh
+step scripts/check-scheduled-watch.sh
 step scripts/check-versions.sh
 step scripts/check-platforms.sh
 step scripts/check-vendored.sh

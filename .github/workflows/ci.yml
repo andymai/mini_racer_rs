@@ -204,6 +204,7 @@ jobs:
       - run: scripts/check-versions.sh
       - run: scripts/check-vendored.sh
       - run: scripts/check-action-pins.sh
+      - run: scripts/check-scheduled-watch.sh
       - run: scripts/check-platforms.sh
       - run: scripts/check-prose.sh
       - run: scripts/check-doc-paths.sh
