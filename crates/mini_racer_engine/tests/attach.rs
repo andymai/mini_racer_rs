@@ -395,3 +395,45 @@ fn a_timeout_while_a_nested_result_serializes_leaves_the_result() {
         Err(EngineError::Js(js)) if js.kind == JsErrorKind::Terminated(TerminationCause::Timeout)
     ));
 }
+
+// A dispose cancels mini_racer's wait for a nested script, so one landing
+// while the nested result serializes still fails it.
+#[test]
+fn a_dispose_while_a_nested_result_serializes_fails_it() {
+    let length = 64 << 20;
+    let blob = ContextHandle::create_snapshot(
+        JsText::from(format!("var value = 'x'.repeat({length})")),
+        None,
+        &mut adding(),
+    )
+    .expect("snapshot");
+    let context = ContextHandle::spawn(
+        ContextConfig {
+            snapshot: Some(blob),
+            ..ContextConfig::default()
+        },
+        &mut adding(),
+    )
+    .expect("spawn");
+    context
+        .attach(name_and_id("grab", 0), &mut adding())
+        .expect("attach");
+    let mut nested = None;
+    std::thread::scope(|scope| {
+        let mut host = Answering(|_args: &[i64], _id| {
+            scope.spawn(|| {
+                std::thread::sleep(Duration::from_millis(5));
+                context.begin_dispose();
+            });
+            nested = Some(
+                context
+                    .eval("<eval>", "value", &mut adding())
+                    .map(|bytes| bytes.len()),
+            );
+            CallbackReply::Value(integer(0))
+        });
+        assert!(eval(&context, "grab(); 1", &mut host).is_err());
+    });
+    assert!(matches!(nested, Some(Err(_))), "{nested:?}");
+    context.dispose(&mut adding()).expect("dispose");
+}

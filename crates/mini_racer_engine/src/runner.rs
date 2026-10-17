@@ -460,8 +460,11 @@ fn script(
     let halt = match depth {
         Depth::Outermost(dispatch) if result.is_ok() => term.finish(dispatch),
         Depth::Outermost(dispatch) => term.end(dispatch),
-        // Its verdict came before it serialized.
-        Depth::Nested if result.is_ok() && kind == DispatchKind::Script => None,
+        // Its verdict came before it serialized, but a dispose still cancels
+        // the wait for it, as in mini_racer.
+        Depth::Nested if result.is_ok() && kind == DispatchKind::Script => {
+            term.is_disposing().then_some(Halt::Disposed)
+        }
         Depth::Nested => term.check(kind),
     };
     if raised {
