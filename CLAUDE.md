@@ -107,7 +107,7 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | Differential run against the real gem | `test/diff/run.rb`, `test/diff/workers.rb`, `test/diff/worker.rb`, `test/diff/canonical.rb`, `test/diff/generate.rb`, `test/diff/shrink.rb`, `test/diff/ledger.rb`, `test/diff/shapes.rb` |
 | Consumer workloads (Babel, Terser, Handlebars, React) and their ledger | `test/consumers/workloads.rb`, `test/consumers/js/`, `test/consumers/candidate.status.toml` |
 | rtlcss resolving through the shim to mini_racer_rs | `test/consumers/transitive/` |
-| Benchmarks against the real gem (informational), including mini_racer's own `benchmark/serde` suite | `bench/run.rb`, `bench/measure.rb`, `bench/payload.rb`, `bench/serde.rb` |
+| Benchmarks against the real gem (informational): per-call costs, real workloads (Babel, Terser, React, Handlebars), and mini_racer's own `benchmark/serde` suite | `bench/run.rb`, `bench/measure.rb`, `bench/workloads.rb`, `bench/fixtures/`, `bench/payload.rb`, `bench/serde.rb` |
 | Memory, lifecycle, fork and spawn stress runs (round trips and churn nightly, and on PRs labeled `stress`) | `test/stress/round_trips.rb`, `test/stress/churn.rb`, `test/stress/fork_loop.rb`, `test/stress/spawn_churn.rb`, `.github/workflows/nightly.yml` |
 | Differential ledgers and corpus | `test/diff/candidate.status.toml`, `test/diff/divergences.toml`, `test/diff/corpus/` |
 | Vendored TruffleRuby backend | `lib/mini_racer/truffleruby.rb`, `lib/mini_racer/shared.rb` |
@@ -149,7 +149,7 @@ bundle exec ruby test/diff/run.rb --twin --strict   # the real gem and this one 
 bundle exec ruby test/diff/run.rb --set consumers --twin --strict   # real libraries (npm run build in test/consumers/js first)
 bundle exec ruby test/diff/run.rb --explore --shrink --seed 42 --js 1500 --ruby 1500   # a fresh seed, no ledger, no shared objects
 BUNDLE_GEMFILE=$PWD/test/consumers/transitive/Gemfile bundle exec ruby test/consumers/transitive/check.rb
-bundle exec ruby bench/run.rb     # medians against the real gem; --quick for a smoke run
+bundle exec ruby bench/run.rb     # medians against the real gem (needs the consumer bundles); --quick for a smoke run
 bundle exec ruby -Ilib test/stress/round_trips.rb multi   # 1M evals after a 500k warm-up; fails on RSS growth over 5% (also: single)
 bundle exec ruby -Ilib test/stress/churn.rb multi 8 600   # 8 threads churning contexts for 10 min; fails over 256 bytes of RSS per context plus 32 MB (also: single)
 bundle exec ruby -Ilib test/stress/fork_loop.rb    # 500 forks with idle contexts, 100 during an eval loop, single-threaded

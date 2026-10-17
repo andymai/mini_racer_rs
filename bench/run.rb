@@ -9,6 +9,7 @@ require "fileutils"
 require "json"
 require "open3"
 require "optparse"
+require_relative "../test/consumers/workloads"
 require_relative "../test/diff/workers"
 
 ROOT = File.expand_path("..", __dir__)
@@ -37,16 +38,36 @@ METRICS = {
   "Ruby to JS (MB/s)" => [->(r) { number(r["ruby_to_js_mbps"]) }, :higher],
   "idle CPU, 50 contexts (% of a core)" => [->(r) { number(r["idle_cpu_percent"]) }, :lower, 1.0],
 }.freeze
+WORKLOADS = {
+  "babel_transform" => ["Babel transform of a 3 KB JSX component, through ExecJS (ms)", 1e6],
+  "terser_minify" => ["Terser minify of a 78 KB library, through ExecJS (ms)", 1e6],
+  "react_render" => ["React server render of 1,000 items (17 KB of HTML), through ExecJS (us)", 1e3],
+  "react_first_render" => ["React in a new context: load the bundle and render 1,000 items, through ExecJS (ms)", 1e6],
+  "handlebars_render" => ["Handlebars render of 50 rows, through Context#call (us)", 1e3],
+}.freeze
+TERSER_INPUT = File.join(ROOT, "test", "consumers", "js", "node_modules", "handlebars", "dist", "handlebars.runtime.js")
 # More spread than this between runs means something else was using the machine.
 NOISE = 0.10
 
-options = { runs: 5, quick: false, cpus: nil, serde: true }
+options = { runs: 5, quick: false, cpus: nil, serde: true, micro: true, workloads: true }
 OptionParser.new do |opts|
   opts.on("--runs N", Integer) { |n| options[:runs] = n }
   opts.on("--quick", "One short run each, for a smoke test") { options.merge!(quick: true, runs: 1) }
   opts.on("--cpus LIST", "Pin both implementations to these CPUs with taskset") { |list| options[:cpus] = list }
   opts.on("--[no-]serde", "Also run mini_racer's own benchmark/serde suite (default on)") { |on| options[:serde] = on }
+  opts.on("--[no-]micro", "Run the round-trip, startup and payload metrics (default on)") { |on| options[:micro] = on }
+  opts.on("--[no-]workloads", "Run Babel, Terser, React and Handlebars workloads (default on)") do |on|
+    options[:workloads] = on
+  end
 end.parse!
+if options[:workloads]
+  begin
+    DiffConsumers.cases
+  rescue RuntimeError => e
+    abort "bench: #{e.message}"
+  end
+  abort "bench: #{TERSER_INPUT} is missing; run `npm ci` in test/consumers/js" unless File.exist?(TERSER_INPUT)
+end
 
 # The serde suite reads these too, and an exported one would change its
 # workload without a word in the table.
@@ -77,20 +98,32 @@ def serde(role, options)
   result.fetch("benchmarks").to_h { |bench| [bench.fetch("name"), bench.fetch("ms_per_iter") * 1e3] }
 end
 
+def workloads(role, options)
+  WORKLOADS.keys.to_h do |key|
+    [key, launch(role, options, "workloads.rb", key, *(options[:quick] ? ["--quick"] : [])) || {}]
+  end
+end
+
 def median(values) = values.sort[values.size / 2]
 
 raw = Hash.new { |hash, key| hash[key] = [] }
 serde_raw = Hash.new { |hash, key| hash[key] = [] }
+workloads_raw = Hash.new { |hash, key| hash[key] = [] }
 options[:runs].times do |run|
   ROLES.each do |role|
-    raw[role] << measure(role, options)
+    raw[role] << measure(role, options) if options[:micro]
     serde_raw[role] << serde(role, options) if options[:serde]
+    workloads_raw[role] << workloads(role, options) if options[:workloads]
     warn "run #{run + 1}/#{options[:runs]} #{role} done"
   end
 end
 
 broken = METRICS.filter_map { |name, (read, _)| name if raw["reference"].any? { |result| read.call(result).nil? } }
 abort "bench: the real mini_racer could not run #{broken.join(", ")}; see tmp/bench" unless broken.empty?
+reference_gem, candidate_gem = ROLES.zip(%w[mini_racer mini_racer_rs]).map do |role, plain|
+  [raw[role].first, *workloads_raw[role].first&.values].filter_map { |result| result&.fetch("gem", nil) }.first || plain
+end
+engines = ROLES.map { |role| workloads_raw[role].first&.values&.filter_map { |result| result["engine"] }&.first }
 
 digests = ROLES.to_h { |role| [role, raw[role].filter_map { |result| result["payload_digest"] }.uniq] }
 mismatch = !digests["candidate"].empty? && digests["candidate"] != digests["reference"]
@@ -100,10 +133,10 @@ governor = begin
 rescue Errno::ENOENT
   "unknown"
 end
-puts "#{raw["reference"].first["gem"]} against #{raw["candidate"].first["gem"]}, Ruby #{RUBY_VERSION}, " \
+puts "#{reference_gem} against #{candidate_gem}, Ruby #{RUBY_VERSION}, " \
      "#{options[:runs]} run(s), medians, governor #{governor}, " \
      "#{options[:cpus] ? "CPUs #{options[:cpus]}" : "not pinned"}"
-puts
+puts "Engines: #{engines.join(" against ")}" if engines.all?
 # Ratios of near-zero values say nothing, so with either value below the
 # floor none is given.
 def row(name, values, direction, floor: nil, wrong: false)
@@ -123,11 +156,33 @@ def row(name, values, direction, floor: nil, wrong: false)
   { "reference" => reference, "candidate" => candidate, "ratio" => ratio, "note" => note }
 end
 
-puts "| Metric | mini_racer | mini_racer_rs | Ratio | Note |"
-puts "|---|---|---|---|---|"
-summary = METRICS.to_h do |name, (read, direction, floor)|
-  values = ROLES.to_h { |role| [role, raw[role].map(&read)] }
-  [name, row(name, values, direction, floor:, wrong: mismatch && name.start_with?("JS to Ruby"))]
+summary = {}
+if options[:micro]
+  puts
+  puts "| Metric | mini_racer | mini_racer_rs | Ratio | Note |"
+  puts "|---|---|---|---|---|"
+  summary = METRICS.to_h do |name, (read, direction, floor)|
+    values = ROLES.to_h { |role| [role, raw[role].map(&read)] }
+    [name, row(name, values, direction, floor:, wrong: mismatch && name.start_with?("JS to Ruby"))]
+  end
+end
+
+workloads_summary = {}
+if options[:workloads]
+  puts
+  puts "Workloads, medians of each run's median."
+  puts
+  puts "| Workload | mini_racer | mini_racer_rs | Ratio | Note |"
+  puts "|---|---|---|---|---|"
+  workloads_summary = WORKLOADS.to_h do |key, (label, unit)|
+    values = ROLES.to_h do |role|
+      [role, workloads_raw[role].map { |run| number(run.dig(key, "result", "ns"))&./(unit) }]
+    end
+    reference, candidate = ROLES.map do |role|
+      workloads_raw[role].filter_map { |run| run.dig(key, "result", "digest") }.uniq
+    end
+    [label, row(label, values, :lower, wrong: !candidate.empty? && candidate != reference)]
+  end
 end
 
 serde_summary = {}
@@ -146,7 +201,8 @@ end
 out = File.join(ROOT, "tmp", "bench", "#{Time.now.utc.strftime("%Y%m%dT%H%M%SZ")}.json")
 FileUtils.mkdir_p(File.dirname(out))
 File.write(out, JSON.pretty_generate({ "governor" => governor, "cpus" => options[:cpus], "runs" => options[:runs],
-                                       "summary" => summary, "serde" => serde_summary, "raw" => raw,
-                                       "serde_raw" => serde_raw, }),)
+                                       "summary" => summary, "serde" => serde_summary,
+                                       "workloads" => workloads_summary, "raw" => raw, "serde_raw" => serde_raw,
+                                       "workloads_raw" => workloads_raw, }),)
 puts
 puts "results: #{out.delete_prefix("#{ROOT}/")}"
