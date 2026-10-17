@@ -27,5 +27,5 @@ Every check prints `VIOLATION [<tag>]: <detail>` (or `[settings]`) and exits non
 | `scripts/check-action-pins.sh` | `pin` | An action not pinned to a full SHA with a version comment | Pin it |
 | `scripts/check-versions.sh` | `version` | Version literals disagree | Make them agree |
 | `scripts/check-platforms.sh` | `platform` | Target lists disagree | Make them agree |
-| `scripts/check-doc-paths.sh` | `doc-path` | A path named in `CLAUDE.md` or a skill does not exist | Fix the path or the doc |
+| `scripts/check-doc-paths.sh` | `doc-path` | A path named in `CLAUDE.md`, a skill, a root Markdown doc or a GitHub template does not exist | Fix the path or the doc; public docs change through codex-write and Andy's approval |
 | `scripts/check-repo-settings.sh` | `settings` | A GitHub setting differs from the expected value (run locally with an admin token) | Restore the setting |
