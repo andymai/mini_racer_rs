@@ -450,8 +450,16 @@ jobs:
         run: cargo test -p mini_racer_rs --lib --locked
       - name: Compatibility ledger
         run: bundle exec rake compat:check
+      # Every Ruby 3.4 leg compares against the real gem, so a difference that
+      # shows on one platform only (ICU data, number formatting, a crash) is seen.
+      - name: Cache the real mini_racer 0.22.1
+        if: matrix.ruby == '3.4'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: tools/reference/vendor/bundle
+          key: reference-${{ runner.os }}-${{ runner.arch }}-ruby-${{ matrix.ruby }}-${{ hashFiles('tools/reference/Gemfile.lock') }}
       - name: Install the real mini_racer 0.22.1
-        if: matrix.os == 'ubuntu-24.04' && matrix.ruby == '3.4'
+        if: matrix.ruby == '3.4'
         working-directory: tools/reference
         run: BUNDLE_PATH=vendor/bundle bundle install
       # compat/surface.json is reflected from the real gem; this re-reflects it.
@@ -460,10 +468,10 @@ jobs:
         run: bundle exec rake compat:verify
       # The second copy of the real gem must agree with the first, or the harness itself is unsound.
       - name: Differential run against the real mini_racer
-        if: matrix.os == 'ubuntu-24.04' && matrix.ruby == '3.4'
+        if: matrix.ruby == '3.4'
         run: bundle exec ruby test/diff/run.rb --twin --strict
       - name: Consumer workloads against the real mini_racer
-        if: matrix.os == 'ubuntu-24.04' && matrix.ruby == '3.4'
+        if: matrix.ruby == '3.4'
         run: |
           (cd test/consumers/js && npm ci && npm run build)
           bundle exec ruby test/diff/run.rb --set consumers --twin --strict
