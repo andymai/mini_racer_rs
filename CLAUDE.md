@@ -93,7 +93,7 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | Dependency updates and advisory scans | `.github/dependabot.yml`, `.github/workflows/dependabot-auto-merge.yml`, `.github/workflows/osv-scan.yml`, `.github/workflows/ci.yml` (`osv`), `osv-scanner.toml` |
 | CI | `.github/workflows/ci.yml`, `.github/actions/setup/action.yml` |
 | Releases: the release PR, native and source gem builds, install tests, publishing | `.github/workflows/release-please.yml`, `.github/workflows/release.yml`, `release-please-config.json`, `.release-please-manifest.json` |
-| Gem packaging (one extension per Ruby minor in a native gem) and the installed-gem smoke test | `rakelib/package.rake`, `release/smoke.rb`, `tools/versions.toml` (`[release]`) |
+| Gem packaging (one extension per Ruby minor in a native gem), the installed-gem smoke test, and the suites run on the installed extension | `rakelib/package.rake`, `release/smoke.rb`, `tools/versions.toml` (`[release]`), `.github/workflows/release.yml` (`install`) |
 | Release checks: glibc and macOS floors, gem sizes, publish order, lockfiles after a version bump | `scripts/check-glibc-floor.sh`, `scripts/check-macos-minos.sh`, `scripts/check-gem-sizes.sh`, `scripts/publish-gems.sh`, `scripts/sync-release-locks.sh` |
 | Sanitizer runs (nightly, and on PRs labeled `sanitizers`) | `.github/workflows/nightly.yml`, `scripts/sanitizers.sh`, `.github/sanitizers/lsan.supp` |
 | Nightly fuzzing (15 minutes per target) and fresh-seed differential runs (30 minutes) | `.github/workflows/nightly.yml`, `scripts/fuzz-smoke.sh`, `test/diff/run.rb` (`--explore`) |
@@ -130,6 +130,7 @@ scripts/gate.sh                    # plus Rust tests, compile, exports, Ruby tes
 scripts/gate.sh --full             # plus planted violations, MSRV, deny, audit, machete, rustdoc, gem builds
 bundle exec rake compile           # build the extension into lib/mini_racer_rs/
 bundle exec rake test              # Ruby tests (compiles first)
+bundle exec rake test:prebuilt     # the same tests on the extension already in lib/, without compiling
 cargo nextest run --workspace --exclude mini_racer_rs
 scripts/check-exports.sh --write   # after changing #[no_mangle] items or bumping v8
 scripts/update-v8-archives.sh      # repin every target's V8 archive after bumping v8

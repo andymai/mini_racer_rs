@@ -12,7 +12,7 @@ Each compile leg of `.github/workflows/release.yml` builds with the release prof
 
 ## Install tests
 
-Every native gem is installed into an empty `GEM_HOME` on its platform for every Ruby, on the same runners as the compile legs, and `release/smoke.rb` runs from outside the checkout: it checks the loaded gem's platform, then evaluates, calls, attaches a callback, checks ICU data, a timeout and a snapshot. The source gem is installed the same way on TruffleRuby (which loads upstream's backend and builds nothing) and on a plain `ubuntu-24.04` runner with its own Rust and no V8 archive prefetched, so `ext/mini_racer_rs/extconf.rb`'s pinned digest is what downloads V8.
+Every native gem is installed into an empty `GEM_HOME` on its platform for every Ruby, on the same runners as the compile legs, and `release/smoke.rb` runs from outside the checkout: it checks the loaded gem's platform, then evaluates, calls, attaches a callback, checks ICU data, a timeout and a snapshot. The job then copies the installed extension for its Ruby into the checkout's `lib/mini_racer_rs/<minor>/` and runs `rake test:prebuilt` and the upstream and ExecJS suites in strict mode on it, so the full suites cover the released build. The source gem is installed the same way on TruffleRuby (which loads upstream's backend and builds nothing) and on a plain `ubuntu-24.04` runner with its own Rust and no V8 archive prefetched, so `ext/mini_racer_rs/extconf.rb`'s pinned digest is what downloads V8.
 
 ## Publishing
 
