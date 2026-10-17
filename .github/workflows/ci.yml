@@ -451,13 +451,7 @@ jobs:
       - name: Compatibility ledger
         run: bundle exec rake compat:check
       # Every Ruby 3.4 leg compares against the real gem, so a difference that
-      # shows on one platform only (ICU data, number formatting, a crash) is seen.
-      - name: Cache the real mini_racer 0.22.1
-        if: matrix.ruby == '3.4'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: tools/reference/vendor/bundle
-          key: reference-${{ runner.os }}-${{ runner.arch }}-ruby-${{ matrix.ruby }}-${{ hashFiles('tools/reference/Gemfile.lock') }}
+      # shows on one platform only (a crash, a conversion) is seen.
       - name: Install the real mini_racer 0.22.1
         if: matrix.ruby == '3.4'
         working-directory: tools/reference
