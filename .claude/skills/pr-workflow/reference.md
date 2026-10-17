@@ -15,7 +15,7 @@
 | Security Audit | `cargo audit` on the root and fuzz lockfiles |
 | Third-Party Notices | `scripts/update-notices.sh --check`, on every PR: `THIRD_PARTY_NOTICES.md` matches `cargo about`, `licenses/rust` and `licenses/v8`, and none of the four V8 archives links source `licenses/v8/components.tsv` misses |
 | Boundaries | `scripts/check-boundaries.sh`, `scripts/test-boundaries.sh`, and the fence, guard, GC root and static checks |
-| Repo Checks | version, action pin, platform, prose, doc path and Claude hook checks |
+| Repo Checks | version, action pin, scheduled-workflow watch, platform, prose, doc path and Claude hook checks |
 | MSRV | `cargo check` on the toolchain in `tools/versions.toml` |
 | Rustdoc | `cargo doc` with `-D warnings` |
 | Clippy | `cargo clippy --workspace --all-targets -- -D warnings` |
