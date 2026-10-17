@@ -603,3 +603,27 @@ fn a_heap_snapshot_is_the_json_v8_writes() {
         Err(EngineError::Disposed)
     ));
 }
+
+// A WeakRef's target goes only in a garbage collection, which nothing else
+// asks for while the context is idle.
+fn collected_while_idle(gc_after_idle: Option<Duration>) -> bool {
+    let context = ContextHandle::spawn(
+        ContextConfig {
+            gc_after_idle,
+            ..ContextConfig::default()
+        },
+        &mut Parking,
+    )
+    .expect("spawn");
+    eval(&context, "globalThis.ref = new WeakRef({}); 0").expect("eval");
+    std::thread::sleep(Duration::from_millis(100));
+    eval(&context, "ref.deref() === undefined").expect("eval") == Out::Bool(true)
+}
+
+// As mini_racer's runner does: once idle that long after a request, it asks
+// V8 for a full collection, once.
+#[test]
+fn an_idle_context_collects_garbage_after_ensure_gc_after_idle() {
+    assert!(collected_while_idle(Some(Duration::from_millis(5))));
+    assert!(!collected_while_idle(None));
+}

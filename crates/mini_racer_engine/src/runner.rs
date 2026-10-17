@@ -267,10 +267,25 @@ enum Served {
     Stop { disposed: bool },
 }
 
+// With `gc_after_idle`, mini_racer's runner asks V8 for a full collection
+// once it has waited that long after a request, and not again until the next.
 fn serve_held(block: &ControlBlock, shared: &v8::SharedIsolate, runtime: &Arc<Runtime>) -> bool {
     let mut isolate = shared.lock();
+    let mut collected = true;
     loop {
-        if let Served::Stop { disposed } = serve_one(&mut isolate, block, runtime, receive(block)) {
+        let message = match block.config.gc_after_idle {
+            Some(idle) if !collected => match receive_within(block, idle) {
+                Received::Message(message) => message,
+                Received::Idle => {
+                    isolate.low_memory_notification();
+                    collected = true;
+                    continue;
+                }
+            },
+            _ => receive(block),
+        };
+        collected = false;
+        if let Served::Stop { disposed } = serve_one(&mut isolate, block, runtime, message) {
             return disposed;
         }
     }
@@ -353,6 +368,30 @@ fn respond(block: &ControlBlock, response: Result<Vec<u8>, EngineError>) -> Serv
         Served::Next
     } else {
         Served::Stop { disposed: false }
+    }
+}
+
+enum Received {
+    Message(Option<ToV8<crate::control::Wire>>),
+    Idle,
+}
+
+fn receive_within(block: &ControlBlock, idle: Duration) -> Received {
+    let deadline = std::time::Instant::now().checked_add(idle);
+    spin_until(IDLE_SPIN.min(idle), || block.channel.ready(Side::V8));
+    loop {
+        match block.channel.recv_v8() {
+            Ok(Some(message)) => return Received::Message(Some(message)),
+            Ok(None) => {
+                let left =
+                    deadline.map(|at| at.saturating_duration_since(std::time::Instant::now()));
+                if left.is_some_and(|left| left.is_zero()) {
+                    return Received::Idle;
+                }
+                block.channel.park(Side::V8, left);
+            }
+            Err(_) => return Received::Message(None),
+        }
     }
 }
 

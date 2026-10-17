@@ -139,6 +139,10 @@ pub struct ContextConfig {
     /// The used heap size, in bytes, past which a garbage collection ends the
     /// running script out of memory, as `mini_racer`'s `max_memory:` does.
     pub max_memory: Option<u64>,
+    /// How long a runner waits idle after a request before it asks V8 for a
+    /// full garbage collection, once, as `mini_racer`'s
+    /// `ensure_gc_after_idle:` does. Single-threaded runners never do.
+    pub gc_after_idle: Option<Duration>,
 }
 
 /// The context's pending timeout and the earliest deadline the watchdog holds
