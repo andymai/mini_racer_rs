@@ -1,5 +1,5 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -49,6 +49,9 @@ struct Runtime {
     key: usize,
     // Tasks running, one inside another when a task's script pumps.
     running: AtomicU32,
+    // Set by a request, at any depth, that left memory worth handing back
+    // once the outermost response is out.
+    freed: AtomicBool,
 }
 
 impl Runtime {
@@ -67,6 +70,7 @@ impl Runtime {
             raised: Mutex::default(),
             key,
             running: AtomicU32::new(0),
+            freed: AtomicBool::new(false),
         }
     }
 }
@@ -361,7 +365,9 @@ fn serve_one(
                 )),
             };
             let served = respond(block, response);
-            sys::release_free_memory();
+            if matches!(served, Served::Next) {
+                sys::release_free_memory();
+            }
             return served;
         }
         Some(ToV8::Request(request)) => request,
@@ -369,18 +375,13 @@ fn serve_one(
         Some(ToV8::Reply(_)) => return Served::Next,
         None => return Served::Stop { disposed: false },
     };
-    let release = match &request {
-        Request::Eval { source, .. } => large(source),
-        Request::LowMemoryNotification { .. } => true,
-        _ => false,
-    };
     let response = {
         v8::scope_with_context!(let scope, isolate, &runtime.context);
         handle(scope, runtime, request)
     };
     let served = respond(block, response);
     // After the response, so the caller does not wait for it.
-    if release {
+    if matches!(served, Served::Next) && runtime.freed.swap(false, Ordering::Relaxed) {
         sys::release_free_memory();
     }
     served
@@ -482,6 +483,7 @@ fn handle(
         Request::LowMemoryNotification { depth } => {
             if !runtime.block.term.is_disposing() {
                 scope.low_memory_notification();
+                runtime.freed.store(true, Ordering::Relaxed);
             }
             match depth {
                 Depth::Outermost(dispatch) => ended(runtime, dispatch),
@@ -666,6 +668,9 @@ fn evaluate(
     (filename, source): (&JsText, &JsText),
     (depth, awaited): (Depth, bool),
 ) -> Result<Vec<u8>, EngineError> {
+    if large(source) {
+        runtime.freed.store(true, Ordering::Relaxed);
+    }
     let too_large = || EngineError::Internal("source too large".to_owned());
     let source = string(tc, source).ok_or_else(too_large)?;
     let name = string(tc, filename).ok_or_else(too_large)?;

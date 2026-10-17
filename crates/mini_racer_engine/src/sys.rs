@@ -85,10 +85,10 @@ extern "C" fn park_for_fork(isolate: v8::UnsafeRawIsolatePtr, _data: *mut std::f
     }
 }
 
-/// Hands memory malloc holds free back to the system. glibc keeps what a
-/// thread frees in that thread's arena for later allocations, and parsing a
-/// large script frees most of what it took, about half of a loaded bundle's
-/// resident memory, which no later allocation of that runner may need.
+/// Returns the free pages of every glibc malloc arena in the process to the
+/// system. glibc keeps what is freed for later allocations, and parsing a
+/// large script frees most of what it took: about half of a loaded bundle's
+/// resident memory, which Ruby's collector never hands back.
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
 pub fn release_free_memory() {
     // SAFETY: malloc_trim only reads and updates glibc's allocator state,
@@ -96,8 +96,7 @@ pub fn release_free_memory() {
     let _ = unsafe { libc::malloc_trim(0) };
 }
 
-/// Hands memory malloc holds free back to the system, where the allocator
-/// offers a way to.
+/// A no-op where malloc is not glibc's.
 #[cfg(not(all(target_os = "linux", target_env = "gnu")))]
 pub const fn release_free_memory() {}
 

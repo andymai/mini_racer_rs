@@ -1,18 +1,22 @@
 # frozen_string_literal: true
 
-# Loads a different generated script of about 3 MB into each of several
+# Loads a different generated script of about 3 MiB into each of several
 # contexts and reads resident memory per context once all of them are loaded.
 # Parsing and compiling a large script frees most of its working memory back
-# to malloc, which keeps it for the process unless asked to return it. Fails
-# when a context costs more than the limit.
-#   ruby -Ilib test/stress/large_load.rb [contexts] [max_mb]
+# to malloc, which keeps it for the process unless asked to return it. On
+# x86_64 Linux a context measured about 10 MiB with that memory handed back
+# and 24 MiB without, in both platform modes. Fails over the limit.
+#   ruby -Ilib test/stress/large_load.rb single|multi [contexts] [max_mib]
 
 require "mini_racer"
 
-contexts = Integer(ARGV.fetch(0, 5))
-max_mb = Float(ARGV.fetch(1, 16))
+mode = ARGV.fetch(0) { abort "usage: large_load.rb single|multi [contexts] [max_mib]" }
+abort "mode must be single or multi" unless %w[single multi].include?(mode)
+MiniRacer::Platform.set_flags!(:single_threaded) if mode == "single"
+contexts = Integer(ARGV.fetch(1, 5))
+max_mib = Float(ARGV.fetch(2, 16))
 
-def rss_kb
+def rss_kib
   if File.exist?("/proc/self/status")
     File.read("/proc/self/status")[/VmRSS:\s+(\d+)/, 1].to_i
   else
@@ -20,10 +24,10 @@ def rss_kb
   end
 end
 
-def settled_rss_kb
+def settled_rss_kib
   3.times { GC.start }
   sleep 0.5
-  rss_kb
+  rss_kib
 end
 
 def source(seed)
@@ -34,13 +38,15 @@ def source(seed)
   "#{functions.join("\n")}\nf#{seed}_0(1, 1);"
 end
 
-# The first context pays for starting V8 once per process.
-MiniRacer::Context.new.eval(source(0))
+# Kept live, so starting V8 and this context's teardown stay out of the reading.
+warm = MiniRacer::Context.new
+warm.eval(source(0))
 sources = Array.new(contexts) { |i| source(i + 1) }
-before = settled_rss_kb
+before = settled_rss_kib
 loaded = sources.map { |text| MiniRacer::Context.new.tap { |context| context.eval(text) } }
-per_context_mb = (settled_rss_kb - before) / 1024.0 / contexts
-megabytes = sources.first.bytesize / 1_000_000.0
-puts "#{contexts} contexts with a #{megabytes.round(1)} MB script each: #{per_context_mb.round(1)} MB per context"
-loaded.each(&:dispose)
-abort "over #{max_mb} MB per context" if per_context_mb > max_mb
+per_context_mib = (settled_rss_kib - before) / 1024.0 / contexts
+script_mib = sources.first.bytesize / 1_048_576.0
+puts "#{mode}: #{contexts} contexts with a #{script_mib.round(1)} MiB script each, " \
+     "#{per_context_mib.round(1)} MiB per context"
+[warm, *loaded].each(&:dispose)
+abort "over #{max_mib} MiB per context" if per_context_mib > max_mib
