@@ -438,6 +438,12 @@ jobs:
       - run: bundle exec rake test
       - name: Fork stress
         run: bundle exec ruby -Ilib test/stress/fork_loop.rb
+      # glibc keeps what a thread frees unless asked; macOS's allocator differs.
+      - name: Memory per context after loading a large script, both V8 platform modes
+        if: runner.os == 'Linux'
+        run: |
+          bundle exec ruby -Ilib test/stress/large_load.rb single
+          bundle exec ruby -Ilib test/stress/large_load.rb multi
       # On macOS spawns go through fork() and the engine's fork handlers.
       - name: Spawns under context churn, both V8 platform modes
         run: |

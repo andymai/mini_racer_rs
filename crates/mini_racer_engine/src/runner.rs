@@ -1,5 +1,5 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -49,6 +49,9 @@ struct Runtime {
     key: usize,
     // Tasks running, one inside another when a task's script pumps.
     running: AtomicU32,
+    // Set by a request, at any depth, that left memory worth handing back
+    // once the outermost response is out.
+    freed: AtomicBool,
 }
 
 impl Runtime {
@@ -67,6 +70,7 @@ impl Runtime {
             raised: Mutex::default(),
             key,
             running: AtomicU32::new(0),
+            freed: AtomicBool::new(false),
         }
     }
 }
@@ -281,6 +285,7 @@ fn serve_held(block: &ControlBlock, shared: &v8::SharedIsolate, runtime: &Arc<Ru
                 Received::Idle => {
                     if !block.term.is_disposing() {
                         isolate.low_memory_notification();
+                        sys::release_free_memory();
                     }
                     collected = true;
                     continue;
@@ -359,7 +364,11 @@ fn serve_one(
                     "snapshot inside a callback".to_owned(),
                 )),
             };
-            return respond(block, response);
+            let served = respond(block, response);
+            if matches!(served, Served::Next) {
+                sys::release_free_memory();
+            }
+            return served;
         }
         Some(ToV8::Request(request)) => request,
         // No callback is outstanding here, so there is nothing to reply to.
@@ -370,7 +379,22 @@ fn serve_one(
         v8::scope_with_context!(let scope, isolate, &runtime.context);
         handle(scope, runtime, request)
     };
-    respond(block, response)
+    let served = respond(block, response);
+    // After the response, so the caller does not wait for it.
+    if matches!(served, Served::Next) && runtime.freed.swap(false, Ordering::Relaxed) {
+        sys::release_free_memory();
+    }
+    served
+}
+
+// A bundle, not a render: what parsing it frees is worth handing back.
+const LARGE_SOURCE: usize = 1 << 20;
+
+const fn large(source: &JsText) -> bool {
+    match source {
+        JsText::Utf8(bytes) | JsText::Latin1(bytes) => bytes.len() >= LARGE_SOURCE,
+        JsText::Utf16(units) => units.len() >= LARGE_SOURCE / 2,
+    }
 }
 
 fn respond(block: &ControlBlock, response: Result<Vec<u8>, EngineError>) -> Served {
@@ -459,6 +483,7 @@ fn handle(
         Request::LowMemoryNotification { depth } => {
             if !runtime.block.term.is_disposing() {
                 scope.low_memory_notification();
+                runtime.freed.store(true, Ordering::Relaxed);
             }
             match depth {
                 Depth::Outermost(dispatch) => ended(runtime, dispatch),
@@ -643,6 +668,9 @@ fn evaluate(
     (filename, source): (&JsText, &JsText),
     (depth, awaited): (Depth, bool),
 ) -> Result<Vec<u8>, EngineError> {
+    if large(source) {
+        runtime.freed.store(true, Ordering::Relaxed);
+    }
     let too_large = || EngineError::Internal("source too large".to_owned());
     let source = string(tc, source).ok_or_else(too_large)?;
     let name = string(tc, filename).ok_or_else(too_large)?;
