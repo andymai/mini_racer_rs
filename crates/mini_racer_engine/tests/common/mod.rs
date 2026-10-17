@@ -1,4 +1,8 @@
-#![allow(clippy::panic, reason = "test helpers fail the test by panicking")]
+#![allow(
+    clippy::expect_used,
+    clippy::panic,
+    reason = "test helpers fail the test by panicking"
+)]
 
 use std::time::Duration;
 

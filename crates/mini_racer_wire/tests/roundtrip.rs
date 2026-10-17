@@ -1,5 +1,10 @@
 //! What the writer produces, the decoder reads back as the same values.
 
+#![allow(
+    clippy::expect_used,
+    reason = "test helpers fail the test by panicking"
+)]
+
 mod common;
 
 use common::{Tree, hex, number};

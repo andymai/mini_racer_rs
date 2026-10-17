@@ -1,4 +1,8 @@
 #![cfg(target_os = "linux")]
+#![allow(
+    clippy::expect_used,
+    reason = "test helpers fail the test by panicking"
+)]
 
 // Its own test binary: it reads the CPU time of the whole process, which
 // tests running alongside it in one binary would add to.

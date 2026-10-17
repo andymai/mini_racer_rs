@@ -23,12 +23,19 @@ fn class(ruby: &Ruby, module: &str, name: &str) -> Result<ExceptionClass, Error>
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "errors::init resolved the class, and a root initializer cannot return an error"
+)]
+fn resolved(ruby: &Ruby, module: &str, name: &str) -> ExceptionClass {
+    class(ruby, module, name).expect("errors::init resolved this class")
+}
+
 macro_rules! roots {
     ($($root:ident = $module:literal :: $name:literal;)*) => {
         $(
-            static $root: StaticRoot<ExceptionClass> = StaticRoot::new(|ruby| {
-                class(ruby, $module, $name).expect("errors::init resolved this class")
-            });
+            static $root: StaticRoot<ExceptionClass> =
+                StaticRoot::new(|ruby| resolved(ruby, $module, $name));
         )*
 
         pub fn init(ruby: &Ruby) -> Result<(), Error> {

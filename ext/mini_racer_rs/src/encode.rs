@@ -21,6 +21,10 @@ const MESSAGE_MAX_BYTES: usize = 63;
 /// it at each `Context.new`, since `date` may be required after this gem.
 pub static DATE_TIME: OnceRoot<Value> = OnceRoot::new();
 
+#[expect(
+    clippy::expect_used,
+    reason = "the vocabulary defines the class, and a root initializer cannot return an error"
+)]
 static BINARY: StaticRoot<RClass> = StaticRoot::new(|ruby| {
     ruby.class_object()
         .const_get::<_, RModule>("MiniRacer")

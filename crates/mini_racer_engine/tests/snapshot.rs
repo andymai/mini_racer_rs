@@ -1,4 +1,8 @@
-#![allow(clippy::panic, reason = "test helpers fail the test by panicking")]
+#![allow(
+    clippy::expect_used,
+    clippy::panic,
+    reason = "test helpers fail the test by panicking"
+)]
 
 use mini_racer_engine::{ContextConfig, ContextHandle, EngineError, Host, WaitHandle, WaitOutcome};
 use mini_racer_wire::{Begun, Container, Limits, Scalar, Visitor, decode_value};
