@@ -71,4 +71,42 @@ class SpentTerminationTest < Minitest::Test
   ensure
     context&.dispose
   end
+
+  # A callback that stops the context and then attaches uses up the stop, so
+  # what called it runs on, as in mini_racer, and the next script runs before
+  # it reports the stop.
+  def attach_spender
+    nest = proc do
+      @context.stop
+      begin
+        @context.attach("g", proc { 2 })
+      rescue MiniRacer::InternalError
+        nil
+      end
+      1
+    end
+    stopper = proc do
+      @context.stop
+      1
+    end
+    @context.attach("nest", nest)
+    @context.attach("stopper", stopper)
+  end
+
+  def test_a_leftover_microtask_runs_on_after_a_nested_attach_spends_the_stop
+    attach_spender
+    assert_raises(MiniRacer::ScriptTerminatedError) do
+      @context.eval("Promise.resolve().then(() => { nest(); globalThis.after = 1 }); stopper(); 0")
+    end
+    assert_raises(MiniRacer::ScriptTerminatedError) { @context.eval("globalThis.y = 1") }
+    assert_equal %w[number number], @context.eval("[typeof after, typeof y]")
+  end
+
+  def test_a_getter_runs_on_after_a_nested_attach_spends_the_stop
+    attach_spender
+
+    assert_equal({ "a" => 7 }, @context.eval("({ get a() { nest(); globalThis.after = 1; return 7 } })"))
+    assert_raises(MiniRacer::ScriptTerminatedError) { @context.eval("globalThis.y = 1") }
+    assert_equal %w[number number], @context.eval("[typeof after, typeof y]")
+  end
 end

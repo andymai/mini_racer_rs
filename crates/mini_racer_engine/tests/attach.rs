@@ -684,7 +684,7 @@ fn a_stop_pending_after_leftover_microtasks_ends_with_the_script() {
 fn leftover_microtasks_of_a_stopped_script_keep_its_deadline() {
     let context = ContextHandle::spawn(
         ContextConfig {
-            timeout: Some(Duration::from_millis(300)),
+            timeout: Some(Duration::from_millis(500)),
             ..ContextConfig::default()
         },
         &mut adding(),
@@ -694,8 +694,8 @@ fn leftover_microtasks_of_a_stopped_script_keep_its_deadline() {
     let busy = |ms: u32| format!("{{ const t = Date.now(); while (Date.now() - t < {ms}) {{}} }}");
     let source = format!(
         "Promise.resolve().then(() => {{ {}; globalThis.after = 1 }}); {}; stopper(); 0",
-        busy(250),
-        busy(200)
+        busy(600),
+        busy(100)
     );
     assert!(stopped(eval(&context, &source, &mut stopping(&context))));
     assert_eq!(

@@ -578,7 +578,7 @@ fn script(
                     _ => verdict,
                 }
             } else if drains {
-                term.end(dispatch).or(verdict)
+                term.end_drained(dispatch).or(verdict)
             } else {
                 match term.end(dispatch) {
                     Some(Halt::Disposed) => Some(Halt::Disposed),

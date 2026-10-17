@@ -218,6 +218,23 @@ struct State<T> {
 }
 
 impl<T: Terminator> State<T> {
+    fn finish(&mut self, id: DispatchId) -> Option<Halt> {
+        match self.armed {
+            Some(armed) if armed.id == id && armed.settled => {}
+            _ => return self.end(id),
+        }
+        self.cancel_armed();
+        self.suspended = false;
+        self.nested_timer = None;
+        self.armed = None;
+        if self.disposing {
+            return Some(Halt::Disposed);
+        }
+        let causes = self.causes.carried();
+        self.set_causes(causes);
+        None
+    }
+
     // The causes V8 still has a termination for.
     const fn live(&self) -> CauseSet {
         if self.spent {
@@ -365,9 +382,9 @@ impl<T: Terminator> TermCell<T> {
     /// termination. For a dispatch nested in a callback, the termination is
     /// lifted so the script around it runs on, as in `mini_racer`, unless a
     /// request arrived after `since`, a dispose began, the heap is exhausted,
-    /// which `mini_racer` has no counterpart for, or the script around it has
-    /// its verdict and only its leftover microtasks run, which the lift would
-    /// leave unbounded. Returns whether it lifted.
+    /// which `mini_racer` has no counterpart for, or a timeout ended a script
+    /// that has its verdict: its leftover microtasks would then run with no
+    /// limit. Returns whether it lifted.
     pub fn spend(&self, since: RequestMark, nested: bool) -> bool {
         let mut state = lock(&self.state);
         if state.requests != since.0 {
@@ -379,7 +396,8 @@ impl<T: Terminator> TermCell<T> {
         let lift = nested
             && !state.disposing
             && !state.causes.contains(TerminationCause::HeapExhausted)
-            && state.armed.is_some_and(|armed| !armed.settled);
+            && (!state.causes.contains(TerminationCause::Timeout)
+                || state.armed.is_none_or(|armed| !armed.settled));
         if lift {
             state.cancel_armed();
         }
@@ -574,21 +592,20 @@ impl<T: Terminator> TermCell<T> {
     /// cause waits for the next script, as `mini_racer` leaves them. A dispatch
     /// that was never settled ends as `end` ends it.
     pub fn finish(&self, id: DispatchId) -> Option<Halt> {
+        lock(&self.state).finish(id)
+    }
+
+    /// Disarms `id` once the leftover microtasks of its terminated script ran
+    /// without V8 acting on a cause. One still live fails `mini_racer`'s reply,
+    /// whose retry reports it with this script, as `end` does; with none, a
+    /// spent stop or memory cause is carried, as `finish` leaves it.
+    pub fn end_drained(&self, id: DispatchId) -> Option<Halt> {
         let mut state = lock(&self.state);
-        match state.armed {
-            Some(armed) if armed.id == id && armed.settled => {}
-            _ => return state.end(id),
+        if state.live().is_empty() {
+            state.finish(id)
+        } else {
+            state.end(id)
         }
-        state.cancel_armed();
-        state.suspended = false;
-        state.nested_timer = None;
-        state.armed = None;
-        if state.disposing {
-            return Some(Halt::Disposed);
-        }
-        let causes = state.causes.carried();
-        state.set_causes(causes);
-        None
     }
 }
 
@@ -1092,18 +1109,56 @@ mod tests {
     }
 
     #[test]
-    fn a_settled_dispatch_is_never_lifted() {
+    fn a_settled_dispatch_with_a_timeout_is_never_lifted() {
         let (cell, calls) = cell();
         let outer = cell.begin(DispatchKind::Script).expect("nothing armed");
-        cell.request(Interrupt::Stop);
-        assert_eq!(cell.settle(outer), STOPPED);
+        cell.request(Interrupt::Timeout(outer));
+        assert_eq!(
+            cell.settle(outer),
+            Some(Halt::Terminated(TerminationCause::Timeout))
+        );
         assert!(cell.is_settled());
-        cell.request(Interrupt::Stop);
+        cell.request(Interrupt::Timeout(outer));
         let cancels = calls.cancel.get();
         assert!(!cell.spend(cell.mark(), true));
         assert_eq!(calls.cancel.get(), cancels);
         assert_eq!(cell.finish(outer), None);
         assert!(!cell.is_settled());
+    }
+
+    // A getter running while a finished script's result serializes, or a
+    // leftover microtask, runs on in mini_racer once a nested attach uses up
+    // a stop, and the next script reports it.
+    #[test]
+    fn a_settled_dispatch_lifts_a_spent_stop() {
+        let (cell, calls) = cell();
+        let outer = cell.begin(DispatchKind::Script).expect("nothing armed");
+        assert_eq!(cell.settle(outer), None);
+        cell.request(Interrupt::Stop);
+        assert!(cell.spend(cell.mark(), true));
+        assert_eq!(calls.cancel.get(), 1);
+        assert_eq!(cell.finish(outer), None);
+        assert!(!cell.refuses(DispatchKind::Script));
+        assert_eq!(run(&cell, DispatchKind::Script), STOPPED);
+    }
+
+    #[test]
+    fn a_drained_script_carries_a_spent_stop_and_reports_a_live_one() {
+        let (cell, _) = cell();
+        let outer = cell.begin(DispatchKind::Script).expect("nothing armed");
+        cell.request(Interrupt::Stop);
+        assert_eq!(cell.settle(outer), STOPPED);
+        cell.request(Interrupt::Stop);
+        cell.spend(cell.mark(), true);
+        assert_eq!(cell.end_drained(outer), None);
+        assert_eq!(run(&cell, DispatchKind::Script), STOPPED);
+
+        let outer = cell.begin(DispatchKind::Script).expect("nothing armed");
+        cell.request(Interrupt::Stop);
+        assert_eq!(cell.settle(outer), STOPPED);
+        cell.request(Interrupt::Stop);
+        assert_eq!(cell.end_drained(outer), STOPPED);
+        assert_eq!(run(&cell, DispatchKind::Script), None);
     }
 
     #[test]
