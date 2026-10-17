@@ -7,7 +7,7 @@ gemspec
 gem "activesupport", "~> 8.0"
 # The native fork cases call libc's fork() through it. Ruby 4.0 ships without it;
 # older Rubies keep it as a default gem, so they need no compiler or libffi for it.
-gem "fiddle", "~> 1.1", platforms: :mri, install_if: -> { RUBY_VERSION >= "4.0" }
+gem "fiddle", "~> 1.1", platforms: :mri, install_if: -> { Gem::Version.new(RUBY_VERSION) >= Gem::Version.new("4.0") }
 gem "minitest", "~> 5.25"
 gem "rake", "~> 13.2"
 gem "rake-compiler", "~> 1.2"
