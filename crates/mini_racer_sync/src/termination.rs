@@ -45,6 +45,10 @@ impl CauseSet {
             | TerminationCause::HeapExhausted.bit(),
     );
 
+    // The causes upstream records in its request flag beside the one-shot
+    // interrupt, which V8 can use up while the flag stays.
+    const SPENDABLE: Self = Self(TerminationCause::Stop.bit() | TerminationCause::MaxMemory.bit());
+
     const fn with(self, cause: TerminationCause) -> Self {
         Self(self.0 | cause.bit())
     }
@@ -224,7 +228,7 @@ impl<T: Terminator> State<T> {
     // The causes V8 still has a termination for.
     const fn live(&self) -> CauseSet {
         if self.spent {
-            self.causes.minus(CauseSet::PENDING)
+            self.causes.minus(CauseSet::SPENDABLE)
         } else {
             self.causes
         }
@@ -370,12 +374,15 @@ impl<T: Terminator> TermCell<T> {
     /// V8 has acted on the termination of the carried causes without
     /// reporting them, as when `mini_racer`'s attach or a microtask uses up
     /// its one-shot interrupt: they are left for the next script to report,
-    /// which runs.
-    pub fn spend(&self) {
+    /// which runs. Returns whether the script around a nested dispatch may
+    /// run on: never through a dispose, or with the heap exhausted, which
+    /// `mini_racer` has no counterpart for.
+    pub fn spend(&self) -> bool {
         let mut state = lock(&self.state);
         if !state.causes.carried().is_empty() {
             state.spent = true;
         }
+        !state.disposing && !state.causes.contains(TerminationCause::HeapExhausted)
     }
 
     /// A nested script that reports a cause hands the termination back to the
@@ -986,6 +993,22 @@ mod tests {
         assert!(!child.refuses(DispatchKind::Script));
         assert_eq!(run(&child, DispatchKind::Script), STOPPED);
         assert_eq!(calls.terminate.get(), 0);
+    }
+
+    #[test]
+    fn a_dispose_or_an_exhausted_heap_is_never_lifted() {
+        let (exhausted, _) = cell();
+        exhausted.request(Interrupt::Stop);
+        assert!(exhausted.spend());
+        exhausted.request(Interrupt::HeapExhausted);
+        assert!(!exhausted.spend());
+        assert!(exhausted.refuses(DispatchKind::Script));
+
+        let (disposed, _) = cell();
+        let outer = disposed.begin(DispatchKind::Script).expect("nothing armed");
+        assert!(disposed.dispose());
+        assert!(!disposed.spend());
+        assert_eq!(disposed.end(outer), Some(Halt::Disposed));
     }
 
     // mini_racer's attach uses up the one-shot interrupt a stop left, and its

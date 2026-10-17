@@ -541,12 +541,13 @@ fn script(
     // a callback, the termination caught here would otherwise unwind the
     // script around it, which in mini_racer runs on and reports the cause
     // when it ends.
-    if kind == DispatchKind::Maintenance && tc.has_terminated() {
-        term.spend();
-        if matches!(depth, Depth::Nested) {
-            tc.reset();
-            tc.cancel_terminate_execution();
-        }
+    if kind == DispatchKind::Maintenance
+        && tc.has_terminated()
+        && term.spend()
+        && matches!(depth, Depth::Nested)
+    {
+        tc.reset();
+        tc.cancel_terminate_execution();
     }
     let raised = result.is_err() && kind == DispatchKind::Script && escaped(tc, runtime);
     let halt = match depth {
