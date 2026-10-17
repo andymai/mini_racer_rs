@@ -13,6 +13,11 @@ url=$(jq -r .html_url <<<"$run")
 sha=$(jq -r .head_sha <<<"$run")
 jobs=$(gh api --paginate "repos/{owner}/{repo}/actions/runs/$RUN_ID/jobs" \
   --jq '.jobs[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "cancelled") | "- [\(.name)](\(.html_url))"')
+# A queued run that a newer one replaced is cancelled before any job starts.
+if [ "$(jq -r .conclusion <<<"$run")" = cancelled ] && [ -z "$jobs" ]; then
+  echo "The run was cancelled before any job ran."
+  exit 0
+fi
 title="Scheduled $WORKFLOW run failed"
 body=$(printf 'Run: %s\nCommit: %s\n\nFailed jobs:\n%s\n' "$url" "$sha" "${jobs:-- none reported}")
 open=$(gh issue list --state open --search "\"$title\" in:title" --json number,title |

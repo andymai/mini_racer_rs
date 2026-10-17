@@ -6,14 +6,27 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+unquote() { sed -E 's/^ +//; s/ +$//; s/^"(.*)"$/\1/; s/^'"'"'(.*)'"'"'$/\1/'; }
+
 watch=.github/workflows/scheduled-failures.yml
-listed=$(sed -nE 's/^ *workflows: \[(.*)\]$/\1/p' "$watch" | tr ',' '\n' | sed -E 's/^ +//; s/ +$//' | sort)
+listed=$(sed -nE 's/^ *workflows: \[(.*)\]$/\1/p' "$watch" | tr ',' '\n' | unquote | sort)
 [ -n "$listed" ] || { echo "VIOLATION [watch]: $watch lists no workflows"; exit 1; }
-scheduled=$(for file in .github/workflows/*.yml; do
-  if grep -qE '^  schedule:' "$file"; then sed -nE 's/^name: (.*)$/\1/p' "$file"; fi
-done | sort)
 
 fail=0
+shopt -s nullglob
+scheduled=""
+for file in .github/workflows/*.yml .github/workflows/*.yaml; do
+  grep -qE '(^[[:space:]]+|[{,][[:space:]]*)schedule:' "$file" || continue
+  name=$(sed -nE 's/^name:(.*)$/\1/p' "$file" | head -n 1 | unquote)
+  if [ -z "$name" ]; then
+    echo "VIOLATION [watch]: the scheduled workflow $file has no name: for $watch to match"
+    fail=1
+  else
+    scheduled+="$name"$'\n'
+  fi
+done
+scheduled=$(printf '%s' "$scheduled" | sort)
+
 while IFS= read -r name; do
   echo "VIOLATION [watch]: the scheduled workflow \"$name\" is missing from $watch"
   fail=1
