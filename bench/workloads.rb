@@ -2,14 +2,15 @@
 
 # One real-library workload, timed the way applications run it, as JSON on
 # stdout for bench/run.rb: Babel and Terser through ExecJS as Sprockets runs
-# them, React through ExecJS as react-rails does, and a Handlebars template
-# called on a context. run.rb starts a fresh process per workload, so what one
-# workload leaves behind (contexts awaiting collection, a warm heap) cannot
-# change another's numbers. The output's digest lets run.rb confirm both gems
-# agree.
+# them, Autoprefixer through ExecJS as autoprefixer-rails does, React and MUI
+# through ExecJS as react-rails does, and a Handlebars template called on a
+# context. run.rb starts a fresh process per workload, so what one workload
+# leaves behind (contexts awaiting collection, a warm heap) cannot change
+# another's numbers. The output's digest lets run.rb confirm both gems agree.
 
 require "digest"
 require "json"
+require_relative "external"
 
 role = ARGV.fetch(0)
 name = ARGV.fetch(1)
@@ -72,6 +73,26 @@ result = begin
     react_source = bundle("react")
     props = react_props
     median_ns(count[20], 3, collect: true) { ExecJS.compile(react_source).call("renderApp", props) }
+  when "autoprefixer_bootstrap"
+    autoprefixer = ExecJS.compile(bundle("autoprefixer"))
+    stylesheet = source("tmp", "consumers", "bundles", "bootstrap.css")
+    median_ns(count[60], 20) { autoprefixer.call("prefix", stylesheet) }
+  when "mui_render"
+    mui = ExecJS.compile(bundle("mui"))
+    median_ns(count[200], 80) { mui.call("renderDashboard", 200) }
+  when "mui_first_render"
+    mui_source = bundle("mui")
+    median_ns(count[20], 4, collect: true) { ExecJS.compile(mui_source).call("renderDashboard", 200) }
+  when "external_ssr_load"
+    ssr_source = BenchExternal.source
+    # A load returns nothing to compare; the render's digest covers the bundle.
+    median_ns(count[10], 2, collect: true) do
+      ExecJS.compile(ssr_source)
+      nil
+    end
+  when "external_ssr_render"
+    ssr = ExecJS.compile(BenchExternal.source)
+    median_ns(count[2000], 500) { ssr.eval(BenchExternal::CALL) }
   when "handlebars_render"
     handlebars = MiniRacer::Context.new
     handlebars.eval(bundle("handlebars"))
@@ -88,7 +109,9 @@ result = begin
     abort "bench: no workload named #{name}"
   end
 rescue StandardError, NotImplementedError => e
-  { "unsupported" => "#{e.class}: #{e.message[0, 120]}" }
+  # mini_racer's message is the JavaScript stack, which for the external
+  # bundle names its functions and components.
+  { "unsupported" => name.start_with?("external_") ? e.class.name : "#{e.class}: #{e.message[0, 120]}" }
 end
 
 gem = defined?(MiniRacerRs) ? "mini_racer_rs #{MiniRacerRs::VERSION}" : "mini_racer #{MiniRacer::VERSION}"
