@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
-# Agents load CLAUDE.md and the skills as ground truth, so every repository path
-# they name in backticks must exist. A renamed or split file is the usual drift.
-# Upstream test paths are written relative to the suite's directory
-# (vendor/mini_racer or vendor/execjs), which test/upstream/run.rb resolves them
-# against, so they may resolve there instead.
+# Agents load CLAUDE.md and the skills as ground truth, and readers follow the
+# public docs, so every repository path they name in backticks must exist. A
+# renamed or split file is the usual drift. Upstream test paths are written
+# relative to the suite's directory (vendor/mini_racer or vendor/execjs), which
+# test/upstream/run.rb resolves them against, and a bare workflow file name
+# resolves under .github/workflows, so they may resolve there instead.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# Build outputs the docs describe on purpose; an entry ending in / covers
-# everything under it.
+# Strings that look like paths but name none: build outputs the docs describe
+# on purpose, the repository's GitHub slug, and slash-joined names in prose. An
+# entry ending in / covers everything under it.
 allowed=(
+  "andymai/mini_racer_rs"
+  "call_await/eval_await"
+  "class/object"
   "lib/mini_racer_rs/mini_racer_rs.so"
   "pkg/"
   "target/"
@@ -22,9 +27,21 @@ fenced_blocks() {
   awk '/^```/ { fenced = !fenced; next } fenced { print }' "$1"
 }
 
+# mini_racer's benchmark/serde case names, such as ruby_to_js/call_no_args.
+case_name='^(callback|js_to_ruby|ruby_to_js)/[A-Za-z0-9_]+$'
+
+# These are kept verbatim or generated from commits, so a path in them is not
+# ours to fix.
+docs=()
+for doc in *.md .claude/skills/*/*.md .github/*.md .github/ISSUE_TEMPLATE/*.md; do
+  case "$doc" in
+    CODE_OF_CONDUCT.md | THIRD_PARTY_NOTICES.md | AI-DISCLOSURE.md | CHANGELOG.md) ;;
+    *) [ -f "$doc" ] && docs+=("$doc") ;;
+  esac
+done
+
 fail=0
-for doc in CLAUDE.md .claude/skills/*/*.md; do
-  [ -f "$doc" ] || continue
+for doc in "${docs[@]}"; do
   while IFS= read -r path; do
     [ -n "$path" ] || continue
     for skip in "${allowed[@]}"; do
@@ -33,10 +50,15 @@ for doc in CLAUDE.md .claude/skills/*/*.md; do
         *) [ "$path" = "$skip" ] && continue 2 ;;
       esac
     done
-    if [ ! -e "$path" ] && [ ! -e "vendor/mini_racer/$path" ] && [ ! -e "vendor/execjs/$path" ]; then
-      echo "VIOLATION [doc-path]: $doc names $path, which does not exist"
-      fail=1
-    fi
+    [[ "$path" =~ $case_name ]] && continue
+    [ -e "$path" ] && continue
+    case "$path" in
+      test/* | benchmark/*) [ -e "vendor/mini_racer/$path" ] || [ -e "vendor/execjs/$path" ] && continue ;;
+      */*) ;;
+      *.yml) [ -e ".github/workflows/$path" ] && continue ;;
+    esac
+    echo "VIOLATION [doc-path]: $doc names $path, which does not exist"
+    fail=1
   done < <({ grep -oE '`[^`]+`' "$doc" | tr -d '`'; fenced_blocks "$doc"; } |
     tr -s ' \t()"' '\n' |
     grep -E '^\.?[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_.-]+)*/?$' |
@@ -47,4 +69,4 @@ done
 if [ "$fail" -ne 0 ]; then
   exit 1
 fi
-echo "Paths named in CLAUDE.md and the skills exist."
+echo "Paths named in the docs, CLAUDE.md and the skills exist."
