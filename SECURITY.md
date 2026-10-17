@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Report suspected vulnerabilities through GitHub private vulnerability reporting in this repository's Security tab. Do not open a public issue.
+Report suspected vulnerabilities through GitHub private vulnerability reporting in this repository's Security tab. Do not open a public issue. The maintainer sends an initial response within 7 days of receiving a report.
 
 ## Supported versions
 
