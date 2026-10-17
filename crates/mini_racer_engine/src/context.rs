@@ -228,6 +228,8 @@ impl ContextHandle {
     pub fn spawn(mut config: ContextConfig, host: &mut impl Host) -> Result<Self, EngineError> {
         let snapshot = config.snapshot.take();
         process::ensure_initialized();
+        // Read here, on the caller's thread, not first on a runner's.
+        let _ = process::code_cache::enabled();
         let generation = fork::current();
         let block = Arc::new(ControlBlock::new(config));
         start(&block, generation, Start::Fresh(snapshot))?;

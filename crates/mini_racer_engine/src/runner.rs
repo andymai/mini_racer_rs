@@ -10,6 +10,7 @@ use mini_racer_wire::Writer;
 use v8::ValueDeserializerHelper;
 
 use crate::control::{CallbackReply, ControlBlock, Depth, IsolateTerminator, JsText, Request};
+use crate::process::code_cache::{Building, Plan};
 use crate::process::fork::Generation;
 use crate::process::platform::{self, Mode};
 use crate::process::watchdog;
@@ -52,6 +53,16 @@ struct Runtime {
     // Set by a request, at any depth, that left memory worth handing back
     // once the outermost response is out.
     freed: AtomicBool,
+    // The startup snapshot this isolate began from, for the code cache's key.
+    snapshot: Option<u64>,
+    // Large scripts to cache once their dispatch is over, so making a cache
+    // never counts against a timeout.
+    uncached: Mutex<Vec<Uncached>>,
+}
+
+struct Uncached {
+    script: v8::Global<v8::UnboundScript>,
+    building: Building,
 }
 
 impl Runtime {
@@ -59,7 +70,7 @@ impl Runtime {
         block: &Arc<ControlBlock>,
         generation: &'static Generation,
         (context, filter): (v8::Global<v8::Context>, Filter),
-        key: usize,
+        (key, snapshot): (usize, Option<u64>),
     ) -> Self {
         Self {
             block: Arc::clone(block),
@@ -71,6 +82,8 @@ impl Runtime {
             key,
             running: AtomicU32::new(0),
             freed: AtomicBool::new(false),
+            snapshot,
+            uncached: Mutex::default(),
         }
     }
 }
@@ -161,6 +174,9 @@ fn serve(
     // No isolate is made while a fork waits for every runner to be idle.
     generation.resume(block);
     let from_snapshot = snapshot.is_some();
+    let snapshot_id = snapshot
+        .as_deref()
+        .map(|blob| generation.code_cache().snapshot_id(blob));
     let params = v8::CreateParams::default();
     let params = match snapshot {
         Some(blob) => params.snapshot_blob(v8::StartupData::from(blob)),
@@ -180,7 +196,12 @@ fn serve(
         retire(block, generation, key, isolate);
         return refuse(block, "context setup failed");
     };
-    let runtime = Arc::new(Runtime::new(block, generation, contexts, key));
+    let runtime = Arc::new(Runtime::new(
+        block,
+        generation,
+        contexts,
+        (key, snapshot_id),
+    ));
     isolate.set_slot(Arc::clone(&runtime));
     // Installed only once the context exists, so nothing terminates its setup.
     block.term.install(IsolateTerminator::new(
@@ -221,7 +242,7 @@ fn adopt(
             block,
             generation,
             (inherited.context.clone(), inherited.filter.clone()),
-            key,
+            (key, inherited.snapshot),
         ));
         locker.set_slot(Arc::clone(&runtime));
         runtime
@@ -382,12 +403,29 @@ fn serve_one(
         v8::scope_with_context!(let scope, isolate, &runtime.context);
         handle(scope, runtime, request)
     };
+    // Before the response, so a fork that follows finds this runner idle.
+    cache_uncached(isolate, runtime);
     let served = respond(block, response);
     // After the response, so the caller does not wait for it.
     if matches!(served, Served::Next) && runtime.freed.swap(false, Ordering::Relaxed) {
         sys::release_free_memory();
     }
     served
+}
+
+fn cache_uncached(isolate: &mut v8::Isolate, runtime: &Runtime) {
+    let uncached = std::mem::take(&mut *lock(&runtime.uncached));
+    if uncached.is_empty() || runtime.block.term.is_disposing() {
+        return;
+    }
+    let cache = runtime.generation.code_cache();
+    v8::scope!(let scope, isolate);
+    for Uncached { script, building } in uncached {
+        let script = v8::Local::new(scope, &script);
+        if let Some(data) = script.create_code_cache() {
+            cache.store(building, Box::from(&**data));
+        }
+    }
 }
 
 // A bundle, not a render: what parsing it frees is worth handing back.
@@ -671,15 +709,21 @@ fn evaluate(
     (filename, source): (&JsText, &JsText),
     (depth, awaited): (Depth, bool),
 ) -> Result<Vec<u8>, EngineError> {
-    if large(source) {
+    let plan = if large(source) {
         runtime.freed.store(true, Ordering::Relaxed);
-    }
+        runtime
+            .generation
+            .code_cache()
+            .plan(filename, source, runtime.snapshot)
+    } else {
+        Plan::Compile
+    };
     let too_large = || EngineError::Internal("source too large".to_owned());
     let source = string(tc, source).ok_or_else(too_large)?;
     let name = string(tc, filename).ok_or_else(too_large)?;
     let origin = serialize::origin(tc, name.into());
-    let script = v8::Script::compile(tc, source, Some(&origin))
-        .ok_or_else(|| failure(tc, JsErrorKind::Parse))?;
+    let (script, make) = compile(tc, runtime, source, &origin, plan);
+    let script = script.ok_or_else(|| failure(tc, JsErrorKind::Parse))?;
     let value = script
         .run(tc)
         .ok_or_else(|| failure(tc, JsErrorKind::Runtime))?;
@@ -690,7 +734,60 @@ fn evaluate(
     };
     let value = serialize::sanitize(tc, value);
     verdict(runtime, depth)?;
-    serialize::reply(tc, &runtime.filter, value).ok_or_else(|| failure(tc, JsErrorKind::Runtime))
+    let reply = serialize::reply(tc, &runtime.filter, value)
+        .ok_or_else(|| failure(tc, JsErrorKind::Runtime))?;
+    if let Some(building) = make {
+        let script = v8::Global::new(tc, script.get_unbound_script(tc));
+        lock(&runtime.uncached).push(Uncached { script, building });
+    }
+    Ok(reply)
+}
+
+// From this process's code cache when the plan has an entry. V8 refuses one
+// made under other flags, another V8 or another snapshot, and compiles from
+// source; the entry is then forgotten. Also returns the claim to cache the
+// script under once it has run.
+fn compile<'s>(
+    scope: &v8::PinScope<'s, '_>,
+    runtime: &Runtime,
+    source: v8::Local<'s, v8::String>,
+    origin: &v8::ScriptOrigin<'s>,
+    plan: Plan,
+) -> (Option<v8::Local<'s, v8::Script>>, Option<Building>) {
+    let (entry, key) = match plan {
+        Plan::Compile => return (v8::Script::compile(scope, source, Some(origin)), None),
+        Plan::Make(building) => {
+            return (
+                v8::Script::compile(scope, source, Some(origin)),
+                Some(building),
+            );
+        }
+        Plan::Consume(entry, key) => (entry, key),
+    };
+    // `Source` keeps a pointer into the entry's bytes that the borrow checker
+    // does not see, so it lives only inside this block, while `entry` does.
+    let (script, rejected) = {
+        let data = v8::script_compiler::CachedData::new(entry.data());
+        let mut cached =
+            v8::script_compiler::Source::new_with_cached_data(source, Some(origin), data);
+        let script = v8::script_compiler::compile(
+            scope,
+            &mut cached,
+            v8::script_compiler::CompileOptions::ConsumeCodeCache,
+            v8::script_compiler::NoCacheReason::NoReason,
+        );
+        let rejected = cached
+            .get_cached_data()
+            .is_some_and(v8::CachedData::rejected);
+        (script, rejected)
+    };
+    let cache = runtime.generation.code_cache();
+    if rejected {
+        cache.forget(&entry);
+        return (script, cache.begin(key));
+    }
+    cache.hit();
+    (script, None)
 }
 
 // mini_racer's last termination check, before a script's result is

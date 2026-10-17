@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 use mini_racer_sync::{ForkGate, Phase, lock, wait, wait_timeout};
 
 use crate::control::ControlBlock;
+use crate::process::code_cache::CodeCache;
 use crate::process::tasks::TaskRegistry;
 use crate::process::watchdog::Watchdog;
 
@@ -50,13 +51,14 @@ pub struct Generation {
     tasks: TaskRegistry,
     watchdog: Mutex<Option<Arc<Watchdog>>>,
     workers: Workers,
+    code_cache: CodeCache,
     next: OnceLock<Box<Self>>,
 }
 
 static ROOT: OnceLock<Generation> = OnceLock::new();
 
 impl Generation {
-    fn new(epoch: u64, quiesced: bool) -> Self {
+    fn new(epoch: u64, quiesced: bool, code_cache: CodeCache) -> Self {
         Self {
             epoch,
             quiesced,
@@ -67,6 +69,7 @@ impl Generation {
             tasks: TaskRegistry::default(),
             watchdog: Mutex::new(None),
             workers: Workers::default(),
+            code_cache,
             next: OnceLock::new(),
         }
     }
@@ -81,6 +84,11 @@ impl Generation {
 
     pub(crate) const fn watchdog(&self) -> &Mutex<Option<Arc<Watchdog>>> {
         &self.watchdog
+    }
+
+    #[must_use]
+    pub const fn code_cache(&self) -> &CodeCache {
+        &self.code_cache
     }
 
     pub fn register(&self, block: &Arc<ControlBlock>) {
@@ -104,13 +112,18 @@ impl Generation {
 
 pub fn current() -> &'static Generation {
     let epoch = epoch();
-    let mut generation = ROOT.get_or_init(|| Generation::new(epoch, true));
+    let mut generation = ROOT.get_or_init(|| Generation::new(epoch, true, CodeCache::default()));
     while generation.epoch != epoch {
         let quiesced = generation.quiesced && generation.prepared.load(Ordering::SeqCst);
         let next = generation.epoch.saturating_add(1);
-        generation = generation
-            .next
-            .get_or_init(|| Box::new(Generation::new(next, quiesced)));
+        let parent = generation;
+        generation = parent.next.get_or_init(|| {
+            Box::new(Generation::new(
+                next,
+                quiesced,
+                parent.code_cache.inherited(),
+            ))
+        });
     }
     generation
 }

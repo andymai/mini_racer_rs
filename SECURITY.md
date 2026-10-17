@@ -20,6 +20,8 @@ Each `MiniRacer::Context` runs V8 on its own native thread. `Context.new(timeout
 
 `Context.new(max_memory:)` sets a byte limit. After each V8 garbage collection, the context compares V8's used heap size with the limit. If usage is over it, the running script is terminated, or the next script if none is running. The affected call raises `MiniRacer::V8OutOfMemoryError` with the message `out of memory`, and the context remains usable. The heap can exceed the limit before collection detects it. `ensure_gc_after_idle:` takes milliseconds and runs one full collection after that idle period following a request. Zero disables it. V8's sandbox and pointer compression are disabled in the project's archives, and the repository boundary check rejects builds that enable those crate features.
 
+Contexts in one process share a V8 code cache for sources of 1 MiB or more, so a context, or a forked child that inherits the cache, can use timing to learn that a source with the same file name, length, and sampled content was evaluated before. For an exact match, they can also infer which functions ran during loading, because the cache contains code compiled in that run. They cannot recover values or objects from the earlier context: V8 stores bytecode and function data only. Set `MINI_RACER_RS_CODE_CACHE=off` before the process creates its first context to disable it. Forked children retain the parent's setting.
+
 ## Supply chain
 
 | Area | Control |

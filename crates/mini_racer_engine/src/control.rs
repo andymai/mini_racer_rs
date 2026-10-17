@@ -36,11 +36,22 @@ pub enum Depth {
 /// Text in the encoding Ruby holds it in. V8 reads each form directly, so a
 /// lone surrogate in UTF-16 and invalid UTF-8 reach it as `mini_racer` sends
 /// them.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum JsText {
     Utf8(Vec<u8>),
     Latin1(Vec<u8>),
     Utf16(Vec<u16>),
+}
+
+impl JsText {
+    /// Its length in code units of its own encoding.
+    #[must_use]
+    pub const fn units(&self) -> usize {
+        match self {
+            Self::Utf8(bytes) | Self::Latin1(bytes) => bytes.len(),
+            Self::Utf16(units) => units.len(),
+        }
+    }
 }
 
 impl From<String> for JsText {
