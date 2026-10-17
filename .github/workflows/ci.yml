@@ -419,6 +419,9 @@ jobs:
           if ! scripts/check-exports.sh; then
             scripts/check-exports.sh --write
             allow=$(git diff --name-only -- 'ext/mini_racer_rs/exports.allow.*')
+            # The allowlist matched; the failure is another export rule.
+            [ -n "$allow" ] || exit 1
+            echo "allow=$allow" >>"$GITHUB_OUTPUT"
             echo "::group::Changes to $allow"
             git diff -- "$allow"
             echo "::endgroup::"
@@ -426,11 +429,11 @@ jobs:
             exit 1
           fi
       - name: Keep the built export list
-        if: failure() && steps.exports.outcome == 'failure'
+        if: failure() && steps.exports.outputs.allow != ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: exports-${{ matrix.os }}-ruby-${{ matrix.ruby }}
-          path: ext/mini_racer_rs/exports.allow.*
+          path: ${{ steps.exports.outputs.allow }}
           retention-days: 14
       - run: bundle exec rake test
       - name: Fork stress
