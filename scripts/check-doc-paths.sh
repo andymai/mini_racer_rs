@@ -9,12 +9,16 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # Strings that look like paths but name none: build outputs the docs describe
-# on purpose, the repository's GitHub slug, and slash-joined names in prose. An
-# entry ending in / covers everything under it.
+# on purpose, the repository's GitHub slug, mini_racer's benchmark/serde case
+# names, and slash-joined names in prose. An entry ending in / covers everything
+# under it.
 allowed=(
   "andymai/mini_racer_rs"
   "call_await/eval_await"
+  "callback/"
   "class/object"
+  "js_to_ruby/"
+  "ruby_to_js/"
   "lib/mini_racer_rs/mini_racer_rs.so"
   "pkg/"
   "target/"
