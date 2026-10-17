@@ -464,8 +464,9 @@ fn an_await_after_dispose_is_refused() {
 
 // mini_racer's last termination check comes before the result is serialized,
 // so a timeout that fires while a large string is copied out leaves the
-// result, and the next script. Copying 128 MiB takes past 5 ms on any runner,
-// and termination does not interrupt a string's copy.
+// result, and the next script. Copying 128 MiB took about 20 ms on the
+// fastest CI runner measured, and termination does not interrupt a string's
+// copy.
 #[test]
 fn a_timeout_while_the_result_serializes_leaves_the_result() {
     let length = 128 << 20;
