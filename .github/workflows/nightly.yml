@@ -7,8 +7,10 @@ on:
   pull_request:
     types: [labeled, synchronize]
 
+# Each label gets its own group, so adding one label does not cancel the job
+# another label started.
 concurrency:
-  group: nightly-${{ github.event.pull_request.number || github.run_id }}
+  group: nightly-${{ github.event.pull_request.number || github.run_id }}-${{ github.event.action == 'labeled' && github.event.label.name || 'push' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions: {}
@@ -57,14 +59,19 @@ jobs:
         with:
           ruby: "3.4"
       - run: bundle exec rake compile
-      - name: Round trips on one context, both V8 platform modes
-        run: |
-          bundle exec ruby -Ilib test/stress/round_trips.rb single 10000000
-          bundle exec ruby -Ilib test/stress/round_trips.rb multi 10000000
-      - name: Context churn from 8 threads, both V8 platform modes
-        run: |
-          bundle exec ruby -Ilib test/stress/churn.rb single 8 600
-          bundle exec ruby -Ilib test/stress/churn.rb multi 8 600
+      # Each run is its own step, so one failure does not hide the others.
+      - name: Round trips on one context, single-threaded platform
+        if: ${{ !cancelled() }}
+        run: bundle exec ruby -Ilib test/stress/round_trips.rb single 10000000
+      - name: Round trips on one context, multi-threaded platform
+        if: ${{ !cancelled() }}
+        run: bundle exec ruby -Ilib test/stress/round_trips.rb multi 10000000
+      - name: Context churn from 8 threads, single-threaded platform
+        if: ${{ !cancelled() }}
+        run: bundle exec ruby -Ilib test/stress/churn.rb single 8 600
+      - name: Context churn from 8 threads, multi-threaded platform
+        if: ${{ !cancelled() }}
+        run: bundle exec ruby -Ilib test/stress/churn.rb multi 8 600
 
   # Every wire fuzz target for 15 minutes on the pinned nightly.
   fuzz:
