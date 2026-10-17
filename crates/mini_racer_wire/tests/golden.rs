@@ -3,6 +3,11 @@
 //! the `.txt` files; regenerate the `.bin` files with
 //! `cargo run -p mini_racer_engine --example gen_wire_golden`.
 
+#![allow(
+    clippy::expect_used,
+    reason = "test helpers fail the test by panicking"
+)]
+
 mod common;
 
 use std::collections::HashSet;

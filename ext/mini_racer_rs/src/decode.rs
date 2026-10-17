@@ -10,6 +10,10 @@ use mini_racer_wire::{
 use crate::gc_root::StaticRoot;
 use crate::{errors, rb_raw};
 
+#[expect(
+    clippy::expect_used,
+    reason = "init defines the class, and a root initializer cannot return an error"
+)]
 static JAVASCRIPT_FUNCTION: StaticRoot<RClass> = StaticRoot::new(|ruby| {
     ruby.class_object()
         .const_get::<_, RModule>("MiniRacer")

@@ -425,7 +425,8 @@ impl<P: Protocol> Channel<P> {
     }
 }
 
-#[cfg(all(test, not(loom)))]
+#[cfg(test)]
+#[cfg(not(loom))]
 mod tests {
     use std::sync::Arc;
     use std::thread;

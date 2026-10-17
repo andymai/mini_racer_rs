@@ -24,7 +24,8 @@ pub fn wait_timeout<'a, T>(
         .map_or_else(|poisoned| poisoned.into_inner().0, |(guard, _)| guard)
 }
 
-#[cfg(all(test, not(loom)))]
+#[cfg(test)]
+#[cfg(not(loom))]
 mod tests {
     use super::*;
 

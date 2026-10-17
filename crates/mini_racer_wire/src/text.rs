@@ -4,6 +4,7 @@ const LATIN1_BLOCK: usize = 32;
 // Each block's count of non-ASCII bytes is summed in a u8.
 const _: () = assert!(LATIN1_BLOCK <= u8::MAX as usize);
 
+#[expect(clippy::expect_used, reason = "callers pass only spans of ASCII bytes")]
 fn ascii(bytes: &[u8]) -> &str {
     std::str::from_utf8(bytes).expect("ASCII is UTF-8")
 }

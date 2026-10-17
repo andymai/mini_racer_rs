@@ -609,7 +609,8 @@ impl<T: Terminator> TermCell<T> {
     }
 }
 
-#[cfg(all(test, not(loom)))]
+#[cfg(test)]
+#[cfg(not(loom))]
 mod tests {
     use std::cell::Cell;
     use std::rc::Rc;

@@ -1,7 +1,11 @@
 //! V8's own deserializer reads what `Writer` writes: each case writes one value
 //! and a JavaScript predicate over it, bound to `v`, must hold.
 
-#![allow(clippy::panic, reason = "test helpers fail the test by panicking")]
+#![allow(
+    clippy::expect_used,
+    clippy::panic,
+    reason = "test helpers fail the test by panicking"
+)]
 
 use mini_racer_engine::process;
 use mini_racer_wire::Writer;
