@@ -6,7 +6,6 @@ use std::time::{Duration, Instant};
 use mini_racer_sync::{ForkGate, Phase, lock, wait, wait_timeout};
 
 use crate::control::ControlBlock;
-use crate::process::platform::{self, Mode};
 use crate::process::tasks::TaskRegistry;
 use crate::process::watchdog::Watchdog;
 
@@ -213,8 +212,7 @@ pub(crate) fn prepare() {
         }
         std::thread::sleep(POLL);
     };
-    let held =
-        platform::mode() == Mode::SingleThreaded || generation.workers.hold(Instant::now() + HOLD);
+    let held = generation.workers.hold(Instant::now() + HOLD);
     generation
         .prepared
         .store(quiesced && held, Ordering::SeqCst);
