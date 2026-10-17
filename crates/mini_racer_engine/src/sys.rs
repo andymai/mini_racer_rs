@@ -120,11 +120,9 @@ struct TaskVtable {
     run: TaskMethod,
 }
 
-// SAFETY: the vtable is never written, and its pointers are to functions and
-// null.
-unsafe impl Sync for TaskVtable {}
-
-static TASK_VTABLE: TaskVtable = TaskVtable {
+// A constant reference, promoted to memory that lives as long as the program,
+// as a vtable must.
+const TASK_VTABLE: &TaskVtable = &TaskVtable {
     offset_to_top: 0,
     type_info: std::ptr::null(),
     complete_destructor: destroy_task,
@@ -140,32 +138,35 @@ struct WorkerTask {
 }
 
 unsafe extern "C" fn destroy_task(task: *mut WorkerTask) {
-    guarded(|| {
+    let destroyed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         // SAFETY: V8 destroys a task it owns once, and it was built in
         // `post_on_worker_thread`.
         unsafe { std::ptr::drop_in_place(task) };
-    });
+    }));
+    if destroyed.is_err() {
+        std::process::abort();
+    }
 }
 
 unsafe extern "C" fn delete_task(task: *mut WorkerTask) {
-    guarded(|| {
+    let deleted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         // SAFETY: V8 deletes a task it owns once; it came from `Box::into_raw`.
         drop(unsafe { Box::from_raw(task) });
-    });
+    }));
+    if deleted.is_err() {
+        std::process::abort();
+    }
 }
 
 unsafe extern "C" fn run_task(task: *mut WorkerTask) {
-    guarded(|| {
+    let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         // SAFETY: V8 runs a task it owns, on one thread, before deleting it.
         let run = unsafe { (*task).run.take() };
         if let Some(run) = run {
             run();
         }
-    });
-}
-
-fn guarded(body: impl FnOnce()) {
-    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(body)).is_err() {
+    }));
+    if ran.is_err() {
         std::process::abort();
     }
 }
@@ -201,7 +202,7 @@ pub fn worker_threads(platform: &v8::Platform) -> usize {
 /// Has V8 run `run` once on one of its worker threads.
 pub fn post_on_worker_thread(platform: &v8::Platform, run: Box<dyn FnOnce() + Send>) {
     let task = Box::into_raw(Box::new(WorkerTask {
-        vtable: std::ptr::addr_of!(TASK_VTABLE.complete_destructor),
+        vtable: &raw const TASK_VTABLE.complete_destructor,
         run: Some(run),
     }));
     // v8::SourceLocation holds one pointer, which V8 reads as no location when
