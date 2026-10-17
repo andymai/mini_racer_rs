@@ -341,9 +341,15 @@ impl Context {
         Ok(stats)
     }
 
+    // mini_racer sends this one without its result decoding, which also
+    // leaves the exception a callback raised for the enclosing dispatch.
     fn heap_snapshot(ruby: &Ruby, rb_self: &Self) -> Result<RString, Error> {
         let handle = rb_self.handle(ruby)?;
-        let json = rb_self.dispatch(ruby, |host| handle.heap_snapshot(host))?;
+        let _locked = rb_self.acquire(ruby)?;
+        rb_self.warn_if_deep(ruby)?;
+        let mut host = RubyHost::new(ruby).waiting_on(&rb_self.waiter);
+        let result = handle.heap_snapshot(&mut host);
+        let json = host.finish(result)?;
         Ok(ruby.enc_str_new(json, ruby.utf8_encoding()))
     }
 
