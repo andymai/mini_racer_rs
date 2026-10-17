@@ -531,11 +531,23 @@ fn script(
     tc.set_verbose(runtime.block.config.verbose_exceptions);
     let result = if let Err(error) = arm_timeout(runtime, depth, kind) {
         Err(error)
-    } else if term.check(kind).is_some() {
+    } else if term.refuses(kind) {
         Err(EngineError::Internal("halted without a cause".to_owned()))
     } else {
         run(tc)
     };
+    // mini_racer's maintenance never cancels a termination it meets, so the
+    // interrupt is used up while the cause waits for the next script. Inside
+    // a callback, the termination caught here would otherwise unwind the
+    // script around it, which in mini_racer runs on and reports the cause
+    // when it ends.
+    if kind == DispatchKind::Maintenance && tc.has_terminated() {
+        term.spend();
+        if matches!(depth, Depth::Nested) {
+            tc.reset();
+            tc.cancel_terminate_execution();
+        }
+    }
     let raised = result.is_err() && kind == DispatchKind::Script && escaped(tc, runtime);
     let halt = match depth {
         Depth::Outermost(dispatch) if result.is_ok() => term.finish(dispatch),
@@ -545,7 +557,13 @@ fn script(
         Depth::Nested if result.is_ok() && kind == DispatchKind::Script => {
             term.is_disposing().then_some(Halt::Disposed)
         }
-        Depth::Nested => term.check(kind),
+        Depth::Nested => {
+            let halt = term.check(kind);
+            if kind == DispatchKind::Script && matches!(halt, Some(Halt::Terminated(_))) {
+                term.renew();
+            }
+            halt
+        }
     };
     if raised {
         return Err(EngineError::from(JsError {
@@ -631,7 +649,11 @@ fn refuse_nested_await(
     let exception = v8::Exception::error(tc, message);
     tc.throw_exception(exception);
     let refused = failed(tc);
-    let halt = runtime.block.term.check(DispatchKind::Script).map(halted);
+    let halt = runtime.block.term.check(DispatchKind::Script);
+    if matches!(halt, Some(Halt::Terminated(_))) {
+        runtime.block.term.renew();
+    }
+    let halt = halt.map(halted);
     Err(match (halt, refused) {
         (Some(EngineError::Js(halt)), EngineError::Js(refused)) => EngineError::from(JsError {
             kind: halt.kind,
@@ -995,9 +1017,8 @@ fn callback<'s>(
             _ if terminating => {
                 scope.terminate_execution();
             }
-            _ if runtime.block.term.check(DispatchKind::Script).is_some() => {
-                scope.terminate_execution();
-            }
+            // As mini_racer reads the reply: a termination pending for this
+            // script makes the read throw it, and the script ends here.
             CallbackReply::Value(bytes) => {
                 let context = scope.get_current_context();
                 let deserializer = v8::ValueDeserializer::new(scope, Box::new(Reader), &bytes);

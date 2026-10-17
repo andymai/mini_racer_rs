@@ -561,3 +561,67 @@ fn attach_under_a_pending_stop_is_an_internal_error_and_leaves_the_stop() {
     ));
     assert_eq!(eval(&context, "1 + 1", &mut adding()).expect("eval"), [2]);
 }
+
+// mini_racer's stop is a one-shot interrupt plus a flag the next script
+// reports when it ends. A failed attach uses up the interrupt, so a second
+// attach succeeds and the next script runs before it reports the stop.
+#[test]
+fn a_failed_attach_spends_the_stop_and_the_next_script_runs() {
+    let context = spawn();
+    context.stop().expect("live context");
+    assert!(context.attach(name_and_id("f", 0), &mut adding()).is_err());
+    context
+        .attach(name_and_id("g", 1), &mut adding())
+        .expect("the interrupt is spent");
+    assert!(matches!(
+        eval(&context, "globalThis.x = 1; 1", &mut adding()),
+        Err(EngineError::Js(js)) if js.kind == JsErrorKind::Terminated(TerminationCause::Stop)
+    ));
+    assert_eq!(
+        eval(&context, "x + g(2)", &mut adding()).expect("eval"),
+        [3]
+    );
+}
+
+// As mini_racer reads a callback's reply: a stop requested during the
+// callback ends the script as it returns, before the next statement.
+#[test]
+fn a_stop_from_a_callback_ends_the_script_as_the_callback_returns() {
+    let context = spawn();
+    context
+        .attach(name_and_id("stops", 0), &mut adding())
+        .expect("attach");
+    let mut host = Answering(|_args: &[i64], _id| {
+        context.stop().expect("live context");
+        CallbackReply::Value(integer(5))
+    });
+    assert!(matches!(
+        eval(&context, "globalThis.z = 0; stops(); globalThis.z = 1; 1", &mut host),
+        Err(EngineError::Js(js)) if js.kind == JsErrorKind::Terminated(TerminationCause::Stop)
+    ));
+    assert_eq!(eval(&context, "z", &mut adding()).expect("eval"), [0]);
+}
+
+// A nested attach that fails under the stop uses up its interrupt, and the
+// script around it runs on and reports the stop when it ends.
+#[test]
+fn a_nested_attach_spending_the_stop_lets_the_outer_script_run_on() {
+    let context = spawn();
+    context
+        .attach(name_and_id("nest", 0), &mut adding())
+        .expect("attach");
+    let mut nested = None;
+    let mut host = Answering(|_args: &[i64], _id| {
+        context.stop().expect("live context");
+        nested = Some(context.attach(name_and_id("g", 1), &mut adding()));
+        CallbackReply::Value(integer(5))
+    });
+    assert!(matches!(
+        eval(&context, "globalThis.z = 0; nest(); globalThis.z = 1; 1", &mut host),
+        Err(EngineError::Js(js)) if js.kind == JsErrorKind::Terminated(TerminationCause::Stop)
+    ));
+    assert!(
+        matches!(nested, Some(Err(EngineError::Js(ref js))) if js.kind == JsErrorKind::Internal)
+    );
+    assert_eq!(eval(&context, "z", &mut adding()).expect("eval"), [1]);
+}

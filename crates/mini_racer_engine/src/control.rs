@@ -1,10 +1,13 @@
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use mini_racer_sync::{Channel, DispatchId, Protocol, RunnerPhase, TermCell, Terminator, lock};
+use mini_racer_sync::{
+    Channel, DispatchId, IdleTermination, Protocol, RunnerPhase, TermCell, Terminator, lock,
+};
 
 use crate::EngineError;
 use crate::notify::NotifyFd;
+use crate::process::platform::{self, Mode};
 use crate::process::tasks::Tasks;
 
 pub struct Wire;
@@ -211,7 +214,10 @@ impl ControlBlock {
     pub fn with_tasks(config: ContextConfig, tasks: Tasks) -> Self {
         Self {
             channel: Channel::default(),
-            term: TermCell::default(),
+            term: TermCell::new(match platform::mode() {
+                Mode::SingleThreaded => IdleTermination::Dropped,
+                Mode::MultiThreaded => IdleTermination::Kept,
+            }),
             config,
             timer: Mutex::default(),
             notify: NotifyFd::default(),

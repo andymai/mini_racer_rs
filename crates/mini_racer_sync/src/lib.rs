@@ -13,6 +13,6 @@ pub use fork::{ForkGate, Phase, RunnerPhase};
 pub use lock::{lock, wait, wait_timeout};
 pub use tasks::TaskQueue;
 pub use termination::{
-    DispatchId, DispatchKind, Halt, Inherited, Interrupt, TermCell, TermError, TerminationCause,
-    Terminator,
+    DispatchId, DispatchKind, Halt, IdleTermination, Inherited, Interrupt, TermCell, TermError,
+    TerminationCause, Terminator,
 };
