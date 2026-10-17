@@ -130,7 +130,6 @@ scripts/gate.sh                    # plus Rust tests, compile, exports, Ruby tes
 scripts/gate.sh --full             # plus planted violations, MSRV, deny, audit, machete, rustdoc, gem builds
 bundle exec rake compile           # build the extension into lib/mini_racer_rs/
 bundle exec rake test              # Ruby tests (compiles first)
-bundle exec rake test:prebuilt     # the same tests on the extension already in lib/, without compiling
 cargo nextest run --workspace --exclude mini_racer_rs
 scripts/check-exports.sh --write   # after changing #[no_mangle] items or bumping v8
 scripts/update-v8-archives.sh      # repin every target's V8 archive after bumping v8
@@ -178,7 +177,7 @@ bundle exec rake package:source    # the source gem, into pkg/
 - Loom builds need `--cfg loom` in `RUSTFLAGS` and their own `--target-dir target/loom`; sharing the default target dir rebuilds everything on every switch.
 - The fuzz crate is its own workspace with its own `Cargo.lock` (checked by `cargo fetch --locked`, cargo deny and cargo audit); it builds only on the nightly pinned as `toolchains.fuzz` in `tools/versions.toml`, which `scripts/fuzz-smoke.sh` installs when missing.
 - `rake compile` builds the dev profile locally and release when `CI` is set (`RB_SYS_CARGO_PROFILE`).
-- A stale `lib/mini_racer_rs/mini_racer_rs.so` keeps loading after Rust edits until `rake compile` runs; `NATIVE_VERSION` only catches version mismatches.
+- A stale `lib/mini_racer_rs/mini_racer_rs.so` keeps loading after Rust edits until `rake compile` runs; `NATIVE_VERSION` only catches version mismatches. An extension copied into `lib/mini_racer_rs/<minor>/` (from a native gem) wins over that build until it is deleted.
 - Without the variables from `scripts/fetch-v8-archive.sh`, cargo downloads V8 itself and skips the pinned digest.
 - A dependency, toolchain or v8 change regenerates `THIRD_PARTY_NOTICES.md` (`scripts/update-notices.sh`); it downloads every pinned V8 archive and fails if one links source that `licenses/v8/components.tsv` does not list.
 - cargo-about installed from source needs `--features cli`; `bin/setup` passes it.
