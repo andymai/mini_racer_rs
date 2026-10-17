@@ -104,30 +104,31 @@ end
 # workload without a word in the table.
 SUITE_ENV = %w[BENCH_SCALE BENCH_WARMUP BENCH_ROUNDS BENCH_SINGLE_THREADED].to_h { |name| [name, nil] }.freeze
 
-# mini_racer 0.22.1 itself sometimes dies from a signal while churning
-# contexts (glibc has reported a corrupted heap), which says nothing about the
-# harness, so a reference run that dies that way runs again before it counts.
+# mini_racer 0.22.1 itself has died from a signal during bench/memory.rb
+# (glibc reported a corrupted heap), which says nothing about the harness, so a
+# reference run that dies that way runs again before it counts.
 REFERENCE_ATTEMPTS = 3
 
 def launch(role, options, script, *args)
   pin = options[:cpus] ? ["taskset", "-c", options[:cpus]] : []
   command = [*pin, *DiffWorkers.ruby(role, File.join(__dir__, script), role, *args)]
   env = DiffWorkers.env(role).merge(SUITE_ENV)
+  run = [script, *args].join(" ")
   attempts = role == "reference" ? REFERENCE_ATTEMPTS : 1
   out, err, status = nil
   attempts.times do |attempt|
     out, err, status = DiffWorkers.unbundled { Open3.capture3(env, *command, chdir: ROOT) }
     break unless status.signaled? && attempt < attempts - 1
 
-    warn "bench: the #{role} run of #{script} died from signal #{status.termsig}; running it again"
+    warn "bench: the #{role} run of #{run} died from signal #{status.termsig}; running it again"
   end
   return JSON.parse(out) if status.success?
 
   err = "its output is withheld, since it can quote the bundle\n" if args.first&.start_with?("external_")
 
-  abort "bench: the #{role} run of #{script} failed:\n#{err}" if role == "reference"
+  abort "bench: the #{role} run of #{run} failed:\n#{err}" if role == "reference"
 
-  warn "bench: the candidate run of #{script} failed:\n#{err.lines.last(5).join}"
+  warn "bench: the candidate run of #{run} failed:\n#{err.lines.last(5).join}"
   nil
 end
 
