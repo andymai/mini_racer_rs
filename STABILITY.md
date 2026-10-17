@@ -26,6 +26,12 @@ The gem defines `MiniRacer` and provides `lib/mini_racer.rb`. Under Bundler, `re
 
 The internal Rust crates are unstable. Files under `lib/mini_racer_rs/` are unstable except for what `require "mini_racer"` and `require "mini_racer_rs"` load.
 
+## Deprecation
+
+Anything under `MiniRacerRs` and the `MINI_RACER_RS_SPIN_US` environment variable receive one minor release of notice before removal. The deprecating release keeps the affected interface working and warns when it is used. Removal occurs no earlier than the next minor release.
+
+This guarantee covers removal only. `MINI_RACER_RS_SPIN_US` remains an unstable tuning interface, and its effect on timing can change in any release. The `MiniRacer` namespace continues to follow mini_racer 0.22.1.
+
 ## Platforms, Rubies and V8
 
 Supported Rubies are CRuby 3.3, 3.4 and 4.0, plus TruffleRuby using mini_racer's vendored TruffleRuby backend. Supported Ruby versions follow CRuby's maintained releases.
