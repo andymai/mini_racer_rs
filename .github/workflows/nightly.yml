@@ -7,8 +7,10 @@ on:
   pull_request:
     types: [labeled, synchronize]
 
+# Each label gets its own group, so adding one label does not cancel the job
+# another label started.
 concurrency:
-  group: nightly-${{ github.event.pull_request.number || github.run_id }}
+  group: nightly-${{ github.event.pull_request.number || github.run_id }}-${{ github.event.action == 'labeled' && github.event.label.name || 'push' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions: {}
@@ -34,6 +36,42 @@ jobs:
           command -v llvm-symbolizer || find /usr/bin -name 'llvm-symbolizer-*' | grep -q . ||
             { sudo apt-get update && sudo apt-get install -y llvm; }
       - run: scripts/sanitizers.sh
+
+  # Memory growth over long runs, which no PR job runs long enough to see.
+  stress:
+    name: Stress (${{ matrix.os }})
+    if: github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'stress') && (github.event.action != 'labeled' || github.event.label.name == 'stress'))
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      CI: "true"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          ruby: "3.4"
+      - run: bundle exec rake compile
+      # Each run is its own step, so one failure does not hide the others.
+      - name: Round trips on one context, single-threaded platform
+        if: ${{ !cancelled() }}
+        run: bundle exec ruby -Ilib test/stress/round_trips.rb single 10000000
+      - name: Round trips on one context, multi-threaded platform
+        if: ${{ !cancelled() }}
+        run: bundle exec ruby -Ilib test/stress/round_trips.rb multi 10000000
+      - name: Context churn from 8 threads, single-threaded platform
+        if: ${{ !cancelled() }}
+        run: bundle exec ruby -Ilib test/stress/churn.rb single 8 600
+      - name: Context churn from 8 threads, multi-threaded platform
+        if: ${{ !cancelled() }}
+        run: bundle exec ruby -Ilib test/stress/churn.rb multi 8 600
 
   # Every wire fuzz target for 15 minutes on the pinned nightly.
   fuzz:

@@ -4,14 +4,18 @@
 # grows more than the allowed fraction after a warm-up. V8 keeps sizing its heap
 # for the first few hundred thousand evaluations (the real gem's RSS rises about
 # 25% over that stretch too), so the default warm-up waits that out and what is
-# left to see is a leak.
-#   ruby -Ilib test/stress/round_trips.rb [count] [warmup] [max_growth]
+# left to see is a leak. The V8 platform mode is fixed per process, so each
+# mode is its own run.
+#   ruby -Ilib test/stress/round_trips.rb single|multi [count] [warmup] [max_growth]
 
 require "mini_racer"
 
-count = Integer(ARGV.fetch(0, 1_000_000))
-warmup = Integer(ARGV.fetch(1, 500_000))
-max_growth = Float(ARGV.fetch(2, 0.05))
+mode = ARGV.fetch(0) { abort "usage: round_trips.rb single|multi [count] [warmup] [max_growth]" }
+abort "mode is single or multi, not #{mode}" unless %w[single multi].include?(mode)
+count = Integer(ARGV.fetch(1, 1_000_000))
+warmup = Integer(ARGV.fetch(2, 500_000))
+max_growth = Float(ARGV.fetch(3, 0.05))
+MiniRacer::Platform.set_flags!(:single_threaded) if mode == "single"
 
 def rss_kb = Integer(`ps -o rss= -p #{Process.pid}`.strip)
 

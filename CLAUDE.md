@@ -108,7 +108,7 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | Consumer workloads (Babel, Terser, Handlebars, React) and their ledger | `test/consumers/workloads.rb`, `test/consumers/js/`, `test/consumers/candidate.status.toml` |
 | rtlcss resolving through the shim to mini_racer_rs | `test/consumers/transitive/` |
 | Benchmarks against the real gem (informational), including mini_racer's own `benchmark/serde` suite | `bench/run.rb`, `bench/measure.rb`, `bench/payload.rb`, `bench/serde.rb` |
-| Memory, lifecycle, fork and spawn stress runs | `test/stress/round_trips.rb`, `test/stress/churn.rb`, `test/stress/fork_loop.rb`, `test/stress/spawn_churn.rb` |
+| Memory, lifecycle, fork and spawn stress runs (round trips and churn nightly, and on PRs labeled `stress`) | `test/stress/round_trips.rb`, `test/stress/churn.rb`, `test/stress/fork_loop.rb`, `test/stress/spawn_churn.rb`, `.github/workflows/nightly.yml` |
 | Differential ledgers and corpus | `test/diff/candidate.status.toml`, `test/diff/divergences.toml`, `test/diff/corpus/` |
 | Vendored TruffleRuby backend | `lib/mini_racer/truffleruby.rb`, `lib/mini_racer/shared.rb` |
 | Public surface status per id, deviation reasons | `compat.toml`, `compat/surface.json` |
@@ -149,8 +149,8 @@ bundle exec ruby test/diff/run.rb --set consumers --twin --strict   # real libra
 bundle exec ruby test/diff/run.rb --explore --shrink --seed 42 --js 1500 --ruby 1500   # a fresh seed, no ledger, no shared objects
 BUNDLE_GEMFILE=$PWD/test/consumers/transitive/Gemfile bundle exec ruby test/consumers/transitive/check.rb
 bundle exec ruby bench/run.rb     # medians against the real gem; --quick for a smoke run
-bundle exec ruby -Ilib test/stress/round_trips.rb   # 1M evals after a 500k warm-up; fails on RSS growth over 5%
-bundle exec ruby -Ilib test/stress/churn.rb 8 600   # 8 threads creating, evaluating and releasing contexts for 10 min
+bundle exec ruby -Ilib test/stress/round_trips.rb multi   # 1M evals after a 500k warm-up; fails on RSS growth over 5% (also: single)
+bundle exec ruby -Ilib test/stress/churn.rb multi 8 600   # 8 threads churning contexts for 10 min; fails over 256 bytes of RSS per context plus 32 MB (also: single)
 bundle exec ruby -Ilib test/stress/fork_loop.rb    # 500 forks with idle contexts, 100 during an eval loop, single-threaded
 bundle exec ruby -Ilib test/stress/spawn_churn.rb single   # 1,000 backticks and IO.popen under context churn (also: multi)
 scripts/madvise-fixture.sh         # Linux: build without the madvise wrapper and show a fork child crash
