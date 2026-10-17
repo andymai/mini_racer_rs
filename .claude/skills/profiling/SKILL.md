@@ -21,14 +21,16 @@ description: Use when making or measuring a performance change in mini_racer_rs,
 | Everything, 5 runs, pinned | `bundle exec ruby bench/run.rb --cpus 0-7` |
 | More runs for a noisy row | add `--runs <n>` |
 | Smoke run (one short run of each) | add `--quick` |
-| Round trips, startup and payload MB/s only | add `--no-serde --no-workloads` |
-| Conversion per value type (mini_racer's `benchmark/serde`) | add `--no-micro --no-workloads` |
-| Babel, Terser, React and Handlebars only | add `--no-micro --no-serde` |
-| Results | `tmp/bench/<UTC timestamp>.json`: `summary`, `serde`, `workloads` (medians, ratio, note per row) and every raw run |
+| Round trips, startup and payload MB/s only | add `--no-serde --no-workloads --no-memory` |
+| Conversion per value type (mini_racer's `benchmark/serde`) | add `--no-micro --no-workloads --no-memory` |
+| The library workloads only (Babel, Terser, Autoprefixer, React, MUI, Handlebars) | add `--no-micro --no-serde --no-memory` |
+| Resident memory only (idle, loaded and churned contexts) | add `--no-micro --no-serde --no-workloads` |
+| A server rendering bundle kept outside the repository | set `MINI_RACER_RS_BENCH_SSR_BUNDLE`, and `MINI_RACER_RS_BENCH_SSR_PRELUDE` and `MINI_RACER_RS_BENCH_SSR_CALL` as `bench/external.rb` describes; its rows record no path, name or error message |
+| Results | `tmp/bench/<UTC timestamp>.json`: `summary`, `serde`, `workloads`, `external`, `memory` (medians, ratio, note per row) and every raw run |
 
 ## How a run works
 
-Each run starts the reference, then the candidate, as separate `bundle exec` processes started the way `test/diff/workers.rb` starts the differential run's workers: `bench/measure.rb` for the per-call metrics, `bench/serde.rb` for upstream's serde suite, and `bench/workloads.rb <name>` once per workload, so what one workload leaves behind cannot change another. Tables report the median across runs; the ratio is how many times faster this gem is. A failure on the reference side aborts the run; a metric the candidate cannot run is a row noted `unsupported`. Other notes: `noisy` (one gem's runs spread more than 10%, which run.rb reads as something else using the machine; rerun before trusting the ratio), `different output` (the payload or workload digests differ, which is a correctness bug, not a number), `under 1.0` (idle CPU below its floor, no ratio).
+Each run starts the reference, then the candidate, as separate `bundle exec` processes started the way `test/diff/workers.rb` starts the differential run's workers: `bench/measure.rb` for the per-call metrics, `bench/serde.rb` for upstream's serde suite, `bench/workloads.rb <name>` once per workload and `bench/memory.rb <scenario>` once per memory scenario, so what one leaves behind cannot change another. Tables report the median across runs; the ratio is how many times faster this gem is. A failure on the reference side aborts the run; a metric the candidate cannot run is a row noted `unsupported`. Other notes: `noisy` (one gem's runs spread more than 10%, which run.rb reads as something else using the machine; rerun before trusting the ratio), `different output` (the payload or workload digests differ, which is a correctness bug, not a number), `under 1.0` (idle CPU below its floor, no ratio), `reference unsupported` (the real gem could not run it, no ratio).
 
 ## What to measure first
 
@@ -37,6 +39,7 @@ Each run starts the reference, then the candidate, as separate `bundle exec` pro
 | Dispatch, the channel, spinning and parking, GVL release, the watchdog | eval, call and callback round trip p50 and p99, call with timeout | `bundle exec ruby -Ilib test/stress/round_trips.rb multi` (microseconds per eval, and RSS) |
 | Wire decode or write, encode, text transcoding | JS to Ruby and Ruby to JS MB/s | the serde rows for the value type that changed |
 | Context creation, dispose, snapshots, isolate teardown | startup p50, Babel snapshot startup and size | `bundle exec ruby -Ilib test/stress/churn.rb multi 8 60` (contexts churned, bytes per context) |
+| What a context keeps allocated: buffers, isolate setup, what V8 or malloc holds after a load | the memory rows (each scenario in its own process; per-context rows leave out a first context) | the same rows with `--runs 3` or more, since resident memory moves with the allocator |
 | Anything on the hot path | the round trips above | the workloads: they spend most of their time inside V8, so they confirm real use does not regress rather than show small wins |
 
 p99 and p99.9 rows are often `noisy`. The serde rows below 1x in `BENCHMARKS.md` are arrays of 10,000 numbers. The stress scripts load whatever extension `-Ilib` finds and print one gem's figures with no reference, so use them for before and after on the same build profile only.
