@@ -274,7 +274,7 @@ status = "done"
 status = "done"
 
 [ids."kwarg:MiniRacer::Context#initialize:max_memory"]
-status = "todo:M3"
+status = "done"
 
 [ids."kwarg:MiniRacer::Context#initialize:snapshot"]
 depends_on = ["class:MiniRacer::Snapshot < Object"]

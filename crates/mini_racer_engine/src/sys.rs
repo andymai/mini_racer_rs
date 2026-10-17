@@ -44,6 +44,29 @@ pub fn isolate_key(isolate: &v8::Isolate) -> usize {
     pointer.addr()
 }
 
+/// Has V8 report each garbage collection on `isolate`, so its runner can
+/// check the heap against `max_memory`.
+pub fn watch_heap(isolate: &mut v8::Isolate) {
+    isolate.add_gc_epilogue_callback(after_gc, std::ptr::null_mut(), v8::GCType::kGCTypeAll);
+}
+
+unsafe extern "C" fn after_gc(
+    mut isolate: v8::UnsafeRawIsolatePtr,
+    _type: v8::GCType,
+    _flags: v8::GCCallbackFlags,
+    _data: *mut c_void,
+) {
+    let checked = std::panic::catch_unwind(move || {
+        // SAFETY: V8 calls a GC epilogue callback on the thread that has the
+        // isolate entered, with its own non-null pointer to it.
+        let isolate = unsafe { v8::Isolate::ref_from_raw_isolate_ptr_mut(&mut isolate) };
+        crate::runner::check_heap(isolate);
+    });
+    if checked.is_err() {
+        std::process::abort();
+    }
+}
+
 /// Asks the isolate's runner to park for a pending fork the next time V8
 /// checks for interrupts, where JavaScript may be running for a long time.
 pub fn interrupt_for_fork(handle: &v8::IsolateHandle) {

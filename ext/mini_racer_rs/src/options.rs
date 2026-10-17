@@ -87,8 +87,8 @@ pub fn configure(
                 return Err(OptionError::Unsupported(key));
             }
             "max_memory" => {
-                within(&value, "max_memory", 0..UINT32_MAX)?;
-                return Err(OptionError::Unsupported(key));
+                let bytes = within(&value, "max_memory", 0..UINT32_MAX)?;
+                config.max_memory = u64::try_from(bytes).ok().filter(|bytes| *bytes > 0);
             }
             "snapshot" => match value {
                 OptionValue::Nil => {}
@@ -165,6 +165,14 @@ mod tests {
     }
 
     #[test]
+    fn max_memory_is_bytes_and_zero_means_none() {
+        let config = configure_pairs(&[("max_memory", OptionValue::Fixnum(200_000_000))]);
+        assert_eq!(config.map(|c| c.max_memory), Ok(Some(200_000_000)));
+        let config = configure_pairs(&[("max_memory", OptionValue::Fixnum(0))]);
+        assert_eq!(config.map(|c| c.max_memory), Ok(None));
+    }
+
+    #[test]
     fn keys_are_checked_last_to_first() {
         let pairs = [
             ("timeout", OptionValue::Other("String".to_owned())),
@@ -214,7 +222,6 @@ mod tests {
     #[test]
     fn options_not_built_yet_say_so() {
         for pairs in [
-            [("max_memory", OptionValue::Fixnum(1))],
             [("ensure_gc_after_idle", OptionValue::Fixnum(1))],
             [(
                 "verbose_exceptions",

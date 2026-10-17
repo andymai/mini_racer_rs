@@ -3,7 +3,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use mini_racer_sync::{DispatchId, DispatchKind, Halt, Phase, Side, TerminationCause, ToV8, lock};
+use mini_racer_sync::{
+    DispatchId, DispatchKind, Halt, Interrupt, Phase, Side, TerminationCause, ToV8, lock,
+};
 use v8::ValueDeserializerHelper;
 
 use crate::control::{CallbackReply, ControlBlock, Depth, IsolateTerminator, JsText, Request};
@@ -112,6 +114,21 @@ pub fn run(block: &Arc<ControlBlock>, generation: &'static Generation, start: St
     block.phase.set(Phase::Exited);
 }
 
+// mini_racer's max_memory, checked after every garbage collection: a heap
+// past it terminates the running script, or the next one.
+pub fn check_heap(isolate: &mut v8::Isolate) {
+    let Some(runtime) = isolate.get_slot::<Arc<Runtime>>().cloned() else {
+        return;
+    };
+    let Some(max) = runtime.block.config.max_memory else {
+        return;
+    };
+    let used = isolate.get_heap_statistics().used_heap_size();
+    if u64::try_from(used).unwrap_or(u64::MAX) > max {
+        runtime.block.term.request(Interrupt::MaxMemory);
+    }
+}
+
 pub fn park_for_fork(isolate: &v8::Isolate) {
     if let Some(runtime) = isolate.get_slot::<Arc<Runtime>>() {
         runtime.generation.pause(&runtime.block);
@@ -146,6 +163,9 @@ fn serve(
         None => params,
     };
     let mut isolate = v8::Isolate::new(params);
+    if block.config.max_memory.is_some() {
+        sys::watch_heap(&mut isolate);
+    }
     let key = sys::isolate_key(&isolate);
     generation.tasks().register(key, &block.tasks);
     let contexts = {

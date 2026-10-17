@@ -55,6 +55,7 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | Timeout watchdog thread | `crates/mini_racer_engine/src/process/watchdog.rs` |
 | The descriptor a fiber scheduler waits on for a context's runner | `crates/mini_racer_engine/src/notify.rs` |
 | Forks: the fork epoch, per-process generations, quiescing runners inside `fork()` (`pthread_atfork`), taking idle contexts over in the child, dispatches orphaned by a fork from a callback | `crates/mini_racer_engine/src/process/fork.rs`, `crates/mini_racer_engine/src/sys.rs`, `crates/mini_racer_engine/src/context.rs` (`Lineage`, `adopt`) |
+| `max_memory:`: the garbage collection callback and the heap check after it | `crates/mini_racer_engine/src/sys.rs` (`watch_heap`), `crates/mini_racer_engine/src/runner.rs` (`check_heap`) |
 | Building and warming up startup snapshots | `crates/mini_racer_engine/src/snapshot.rs` |
 | Engine errors | `crates/mini_racer_engine/src/error.rs` |
 | `madvise` wrapper (fork safety), and the fixture showing a child crashes without it | `crates/mini_racer_engine/src/sys.rs`, `crates/mini_racer_engine/build.rs`, `scripts/madvise-fixture.sh`, `test/stress/madvise_fixture.rb` |

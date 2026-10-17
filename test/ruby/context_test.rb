@@ -23,7 +23,7 @@ class ContextTest < Minitest::Test
     assert_equal "bad timeout", error.message
     error = assert_raises(MiniRacer::RuntimeError) { MiniRacer::Context.new(bogus: 1) }
     assert_equal "bad keyword: bogus", error.message
-    assert_raises(NotImplementedError) { MiniRacer::Context.new(max_memory: 1) }
+    assert_raises(NotImplementedError) { MiniRacer::Context.new(ensure_gc_after_idle: 1) }
     assert_equal 1, MiniRacer::Context.new(snapshot: nil, verbose_exceptions: false).eval("1")
   end
 

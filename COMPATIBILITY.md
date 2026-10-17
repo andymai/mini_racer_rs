@@ -4,7 +4,7 @@
 
 | Engine | Done | Planned | Deviation |
 |---|---|---|---|
-| CRuby | 48 | 6 | 20 |
+| CRuby | 49 | 5 | 20 |
 | TruffleRuby | 58 | 0 | 0 |
 
 ## Surface
@@ -71,7 +71,7 @@
 | `kwarg:MiniRacer::Context#initialize:ensure_gc_after_idle` | planned (M3) | done |
 | `kwarg:MiniRacer::Context#initialize:isolate` | n/a | done |
 | `kwarg:MiniRacer::Context#initialize:marshal_stack_depth` | done | done |
-| `kwarg:MiniRacer::Context#initialize:max_memory` | planned (M3) | done |
+| `kwarg:MiniRacer::Context#initialize:max_memory` | done | done |
 | `kwarg:MiniRacer::Context#initialize:snapshot` | done | done |
 | `kwarg:MiniRacer::Context#initialize:timeout` | done | done |
 | `kwarg:MiniRacer::Context#initialize:verbose_exceptions` | planned (M3) | n/a |

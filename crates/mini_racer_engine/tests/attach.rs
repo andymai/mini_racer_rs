@@ -364,6 +364,7 @@ fn a_timeout_while_a_nested_result_serializes_leaves_the_result() {
         ContextConfig {
             timeout: Some(Duration::from_millis(50)),
             snapshot: Some(blob),
+            ..ContextConfig::default()
         },
         &mut adding(),
     )
