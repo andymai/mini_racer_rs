@@ -114,6 +114,7 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | Public surface status per id, deviation reasons | `compat.toml`, `compat/surface.json` |
 | Compat reflection, extraction, check and rendering | `tools/compat/`, `rakelib/compat.rake` |
 | Generated from compat.toml (never edit) | `COMPATIBILITY.md`, the README compat table |
+| The README's `ruby check` examples, run with every `# =>` value asserted | `test/ruby/readme_test.rb` |
 | Public docs (written through codex-write, approved by Andy) and GitHub templates | `README.md`, `ARCHITECTURE.md`, `SECURITY.md`, `STABILITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1, verbatim), `.github/ISSUE_TEMPLATE/`, `.github/pull_request_template.md` |
 | Weekly issue when RubyGems.org lists a newer mini_racer than the target | `.github/workflows/upstream-watch.yml`, `.github/upstream-release.md` |
 | An issue per workflow whose scheduled run fails or times out; later failures comment on the open one; every scheduled workflow must be on its list | `.github/workflows/scheduled-failures.yml`, `scripts/report-scheduled-failure.sh`, `scripts/check-scheduled-watch.sh` |
