@@ -93,9 +93,10 @@ if options[:workloads] && !File.exist?(TERSER_INPUT)
 end
 # The messages leave the paths out, so nothing printed names the bundle.
 if options[:external]
-  abort "bench: MINI_RACER_RS_BENCH_SSR_BUNDLE is not a file" unless File.file?(BenchExternal::BUNDLE)
-  unless BenchExternal::PRELUDE.empty? || File.file?(BenchExternal::PRELUDE)
-    abort "bench: MINI_RACER_RS_BENCH_SSR_PRELUDE is not a file"
+  readable = ->(path) { File.file?(path) && File.readable?(path) }
+  abort "bench: MINI_RACER_RS_BENCH_SSR_BUNDLE is not a readable file" unless readable[BenchExternal::BUNDLE]
+  unless BenchExternal::PRELUDE.empty? || readable[BenchExternal::PRELUDE]
+    abort "bench: MINI_RACER_RS_BENCH_SSR_PRELUDE is not a readable file"
   end
 end
 
@@ -103,12 +104,14 @@ end
 # workload without a word in the table.
 SUITE_ENV = %w[BENCH_SCALE BENCH_WARMUP BENCH_ROUNDS BENCH_SINGLE_THREADED].to_h { |name| [name, nil] }.freeze
 
-def launch(role, options, script, *)
+def launch(role, options, script, *args)
   pin = options[:cpus] ? ["taskset", "-c", options[:cpus]] : []
-  command = [*pin, *DiffWorkers.ruby(role, File.join(__dir__, script), role, *)]
+  command = [*pin, *DiffWorkers.ruby(role, File.join(__dir__, script), role, *args)]
   env = DiffWorkers.env(role).merge(SUITE_ENV)
   out, err, status = DiffWorkers.unbundled { Open3.capture3(env, *command, chdir: ROOT) }
   return JSON.parse(out) if status.success?
+
+  err = "its output is withheld, since it can quote the bundle\n" if args.first&.start_with?("external_")
 
   abort "bench: the #{role} run of #{script} failed:\n#{err}" if role == "reference"
 
@@ -184,10 +187,13 @@ puts "Engines: #{engines.join(" against ")}" if engines.all?
 def row(name, values, direction, floor: nil, wrong: false)
   medians = values.transform_values { |list| list.compact.size == list.size ? median(list) : nil }
   reference, candidate = medians.values_at(*ROLES)
-  below = floor && candidate && [reference, candidate].min < floor
-  ratio = (direction == :lower ? reference / candidate : candidate / reference) if candidate && !wrong && !below
+  below = floor && reference && candidate && [reference, candidate].min < floor
+  if reference && candidate && !wrong && !below
+    ratio = direction == :lower ? reference / candidate : candidate / reference
+  end
   noisy = values.values.any? { |list| list.compact.size > 1 && (list.compact.max / list.compact.min) - 1 > NOISE }
-  note = if wrong then "different output"
+  note = if reference.nil? then "reference unsupported"
+         elsif wrong then "different output"
          elsif candidate.nil? then "unsupported"
          elsif below then "under #{floor}"
          elsif noisy then "noisy"
@@ -253,7 +259,8 @@ end
 memory_summary = {}
 if options[:memory]
   puts
-  puts "Memory, resident set size after three collections and a pause, medians."
+  puts "Memory, resident set size after collections and a pause, medians. Per-context rows leave out a first " \
+       "context, which pays for starting V8."
   puts
   puts "| Scenario | mini_racer | mini_racer_rs | Ratio | Note |"
   puts "|---|---|---|---|---|"

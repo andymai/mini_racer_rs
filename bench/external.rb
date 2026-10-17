@@ -4,7 +4,8 @@
 # MINI_RACER_RS_BENCH_SSR_BUNDLE, loaded as react-rails loads one, after the
 # globals and stubs its renderer defines and the file named by
 # MINI_RACER_RS_BENCH_SSR_PRELUDE. MINI_RACER_RS_BENCH_SSR_CALL is the
-# JavaScript expression that renders. Nothing records the bundle's path or name.
+# JavaScript expression that renders. What the benchmark prints and writes
+# leaves out the bundle's path and name and every error message it raises.
 module BenchExternal
   BUNDLE = ENV.fetch("MINI_RACER_RS_BENCH_SSR_BUNDLE", "")
   PRELUDE = ENV.fetch("MINI_RACER_RS_BENCH_SSR_PRELUDE", "")

@@ -109,7 +109,9 @@ result = begin
     abort "bench: no workload named #{name}"
   end
 rescue StandardError, NotImplementedError => e
-  { "unsupported" => "#{e.class}: #{e.message[0, 120]}" }
+  # mini_racer's message is the JavaScript stack, which for the external
+  # bundle names its functions and components.
+  { "unsupported" => name.start_with?("external_") ? e.class.name : "#{e.class}: #{e.message[0, 120]}" }
 end
 
 gem = defined?(MiniRacerRs) ? "mini_racer_rs #{MiniRacerRs::VERSION}" : "mini_racer #{MiniRacer::VERSION}"
