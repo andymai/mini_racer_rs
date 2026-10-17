@@ -100,110 +100,127 @@ pub fn release_free_memory() {
 #[cfg(not(all(target_os = "linux", target_env = "gnu")))]
 pub const fn release_free_memory() {}
 
-// V8 names its worker threads "V8 DefaultWorkerThreadsTaskRunner WorkerThread"
-// and cuts every thread name to 15 bytes.
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-const V8_WORKER: &[u8] = b"V8 DefaultWorke";
+// Slots of v8::Platform's vtable, in v8-platform.h's declaration order after
+// the destructor's two; the v8-bump skill checks them against each new V8.
+const NUMBER_OF_WORKER_THREADS: usize = 6;
+const POST_TASK_ON_WORKER_THREAD_IMPL: usize = 20;
+// v8::TaskPriority::kUserBlocking.
+const USER_BLOCKING: u8 = 2;
 
-/// V8's worker threads, and how many of them are asleep.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Workers {
-    pub total: usize,
-    pub asleep: usize,
+type TaskMethod = unsafe extern "C" fn(*mut WorkerTask);
+
+// A C++ vtable as clang lays one out for v8::Task: the object points past the
+// first two words, at the destructors and then `Run`.
+#[repr(C)]
+struct TaskVtable {
+    offset_to_top: isize,
+    type_info: *const c_void,
+    complete_destructor: TaskMethod,
+    deleting_destructor: TaskMethod,
+    run: TaskMethod,
 }
 
-/// V8's worker threads now, or `None` when the process cannot tell.
-#[cfg(target_os = "linux")]
-#[must_use]
-pub fn v8_workers() -> Option<Workers> {
-    let mut workers = Workers {
-        total: 0,
-        asleep: 0,
-    };
-    for task in std::fs::read_dir("/proc/self/task").ok()? {
-        let path = task.ok()?.path();
-        // A thread that has exited since the listing is skipped.
-        let Ok(name) = std::fs::read(path.join("comm")) else {
-            continue;
-        };
-        if !name.starts_with(V8_WORKER) {
-            continue;
+// SAFETY: the vtable is never written, and its pointers are to functions and
+// null.
+unsafe impl Sync for TaskVtable {}
+
+static TASK_VTABLE: TaskVtable = TaskVtable {
+    offset_to_top: 0,
+    type_info: std::ptr::null(),
+    complete_destructor: destroy_task,
+    deleting_destructor: delete_task,
+    run: run_task,
+};
+
+// A v8::Task made in Rust, which V8 runs once on a worker thread and deletes.
+#[repr(C)]
+struct WorkerTask {
+    vtable: *const TaskMethod,
+    run: Option<Box<dyn FnOnce() + Send>>,
+}
+
+unsafe extern "C" fn destroy_task(task: *mut WorkerTask) {
+    guarded(|| {
+        // SAFETY: V8 destroys a task it owns once, and it was built in
+        // `post_on_worker_thread`.
+        unsafe { std::ptr::drop_in_place(task) };
+    });
+}
+
+unsafe extern "C" fn delete_task(task: *mut WorkerTask) {
+    guarded(|| {
+        // SAFETY: V8 deletes a task it owns once; it came from `Box::into_raw`.
+        drop(unsafe { Box::from_raw(task) });
+    });
+}
+
+unsafe extern "C" fn run_task(task: *mut WorkerTask) {
+    guarded(|| {
+        // SAFETY: V8 runs a task it owns, on one thread, before deleting it.
+        let run = unsafe { (*task).run.take() };
+        if let Some(run) = run {
+            run();
         }
-        let Ok(stat) = std::fs::read_to_string(path.join("stat")) else {
-            continue;
-        };
-        // The state follows the name, which is in parentheses and may hold any
-        // byte, so the last parenthesis ends it.
-        let state = stat
-            .rsplit_once(") ")
-            .and_then(|(_, rest)| rest.chars().next());
-        workers.total += 1;
-        workers.asleep += usize::from(state == Some('S'));
-    }
-    Some(workers)
+    });
 }
 
-/// V8's worker threads now, or `None` when the process cannot tell.
-#[cfg(target_os = "macos")]
+fn guarded(body: impl FnOnce()) {
+    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(body)).is_err() {
+        std::process::abort();
+    }
+}
+
+const fn platform_method(platform: &v8::Platform, slot: usize) -> *const c_void {
+    let this: *const v8::Platform = platform;
+    // SAFETY: `platform` is a live C++ v8::Platform, whose first word points
+    // at its vtable.
+    let vtable = unsafe { *this.cast::<*const *const c_void>() };
+    // SAFETY: v8::Platform declares more virtual functions than `slot`, so the
+    // entry is inside the vtable.
+    let entry = unsafe { vtable.add(slot) };
+    // SAFETY: the entry is an initialized function pointer of the vtable.
+    unsafe { *entry }
+}
+
+/// How many worker threads V8's platform runs.
 #[must_use]
-pub fn v8_workers() -> Option<Workers> {
-    // The proc_info flavor that lists a process's thread handles.
-    const PROC_PIDLISTTHREADS: libc::c_int = 6;
-    let pid = libc::pid_t::try_from(std::process::id()).ok()?;
-    let mut threads = vec![0_u64; 1024];
-    let capacity = libc::c_int::try_from(std::mem::size_of_val(threads.as_slice())).ok()?;
-    // SAFETY: the buffer has `capacity` writable bytes for the handles.
-    let written = unsafe {
-        libc::proc_pidinfo(
-            pid,
-            PROC_PIDLISTTHREADS,
-            0,
-            threads.as_mut_ptr().cast(),
-            capacity,
+pub fn worker_threads(platform: &v8::Platform) -> usize {
+    let method = platform_method(platform, NUMBER_OF_WORKER_THREADS);
+    // SAFETY: the slot holds `int Platform::NumberOfWorkerThreads()`, called
+    // with `this` first, as clang passes it.
+    let method = unsafe {
+        std::mem::transmute::<*const c_void, unsafe extern "C" fn(*const v8::Platform) -> libc::c_int>(
+            method,
         )
     };
-    // libproc reports a failure as 0.
-    let count =
-        usize::try_from(written).ok().filter(|&bytes| bytes > 0)? / std::mem::size_of::<u64>();
-    // A full buffer may have left threads out.
-    if count >= threads.len() {
-        return None;
-    }
-    let size = libc::c_int::try_from(std::mem::size_of::<libc::proc_threadinfo>()).ok()?;
-    let mut workers = Workers {
-        total: 0,
-        asleep: 0,
-    };
-    for &thread in threads.get(..count)? {
-        let mut info = libc::proc_threadinfo::default();
-        // SAFETY: `info` has room for one `proc_threadinfo`, `size` bytes.
-        let read = unsafe {
-            libc::proc_pidinfo(
-                pid,
-                libc::PROC_PIDTHREADINFO,
-                thread,
-                (&raw mut info).cast(),
-                size,
-            )
-        };
-        // A thread that has exited since the listing is skipped.
-        if read != size {
-            continue;
-        }
-        let name = info.pth_name.map(libc::c_char::cast_unsigned);
-        if name.starts_with(V8_WORKER) {
-            workers.total += 1;
-            workers.asleep += usize::from(info.pth_run_state == libc::TH_STATE_WAITING);
-        }
-    }
-    Some(workers)
+    // SAFETY: `platform` is the live object the method belongs to.
+    let count = unsafe { method(platform) };
+    usize::try_from(count).unwrap_or(0)
 }
 
-/// V8's worker threads now, or `None` when the process cannot tell.
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
-#[must_use]
-pub const fn v8_workers() -> Option<Workers> {
-    None
+/// Has V8 run `run` once on one of its worker threads.
+pub fn post_on_worker_thread(platform: &v8::Platform, run: Box<dyn FnOnce() + Send>) {
+    let task = Box::into_raw(Box::new(WorkerTask {
+        vtable: std::ptr::addr_of!(TASK_VTABLE.complete_destructor),
+        run: Some(run),
+    }));
+    // v8::SourceLocation holds one pointer, which V8 reads as no location when
+    // null.
+    let location: *const c_void = std::ptr::null();
+    let method = platform_method(platform, POST_TASK_ON_WORKER_THREAD_IMPL);
+    // SAFETY: the slot holds `void Platform::PostTaskOnWorkerThreadImpl(
+    // TaskPriority, std::unique_ptr<Task>, const SourceLocation&)`. V8's
+    // libc++ passes a unique_ptr in a register, as its own callers do, and the
+    // callee owns it from then on.
+    let method = unsafe {
+        std::mem::transmute::<
+            *const c_void,
+            unsafe extern "C" fn(*const v8::Platform, u8, *mut WorkerTask, *const *const c_void),
+        >(method)
+    };
+    // SAFETY: `platform` is the live object the method belongs to, `task` is
+    // a whole v8::Task, and `location` outlives the call.
+    unsafe { method(platform, USER_BLOCKING, task, &raw const location) };
 }
 
 /// Runs the engine's fork handlers inside every `fork()` of the process.
@@ -233,17 +250,39 @@ extern "C" fn on_child() {
     }
 }
 
-#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+#[cfg(test)]
 mod tests {
-    // A V8 that renames its worker threads would turn the wait before a fork
-    // off without a word; this fails first.
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::{Duration, Instant};
+
+    // The vtable slots match the V8 this crate links: a task posted through
+    // them runs on a worker thread and is deleted.
     #[test]
-    fn finds_v8s_worker_threads() {
+    fn runs_a_task_on_each_of_v8s_worker_threads() {
         crate::process::ensure_initialized();
-        let workers = super::v8_workers();
-        assert!(
-            workers.is_some_and(|workers| workers.total > 0),
-            "{workers:?}"
-        );
+        let platform = crate::process::platform_with_workers().expect("initialized");
+        let workers = super::worker_threads(platform);
+        assert!(workers > 0);
+        let ran = Arc::new(AtomicUsize::new(0));
+        for _ in 0..workers {
+            let ran = Arc::clone(&ran);
+            super::post_on_worker_thread(
+                platform,
+                Box::new(move || {
+                    ran.fetch_add(1, Ordering::SeqCst);
+                }),
+            );
+        }
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while ran.load(Ordering::SeqCst) < workers && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(ran.load(Ordering::SeqCst), workers);
+        // Each closure is dropped with its task, after it ran.
+        while Arc::strong_count(&ran) > 1 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(Arc::strong_count(&ran), 1);
     }
 }

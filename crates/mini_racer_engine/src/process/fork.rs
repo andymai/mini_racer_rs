@@ -1,9 +1,9 @@
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
-use mini_racer_sync::{ForkGate, Phase, lock};
+use mini_racer_sync::{ForkGate, Phase, lock, wait, wait_timeout};
 
 use crate::control::ControlBlock;
 use crate::process::platform::{self, Mode};
@@ -16,8 +16,8 @@ const QUIESCE: Duration = Duration::from_millis(500);
 const POLL: Duration = Duration::from_micros(200);
 // A runner still running after this is interrupted to park in JavaScript.
 const INTERRUPT_AFTER: Duration = Duration::from_millis(50);
-// Polls in a row that must find every one of V8's worker threads asleep.
-const SETTLED: u32 = 3;
+// How long V8's worker threads get to finish the tasks ahead of the fork's.
+const HOLD: Duration = Duration::from_millis(100);
 
 // Forks since the engine's fork handlers were registered, counted by the child
 // handler. A process is told apart from its ancestors by this, never by pid,
@@ -48,6 +48,7 @@ pub struct Generation {
     // may have held this lock at the fork.
     tasks: TaskRegistry,
     watchdog: Mutex<Option<Arc<Watchdog>>>,
+    workers: Workers,
     next: OnceLock<Box<Self>>,
 }
 
@@ -64,6 +65,7 @@ impl Generation {
             blocks: Mutex::new(Vec::new()),
             tasks: TaskRegistry::default(),
             watchdog: Mutex::new(None),
+            workers: Workers::default(),
             next: OnceLock::new(),
         }
     }
@@ -165,12 +167,11 @@ thread_local! {
 // pthread_atfork's prepare handler, on the forking thread inside fork() and
 // after every Ruby `_fork` hook, so no Ruby code runs while runners are held.
 // It waits until every runner is idle or parked, then, with a multi-threaded
-// V8, until its worker threads sleep, so the child finds no isolate mid-change
-// and, but for a worker woken by a delayed task during the fork itself, no
-// lock of V8's held, such as the one on the worker threads' queue that the
-// child's first post to them would wait on forever. No runner needs Ruby to
-// get there: one waiting on a callback already counts as parked. Past the
-// bound the fork goes ahead anyway.
+// V8, until each of V8's worker threads runs a task of the fork's that holds
+// it until the parent handler, so the child finds no isolate mid-change and
+// V8's worker queue neither locked nor waited on. No runner needs Ruby to get
+// there: one waiting on a callback already counts as parked. Past the bounds
+// the fork goes ahead anyway.
 pub(crate) fn prepare() {
     let intended = INTENDED.load(Ordering::SeqCst) != 0;
     FORK_INTENDED.store(intended, Ordering::SeqCst);
@@ -210,30 +211,82 @@ pub(crate) fn prepare() {
         }
         std::thread::sleep(POLL);
     };
-    let settled = !quiesced || platform::mode() == Mode::SingleThreaded || settle_workers(started);
+    let held =
+        platform::mode() == Mode::SingleThreaded || generation.workers.hold(Instant::now() + HOLD);
     generation
         .prepared
-        .store(quiesced && settled, Ordering::SeqCst);
+        .store(quiesced && held, Ordering::SeqCst);
 }
 
-// With every runner parked V8's worker threads get no new tasks, so once all
-// of them sleep, only a delayed task coming due (V8's memory pool releases
-// pages every eight seconds) wakes one to take their queue's lock before the
-// fork. Returns whether they settled; with no worker found it cannot tell.
-fn settle_workers(started: Instant) -> bool {
-    let mut asleep = 0;
-    while started.elapsed() < QUIESCE {
-        match crate::sys::v8_workers() {
-            Some(workers) if workers.total > 0 && workers.asleep == workers.total => asleep += 1,
-            Some(workers) if workers.total > 0 => asleep = 0,
-            _ => return false,
-        }
-        if asleep == SETTLED {
+// V8's worker threads, each held in a task of a fork's for its length. A
+// waiting worker is queued on V8's condition variable with its record on its
+// own stack, which a child need not keep: the child's first post to the
+// workers then reads freed memory. A worker inside a task is not queued and
+// holds no lock of V8's.
+#[derive(Default)]
+struct Workers {
+    hold: Mutex<Hold>,
+    changed: Condvar,
+}
+
+#[derive(Default)]
+struct Hold {
+    // The fork whose tasks hold workers; a task left from an earlier one
+    // returns at once.
+    fork: u64,
+    holding: bool,
+    held: usize,
+}
+
+impl Workers {
+    // Returns whether every worker was held by `deadline`.
+    fn hold(&'static self, deadline: Instant) -> bool {
+        let Some(platform) = crate::process::platform_with_workers() else {
             return true;
+        };
+        let count = crate::sys::worker_threads(platform);
+        let fork = {
+            let mut hold = lock(&self.hold);
+            hold.fork += 1;
+            hold.holding = true;
+            hold.held = 0;
+            hold.fork
+        };
+        for _ in 0..count {
+            crate::sys::post_on_worker_thread(platform, Box::new(move || self.keep(fork)));
         }
-        std::thread::sleep(POLL);
+        let mut hold = lock(&self.hold);
+        let all = loop {
+            if hold.held >= count {
+                break true;
+            }
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                break false;
+            }
+            hold = wait_timeout(&self.changed, hold, left);
+        };
+        drop(hold);
+        all
     }
-    false
+
+    fn keep(&self, fork: u64) {
+        let mut hold = lock(&self.hold);
+        if hold.fork != fork || !hold.holding {
+            return;
+        }
+        hold.held += 1;
+        self.changed.notify_all();
+        while hold.fork == fork && hold.holding {
+            hold = wait(&self.changed, hold);
+        }
+        drop(hold);
+    }
+
+    fn release(&self) {
+        lock(&self.hold).holding = false;
+        self.changed.notify_all();
+    }
 }
 
 // pthread_atfork's parent handler, whether or not the fork succeeded.
@@ -247,6 +300,7 @@ pub(crate) fn parent() {
     // Cleared before the gate opens, so no fork from another thread copies
     // a prepared flag while runners move.
     generation.prepared.store(false, Ordering::SeqCst);
+    generation.workers.release();
     generation.gate.end();
     drop(turn);
 }

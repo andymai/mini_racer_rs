@@ -3,10 +3,13 @@ pub mod platform;
 pub(crate) mod tasks;
 pub(crate) mod watchdog;
 
-use std::sync::Once;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Once, OnceLock};
 
 static INIT: Once = Once::new();
+// With the fork epoch it began in: its worker threads run only in that
+// process, never in a forked child.
+static PLATFORM: OnceLock<(v8::SharedRef<v8::Platform>, u64)> = OnceLock::new();
 static NEXT_THREAD: AtomicU64 = AtomicU64::new(1);
 
 thread_local! {
@@ -35,10 +38,19 @@ pub fn ensure_initialized() {
         };
         let platform =
             v8::new_custom_platform(workers, false, true, tasks::Foreground).make_shared();
+        let _ = PLATFORM.set((platform.clone(), fork::epoch()));
         v8::V8::initialize_platform(platform);
         v8::V8::initialize();
         crate::sys::register_fork_handlers();
     });
+}
+
+/// V8's platform, if this process runs its worker threads.
+pub(crate) fn platform_with_workers() -> Option<&'static v8::SharedRef<v8::Platform>> {
+    PLATFORM
+        .get()
+        .filter(|(_, began)| *began == fork::epoch())
+        .map(|(platform, _)| platform)
 }
 
 /// Tasks V8 posted for an isolate no runner had registered, dropped unrun.

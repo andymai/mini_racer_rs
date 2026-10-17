@@ -133,7 +133,7 @@ The public API and require path stay the same. The main changes are native insta
 
 - You're affected if JavaScript reads a non-ASCII message from a callback exception. mini_racer_rs passes UTF-8, such as `"café"`, while mini_racer passes `"cafÃ©"`.
 
-- You're affected if you fork while another thread runs JavaScript, especially uninterruptible work such as a large `JSON.parse`. Both modes wait up to 500 ms for runners; the default also waits for V8's worker threads to sleep. After a timeout, `:single_threaded` children refuse every inherited context, but new contexts work. Default-mode children always refuse inherited contexts, and new contexts are best effort.
+- You're affected if `fork`, `IO.popen("-")`, or `Process.daemon` runs while another thread uses a context. Both modes interrupt JavaScript after 50 ms and wait up to 500 ms for runners; default mode waits up to 100 ms more for V8 workers. Non-interruptible work such as a large `JSON.parse` can outlast the wait; the fork then proceeds, and a `:single_threaded` child refuses every inherited context. Otherwise `:single_threaded` children take over idle contexts and reject busy ones, and default-mode children reject all inherited contexts.
 
 - You're affected if, with `:single_threaded`, you fork in a way that bypasses Ruby's `fork`, such as a C-level `fork()`. Inherited contexts are unusable in the child.
 
@@ -213,7 +213,7 @@ mini_racer_rs uses the `v8` crate, rusty_v8 152.2.0, with Ruby bindings through 
 
 A waiting Ruby thread first spins briefly with the GVL held, then spins without it, then parks with the GVL released. Under a fiber scheduler, only the waiting fiber parks. Values use V8's serialization format and decode directly into Ruby objects without an intermediate tree. Repeated objects retain their identity.
 
-One watchdog thread per process enforces every context's `timeout:`. In `:single_threaded` mode, a fork with idle contexts quiesces the runners, and the child takes those contexts over; in the default multi-threaded mode, the fork also waits for V8's worker threads to be observed asleep, while inherited contexts remain unavailable in the child.
+One watchdog thread per process enforces every context's `timeout:`. In `:single_threaded` mode, a fork quiesces the runners, the child takes over contexts that were idle, and contexts in use raise there. In the default multi-threaded mode, the fork also holds V8's workers until it returns in the parent; inherited contexts raise in the child.
 
 The implementation is split into four crates:
 
