@@ -32,11 +32,14 @@ pub fn churn() {
                 for round in 0..25 {
                     let context = ContextHandle::spawn(ContextConfig::default(), &mut Parking)
                         .expect("spawn");
+                    // The delayed task is still queued at the dispose.
                     assert!(
                         context
                             .eval(
                                 "<eval>".to_owned(),
-                                "[1, 'two', 3.5]".to_owned(),
+                                "Atomics.waitAsync(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 60000); \
+                                 [1, 'two', 3.5]"
+                                    .to_owned(),
                                 &mut Parking
                             )
                             .is_ok()

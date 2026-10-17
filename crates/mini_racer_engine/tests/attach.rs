@@ -1,5 +1,7 @@
 #![allow(clippy::panic, reason = "test helpers fail the test by panicking")]
 
+use std::time::{Duration, Instant};
+
 use mini_racer_engine::{
     CallbackReply, ContextConfig, ContextHandle, EngineError, Host, JsErrorKind, JsText,
     TerminationCause, WaitHandle, WaitOutcome,
@@ -215,4 +217,133 @@ fn attach_replaces_segments_that_are_not_objects() {
         eval(&context, "minion.kevin.speak(40, 2)", &mut adding()).expect("eval"),
         [42]
     );
+}
+
+#[test]
+fn an_await_nested_in_a_callback_is_refused_and_the_outer_one_settles() {
+    let context = spawn();
+    context
+        .attach(name_and_id("inner", 0), &mut adding())
+        .expect("attach");
+    let mut refusal = None;
+    let mut host = Answering(|_args: &[i64], _id| {
+        refusal = Some(context.eval_await("<eval>", "Promise.resolve(1)", &mut adding()));
+        CallbackReply::Value(integer(41))
+    });
+
+    let settled = context
+        .eval_await(
+            "<eval>",
+            "(async () => { await null; return inner() + 1 })()",
+            &mut host,
+        )
+        .map(|bytes| ints(&bytes));
+    assert_eq!(settled.expect("settles"), [42]);
+    match refusal {
+        Some(Err(EngineError::Js(js))) => {
+            assert_eq!(js.kind, JsErrorKind::Runtime);
+            assert!(
+                js.message
+                    .starts_with("Error: nested call_await/eval_await is not supported"),
+                "{}",
+                js.message
+            );
+        }
+        other => panic!("expected the refusal, got {other:?}"),
+    }
+}
+
+// Gives a dispatch up after two seconds, as a Ruby timeout would, so a hang
+// fails the test instead of stalling it.
+struct Deadline(Instant);
+
+impl Host for Deadline {
+    fn wait(&mut self, wait: &WaitHandle<'_>) -> WaitOutcome {
+        while !wait.spin(Duration::from_millis(1)) {
+            if self.0.elapsed() > Duration::from_secs(2) {
+                return WaitOutcome::Cancel;
+            }
+        }
+        WaitOutcome::Ready
+    }
+
+    fn wait_blocking(&mut self, wait: &WaitHandle<'_>) {
+        parked(wait);
+    }
+}
+
+// Nothing times a pump, so mini_racer times a script a callback runs inside
+// one on its own: the script is stopped, and the pump's task carries on.
+#[test]
+fn a_script_nested_in_a_pump_is_timed_on_its_own() {
+    let context = ContextHandle::spawn(
+        ContextConfig {
+            timeout: Some(Duration::from_millis(50)),
+            ..ContextConfig::default()
+        },
+        &mut adding(),
+    )
+    .expect("spawn");
+    context
+        .attach(name_and_id("spin", 0), &mut adding())
+        .expect("attach");
+    eval(
+        &context,
+        "globalThis.got = 0; \
+         Atomics.waitAsync(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5).value \
+           .then(() => { got = spin() }); 0",
+        &mut adding(),
+    )
+    .expect("eval");
+    std::thread::sleep(Duration::from_millis(30));
+    let mut nested = None;
+    let mut host = Answering(|_args: &[i64], _id| {
+        nested = Some(context.eval("<eval>", "while (true) {}", &mut Deadline(Instant::now())));
+        CallbackReply::Value(integer(7))
+    });
+
+    assert!(context.pump_message_loop(&mut host).expect("pump"));
+    assert!(
+        matches!(
+            nested,
+            Some(Err(EngineError::Js(ref js))) if js.kind == JsErrorKind::Terminated(TerminationCause::Timeout)
+        ),
+        "{nested:?}"
+    );
+    assert_eq!(eval(&context, "got", &mut adding()).expect("eval"), [7]);
+}
+
+// mini_racer throws the refusal, then reports it as terminated when a stop is
+// pending, keeping the refusal's text.
+#[test]
+fn a_nested_await_under_a_pending_stop_reports_the_refusal_as_terminated() {
+    let context = spawn();
+    context
+        .attach(name_and_id("stops", 0), &mut adding())
+        .expect("attach");
+    let mut refusal = None;
+    let mut host = Answering(|_args: &[i64], _id| {
+        context.stop().expect("live context");
+        refusal = Some(context.eval_await("<eval>", "1", &mut adding()));
+        CallbackReply::Value(integer(0))
+    });
+
+    let outer = eval(&context, "stops()", &mut host);
+    assert!(matches!(
+        outer,
+        Err(EngineError::Js(js)) if js.kind == JsErrorKind::Terminated(TerminationCause::Stop)
+    ));
+    match refusal {
+        Some(Err(EngineError::Js(js))) => {
+            assert_eq!(js.kind, JsErrorKind::Terminated(TerminationCause::Stop));
+            assert!(
+                js.message
+                    .starts_with("Error: nested call_await/eval_await is not supported"),
+                "{}",
+                js.message
+            );
+        }
+        other => panic!("expected the refusal, got {other:?}"),
+    }
+    assert_eq!(eval(&context, "1 + 1", &mut adding()).expect("eval"), [2]);
 }

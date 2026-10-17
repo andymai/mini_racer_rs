@@ -74,7 +74,17 @@ pub fn init(ruby: &Ruby, racer: RModule) -> Result<(), Error> {
     class.define_alloc_func::<Context>();
     class.define_method("initialize", export!(method Context::initialize, -1))?;
     class.define_method("eval", export!(method Context::eval, -1))?;
+    class.define_method("eval_await", export!(method Context::eval_await, -1))?;
     class.define_method("call", export!(method Context::call, -1))?;
+    class.define_method("call_await", export!(method Context::call_await, -1))?;
+    class.define_method(
+        "perform_microtask_checkpoint",
+        export!(method Context::perform_microtask_checkpoint, 0),
+    )?;
+    class.define_method(
+        "pump_message_loop",
+        export!(method Context::pump_message_loop, 0),
+    )?;
     class.define_method("attach", export!(method Context::attach, 2))?;
     class.define_method(
         "low_memory_notification",
@@ -245,6 +255,19 @@ impl Context {
     }
 
     fn eval(ruby: &Ruby, rb_self: &Self, args: &[Value]) -> Result<Value, Error> {
+        Self::evaluate(ruby, rb_self, args, false)
+    }
+
+    fn eval_await(ruby: &Ruby, rb_self: &Self, args: &[Value]) -> Result<Value, Error> {
+        Self::evaluate(ruby, rb_self, args, true)
+    }
+
+    fn evaluate(
+        ruby: &Ruby,
+        rb_self: &Self,
+        args: &[Value],
+        awaited: bool,
+    ) -> Result<Value, Error> {
         let handle = rb_self.handle(ruby)?;
         let args = scan_args::<(Value,), (), (), (), RHash, ()>(args)?;
         let source = rb_raw::expect_string(ruby, args.required.0)?;
@@ -255,11 +278,25 @@ impl Context {
             _ => JsText::from("<eval>"),
         };
         let source = js_text(ruby, source)?;
-        let bytes = rb_self.dispatch(ruby, |host| handle.eval(filename, source, host))?;
+        let bytes = rb_self.dispatch(ruby, |host| {
+            if awaited {
+                handle.eval_await(filename, source, host)
+            } else {
+                handle.eval(filename, source, host)
+            }
+        })?;
         decode::value(ruby, &bytes)
     }
 
     fn call(ruby: &Ruby, rb_self: &Self, args: &[Value]) -> Result<Value, Error> {
+        Self::invoke(ruby, rb_self, args, false)
+    }
+
+    fn call_await(ruby: &Ruby, rb_self: &Self, args: &[Value]) -> Result<Value, Error> {
+        Self::invoke(ruby, rb_self, args, true)
+    }
+
+    fn invoke(ruby: &Ruby, rb_self: &Self, args: &[Value], awaited: bool) -> Result<Value, Error> {
         let handle = rb_self.handle(ruby)?;
         let args = scan_args::<(Value,), (), RArray, (), (), ()>(args)?;
         let name = rb_raw::expect_string(ruby, args.required.0)?;
@@ -268,8 +305,24 @@ impl Context {
         let request = encode::encode(ruby, request.as_value(), |message| {
             errors::runtime(ruby, [b"Context.call: ".as_slice(), &message].concat())
         })?;
-        let bytes = rb_self.dispatch(ruby, |host| handle.call(request, host))?;
+        let bytes = rb_self.dispatch(ruby, |host| {
+            if awaited {
+                handle.call_await(request, host)
+            } else {
+                handle.call(request, host)
+            }
+        })?;
         decode::value(ruby, &bytes)
+    }
+
+    fn perform_microtask_checkpoint(ruby: &Ruby, rb_self: &Self) -> Result<(), Error> {
+        let handle = rb_self.handle(ruby)?;
+        rb_self.dispatch(ruby, |host| handle.perform_microtask_checkpoint(host))
+    }
+
+    fn pump_message_loop(ruby: &Ruby, rb_self: &Self) -> Result<bool, Error> {
+        let handle = rb_self.handle(ruby)?;
+        rb_self.dispatch(ruby, |host| handle.pump_message_loop(host))
     }
 
     // The lock is held from choosing the id to sending it, so two threads

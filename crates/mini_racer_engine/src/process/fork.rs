@@ -7,6 +7,7 @@ use mini_racer_sync::{ForkGate, Phase, lock};
 
 use crate::control::ControlBlock;
 use crate::process::platform::{self, Mode};
+use crate::process::tasks::TaskRegistry;
 
 // Long enough for any runner to answer and go idle, short enough that a fork
 // that cannot be quiesced is merely slow.
@@ -40,6 +41,9 @@ pub struct Generation {
     // threads outside Ruby take turns with Ruby's.
     forking: Mutex<()>,
     blocks: Mutex<Vec<Weak<ControlBlock>>>,
+    // Per process, as V8's worker threads post from the parent only, and one
+    // may have held this lock at the fork.
+    tasks: TaskRegistry,
     next: OnceLock<Box<Self>>,
 }
 
@@ -54,12 +58,17 @@ impl Generation {
             gate: ForkGate::default(),
             forking: Mutex::new(()),
             blocks: Mutex::new(Vec::new()),
+            tasks: TaskRegistry::default(),
             next: OnceLock::new(),
         }
     }
 
     pub const fn quiesced(&self) -> bool {
         self.quiesced
+    }
+
+    pub(crate) const fn tasks(&self) -> &TaskRegistry {
+        &self.tasks
     }
 
     pub fn register(&self, block: &Arc<ControlBlock>) {

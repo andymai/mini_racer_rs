@@ -8,7 +8,8 @@ use loom::thread;
 use mini_racer_sync::primitives::{Condvar, Mutex};
 use mini_racer_sync::{
     Channel, ChannelError, DispatchKind, ForkGate, Halt, Interrupt, Nesting, Notifier, Phase,
-    Protocol, RunnerPhase, Side, TermCell, TerminationCause, Terminator, ToRuby, ToV8, lock, wait,
+    Protocol, RunnerPhase, Side, TaskQueue, TermCell, TerminationCause, Terminator, ToRuby, ToV8,
+    lock, wait,
 };
 
 struct Numbers;
@@ -84,14 +85,14 @@ impl Isolate {
 
 struct Handle {
     isolate: Arc<Isolate>,
-    runner: Option<Arc<Channel<Numbers>>>,
+    tasks: Option<Arc<TaskQueue<u8>>>,
 }
 
 impl Terminator for Handle {
     fn terminate(&self) {
         self.isolate.terminating.store(true, Ordering::SeqCst);
-        if let Some(runner) = &self.runner {
-            runner.wake(Side::V8);
+        if let Some(tasks) = &self.tasks {
+            tasks.ring();
         }
     }
 
@@ -100,12 +101,12 @@ impl Terminator for Handle {
     }
 }
 
-fn term_cell(runner: Option<Arc<Channel<Numbers>>>) -> (Arc<TermCell<Handle>>, Arc<Isolate>) {
+fn term_cell(tasks: Option<Arc<TaskQueue<u8>>>) -> (Arc<TermCell<Handle>>, Arc<Isolate>) {
     let isolate = Arc::new(Isolate::default());
     let cell = Arc::new(TermCell::default());
     cell.install(Handle {
         isolate: Arc::clone(&isolate),
-        runner,
+        tasks,
     });
     (cell, isolate)
 }
@@ -435,26 +436,69 @@ fn a_second_sender_on_one_side_is_refused() {
     });
 }
 
-// A stop landing while the runner checks and goes to sleep in an await loop
-// still wakes it.
+// Model 11: a stop landing while an awaiting runner checks for one and goes
+// to wait for a task still wakes it.
 #[test]
-fn a_stop_wakes_a_runner_sleeping_in_an_await_loop() {
+fn a_stop_wakes_a_runner_awaiting_a_task() {
     loom::model(|| {
-        let channel = Arc::new(Channel::<Numbers>::default());
-        channel.request(1).expect("open");
-        request(next_for_v8(&channel)).expect("a request");
-        let (cell, isolate) = term_cell(Some(Arc::clone(&channel)));
+        let tasks = Arc::new(TaskQueue::default());
+        let (cell, isolate) = term_cell(Some(Arc::clone(&tasks)));
         let id = cell.begin(DispatchKind::Script).expect("nothing armed");
         let stopper_cell = Arc::clone(&cell);
         let stopper = thread::spawn(move || stopper_cell.request(Interrupt::Stop));
 
         while cell.check(DispatchKind::Script).is_none() {
-            channel.sleep(Side::V8, None);
+            tasks.wait();
         }
         stopper.join().expect("stopper thread");
 
         assert_eq!(cell.end(id), Some(Halt::Terminated(TerminationCause::Stop)));
         assert!(!isolate.terminating());
+    });
+}
+
+// Model 12: a task posted from another thread while the runner finds the
+// queue empty and goes to wait is never slept through.
+#[test]
+fn a_task_posted_while_the_runner_waits_is_never_missed() {
+    loom::model(|| {
+        let tasks = Arc::new(TaskQueue::default());
+        let poster_tasks = Arc::clone(&tasks);
+        let poster =
+            thread::spawn(move || poster_tasks.post(7, true, Duration::ZERO).expect("open"));
+
+        let task = loop {
+            if let Some(task) = tasks.pop(false) {
+                break task;
+            }
+            tasks.wait();
+        };
+        poster.join().expect("poster thread");
+
+        assert_eq!(task, 7);
+    });
+}
+
+// Model 13: a post racing the queue's close lands in exactly one place: in
+// what close hands back, or refused back to the poster.
+#[test]
+fn a_post_racing_close_is_handed_back_exactly_once() {
+    loom::model(|| {
+        let tasks = Arc::new(TaskQueue::default());
+        let poster_tasks = Arc::clone(&tasks);
+        let poster = thread::spawn(move || poster_tasks.post(7, true, Duration::ZERO));
+
+        let closed = tasks.close();
+        let refused = poster.join().expect("poster thread");
+
+        match refused {
+            Ok(()) => assert_eq!(closed, [7]),
+            Err(task) => {
+                assert_eq!(task, 7);
+                assert!(closed.is_empty());
+            }
+        }
+        assert_eq!(tasks.pop(false), None);
     });
 }
 
@@ -505,5 +549,25 @@ fn a_stop_is_reported_exactly_once() {
             1
         );
         assert!(!isolate.terminating());
+    });
+}
+
+// Model 14: a nested script's own timeout firing as the script ends never
+// leaves the untimed dispatch around it terminated.
+#[test]
+fn a_nested_timeout_racing_its_end_leaves_the_outer_dispatch_running() {
+    loom::model(|| {
+        let (cell, isolate) = term_cell(None);
+        let pump = cell.begin(DispatchKind::Pump).expect("nothing armed");
+        let nested = cell.time_nested().expect("an untimed dispatch");
+        let watchdog_cell = Arc::clone(&cell);
+        let watchdog = thread::spawn(move || watchdog_cell.request(Interrupt::Timeout(nested)));
+
+        cell.untime_nested(nested);
+        watchdog.join().expect("watchdog thread");
+
+        assert!(!isolate.terminating());
+        assert_eq!(cell.check(DispatchKind::Script), None);
+        assert_eq!(cell.end(pump), None);
     });
 }

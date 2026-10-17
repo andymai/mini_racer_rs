@@ -333,16 +333,7 @@ impl<P: Protocol> Channel<P> {
         }
     }
 
-    /// Waits for `wake(side)`, `close`, or the timeout whoever holds the turn,
-    /// so a runner holding it can wait for posted tasks. A wake that came
-    /// first ends the wait at once.
-    pub fn sleep(&self, side: Side, timeout: Option<Duration>) {
-        if !self.is_closed() {
-            self.parker(side).park(timeout);
-        }
-    }
-
-    /// Wakes `side` from `park` or `sleep` without handing it the turn.
+    /// Wakes `side` from `park` without handing it the turn.
     pub fn wake(&self, side: Side) {
         self.parker(side).unpark();
         self.ring(side);
@@ -598,19 +589,6 @@ mod tests {
         channel.park(Side::V8, Some(Duration::from_millis(5)));
 
         assert!(!channel.ready(Side::V8));
-    }
-
-    #[test]
-    fn sleep_waits_for_a_wake_even_while_holding_the_turn() {
-        let channel = Arc::new(Channel::<Text>::default());
-        channel.request("eval_await").unwrap();
-        channel.sleep(Side::V8, Some(Duration::from_millis(5)));
-
-        let waker = Arc::clone(&channel);
-        let task = thread::spawn(move || waker.wake(Side::V8));
-        channel.sleep(Side::V8, None);
-        task.join().unwrap();
-        assert_eq!(request(&channel), Some("eval_await"));
     }
 
     #[test]

@@ -4,7 +4,7 @@
 
 | Engine | Done | Planned | Deviation |
 |---|---|---|---|
-| CRuby | 43 | 11 | 20 |
+| CRuby | 48 | 6 | 20 |
 | TruffleRuby | 58 | 0 | 0 |
 
 ## Surface
@@ -40,18 +40,18 @@
 | `imethod:MiniRacer::Binary#data` | done | done |
 | `imethod:MiniRacer::Context#attach` | done | done |
 | `imethod:MiniRacer::Context#call` | done | done |
-| `imethod:MiniRacer::Context#call_await` | planned (M4) | done |
+| `imethod:MiniRacer::Context#call_await` | done | done |
 | `imethod:MiniRacer::Context#dispose` | done | done |
 | `imethod:MiniRacer::Context#eval` | done | done |
-| `imethod:MiniRacer::Context#eval_await` | planned (M4) | done |
+| `imethod:MiniRacer::Context#eval_await` | done | done |
 | `imethod:MiniRacer::Context#eval_in_context` | n/a | done |
 | `imethod:MiniRacer::Context#heap_snapshot` | planned (M3) | n/a |
 | `imethod:MiniRacer::Context#heap_stats` | planned (M3) | done |
 | `imethod:MiniRacer::Context#isolate` | n/a | done |
 | `imethod:MiniRacer::Context#load` | done | done |
 | `imethod:MiniRacer::Context#low_memory_notification` | done | done |
-| `imethod:MiniRacer::Context#perform_microtask_checkpoint` | planned (M4) | n/a |
-| `imethod:MiniRacer::Context#pump_message_loop` | planned (M4) | n/a |
+| `imethod:MiniRacer::Context#perform_microtask_checkpoint` | done | n/a |
+| `imethod:MiniRacer::Context#pump_message_loop` | done | n/a |
 | `imethod:MiniRacer::Context#stop` | done | done |
 | `imethod:MiniRacer::Context#write_heap_snapshot` | planned (M3) | done |
 | `imethod:MiniRacer::FailedV8Conversion#info` | n/a | done |
@@ -67,7 +67,7 @@
 | `imethod:MiniRacer::Snapshot#warmup_unsafe!` | n/a | done |
 | `imethod:MiniRacer::SnapshotError#backtrace` | done | done |
 | `kwarg:MiniRacer::Context#eval:filename` | done | done |
-| `kwarg:MiniRacer::Context#eval_await:filename` | planned (M4) | n/a |
+| `kwarg:MiniRacer::Context#eval_await:filename` | done | n/a |
 | `kwarg:MiniRacer::Context#initialize:ensure_gc_after_idle` | planned (M3) | done |
 | `kwarg:MiniRacer::Context#initialize:isolate` | n/a | done |
 | `kwarg:MiniRacer::Context#initialize:marshal_stack_depth` | done | done |

@@ -1,5 +1,6 @@
 pub mod fork;
 pub mod platform;
+pub(crate) mod tasks;
 pub(crate) mod watchdog;
 
 use std::sync::Once;
@@ -32,11 +33,19 @@ pub fn ensure_initialized() {
             platform::Mode::SingleThreaded => 1,
             platform::Mode::MultiThreaded => 0,
         };
-        let platform = v8::new_unprotected_default_platform(workers, false).make_shared();
+        let platform =
+            v8::new_custom_platform(workers, false, true, tasks::Foreground).make_shared();
         v8::V8::initialize_platform(platform);
         v8::V8::initialize();
         crate::sys::register_fork_handlers();
     });
+}
+
+/// Tasks V8 posted for an isolate no runner had registered, dropped unrun.
+/// Snapshot builds post some; a context's isolate should never get one.
+#[must_use]
+pub fn unserved_tasks() -> u64 {
+    tasks::unserved()
 }
 
 #[must_use]

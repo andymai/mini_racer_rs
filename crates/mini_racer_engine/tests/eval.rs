@@ -317,3 +317,147 @@ fn dropping_a_handle_shuts_its_runner_down_without_blocking() {
         drop(context);
     }
 }
+
+fn eval_await(context: &ContextHandle, source: &str) -> Result<Out, EngineError> {
+    let bytes = context.eval_await("<eval>", source, &mut Parking)?;
+    Ok(decode_value(&bytes, Limits::default(), &mut Shape).expect("V8 output decodes"))
+}
+
+const NEVER: &str = "new Promise(() => {})";
+// A promise V8 settles from a delayed task of its own, 30 ms on.
+const DELAYED: &str = "Atomics.waitAsync(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30).value";
+
+#[test]
+fn an_await_runs_microtasks_until_the_promise_settles() {
+    let context = spawn();
+    let chain = "(async () => { for (let i = 0; i < 100; i++) await null; return 7 })()";
+    assert_eq!(eval_await(&context, chain).expect("settles"), Out::Int(7));
+    assert_eq!(
+        eval_await(&context, "6 * 7").expect("no promise"),
+        Out::Int(42)
+    );
+}
+
+#[test]
+fn an_awaited_rejection_is_a_runtime_error_with_its_stack() {
+    let context = spawn();
+    match eval_await(&context, "Promise.reject(new Error('nope'))") {
+        Err(EngineError::Js(js)) => {
+            assert_eq!(js.kind, JsErrorKind::Runtime);
+            assert!(js.message.starts_with("Error: nope\n"), "{}", js.message);
+        }
+        other => panic!("expected a runtime error, got {other:?}"),
+    }
+    match eval_await(&context, "Promise.reject('plain')") {
+        Err(EngineError::Js(js)) => assert_eq!(js.message, "plain"),
+        other => panic!("expected a runtime error, got {other:?}"),
+    }
+}
+
+#[test]
+fn an_await_sleeps_until_a_delayed_task_is_due() {
+    let context = spawn();
+    let started = Instant::now();
+    let settled = eval_await(&context, &format!("{DELAYED}.then(v => v === 'timed-out')"));
+    assert_eq!(settled.expect("settles"), Out::Bool(true));
+    assert!(started.elapsed() >= Duration::from_millis(25));
+}
+
+#[test]
+fn a_stop_ends_an_await_that_never_settles() {
+    let context = spawn();
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            std::thread::sleep(Duration::from_millis(50));
+            context.stop().expect("live context");
+        });
+        assert_eq!(
+            terminated_by(eval_await(&context, NEVER)),
+            TerminationCause::Stop
+        );
+    });
+    assert_eq!(eval(&context, "1 + 1").expect("usable"), Out::Int(2));
+}
+
+#[test]
+fn a_timeout_ends_an_await_and_only_that_one() {
+    let context = ContextHandle::spawn(
+        ContextConfig {
+            timeout: Some(Duration::from_millis(50)),
+            ..ContextConfig::default()
+        },
+        &mut Parking,
+    )
+    .expect("spawn");
+    assert_eq!(
+        terminated_by(eval_await(&context, NEVER)),
+        TerminationCause::Timeout
+    );
+    assert_eq!(eval(&context, "1 + 1").expect("usable"), Out::Int(2));
+}
+
+#[test]
+fn a_cancelled_wait_ends_an_await() {
+    let context = spawn();
+    let interrupted = AtomicBool::new(false);
+    let result = std::thread::scope(|scope| {
+        scope.spawn(|| {
+            std::thread::sleep(Duration::from_millis(50));
+            interrupted.store(true, Ordering::SeqCst);
+        });
+        context.eval_await(
+            "<eval>",
+            NEVER,
+            &mut Interruptible {
+                interrupted: &interrupted,
+            },
+        )
+    });
+    let result = result.map(|_| Out::Nil);
+    assert_eq!(terminated_by(result), TerminationCause::Cancelled);
+    assert_eq!(eval(&context, "1 + 1").expect("usable"), Out::Int(2));
+}
+
+#[test]
+fn a_pump_runs_one_due_task_then_the_microtasks_it_queued() {
+    let context = spawn();
+    assert!(!context.pump_message_loop(&mut Parking).expect("pump"));
+    eval(
+        &context,
+        &format!("globalThis.done = false; {DELAYED}.then(() => {{ done = true }}); 0"),
+    )
+    .expect("eval");
+    assert!(!context.pump_message_loop(&mut Parking).expect("pump"));
+    std::thread::sleep(Duration::from_millis(50));
+    assert!(context.pump_message_loop(&mut Parking).expect("pump"));
+    assert_eq!(eval(&context, "done").expect("eval"), Out::Bool(true));
+    assert!(!context.pump_message_loop(&mut Parking).expect("pump"));
+}
+
+#[test]
+fn a_pump_consumes_a_stop_and_a_checkpoint_leaves_it() {
+    let context = spawn();
+    context.stop().expect("live context");
+    context
+        .perform_microtask_checkpoint(&mut Parking)
+        .expect("checkpoint");
+    assert_eq!(terminated_by(eval(&context, "1")), TerminationCause::Stop);
+    context.stop().expect("live context");
+    assert!(!context.pump_message_loop(&mut Parking).expect("pump"));
+    assert_eq!(eval(&context, "1 + 1").expect("usable"), Out::Int(2));
+}
+
+#[test]
+fn an_await_after_dispose_is_refused() {
+    let context = spawn();
+    context.begin_dispose();
+    context.dispose(&mut Parking).expect("dispose");
+    assert!(matches!(
+        eval_await(&context, "1"),
+        Err(EngineError::Disposed)
+    ));
+    assert!(matches!(
+        context.pump_message_loop(&mut Parking),
+        Err(EngineError::Disposed)
+    ));
+}

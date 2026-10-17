@@ -253,13 +253,33 @@ impl ContextHandle {
         source: impl Into<JsText>,
         host: &mut impl Host,
     ) -> Result<Vec<u8>, EngineError> {
-        let (filename, source) = (filename.into(), source.into());
+        self.evaluate((filename.into(), source.into()), false, host)
+    }
+
+    /// `eval`, then awaits a promise result: runs microtasks and due tasks
+    /// until it settles, as `mini_racer`'s `eval_await` does.
+    pub fn eval_await(
+        &self,
+        filename: impl Into<JsText>,
+        source: impl Into<JsText>,
+        host: &mut impl Host,
+    ) -> Result<Vec<u8>, EngineError> {
+        self.evaluate((filename.into(), source.into()), true, host)
+    }
+
+    fn evaluate(
+        &self,
+        (filename, source): (JsText, JsText),
+        awaited: bool,
+        host: &mut impl Host,
+    ) -> Result<Vec<u8>, EngineError> {
         self.dispatch(
             DispatchKind::Script,
             |depth| Request::Eval {
                 filename,
                 source,
                 depth,
+                awaited,
             },
             host,
         )
@@ -268,11 +288,54 @@ impl ContextHandle {
     /// `request` is the wire form `mini_racer` sends: one array holding the
     /// function's dotted path, then its arguments.
     pub fn call(&self, request: Vec<u8>, host: &mut impl Host) -> Result<Vec<u8>, EngineError> {
+        self.invoke(request, false, host)
+    }
+
+    /// `call`, then awaits a promise result, as `eval_await` does.
+    pub fn call_await(
+        &self,
+        request: Vec<u8>,
+        host: &mut impl Host,
+    ) -> Result<Vec<u8>, EngineError> {
+        self.invoke(request, true, host)
+    }
+
+    fn invoke(
+        &self,
+        request: Vec<u8>,
+        awaited: bool,
+        host: &mut impl Host,
+    ) -> Result<Vec<u8>, EngineError> {
         self.dispatch(
             DispatchKind::Script,
-            |depth| Request::Call { request, depth },
+            |depth| Request::Call {
+                request,
+                depth,
+                awaited,
+            },
             host,
         )
+    }
+
+    /// Runs the microtasks queued so far.
+    pub fn perform_microtask_checkpoint(&self, host: &mut impl Host) -> Result<(), EngineError> {
+        self.dispatch(
+            DispatchKind::Maintenance,
+            |depth| Request::MicrotaskCheckpoint { depth },
+            host,
+        )
+        .map(drop)
+    }
+
+    /// Runs one due task of V8's, then the microtasks it queued; returns
+    /// whether a task ran.
+    pub fn pump_message_loop(&self, host: &mut impl Host) -> Result<bool, EngineError> {
+        self.dispatch(
+            DispatchKind::Pump,
+            |depth| Request::PumpMessageLoop { depth },
+            host,
+        )
+        .map(|ran| ran == [1])
     }
 
     /// `request` is the wire form `mini_racer` sends: an array of the dotted
@@ -488,7 +551,7 @@ impl ContextHandle {
         match self.session.owner.load(Ordering::Acquire) {
             0 => {}
             _ if self.session.in_callback(thread) => {
-                return self.nested(block, request(Depth::Nested), host);
+                return self.nested(block, kind, request(Depth::Nested), host);
             }
             _ => return Err(EngineError::Busy),
         }
@@ -522,19 +585,45 @@ impl ContextHandle {
         result
     }
 
+    // A script nested in an untimed dispatch gets a timeout of its own.
     fn nested(
         &self,
-        block: &ControlBlock,
+        block: &Arc<ControlBlock>,
+        kind: DispatchKind,
         request: Request,
         host: &mut impl Host,
     ) -> Result<Vec<u8>, EngineError> {
         if block.term.is_disposing() {
             return Err(EngineError::Disposed);
         }
+        let timer = match (kind, block.config.timeout) {
+            (DispatchKind::Script, Some(timeout)) => {
+                block.term.time_nested().map(|id| (timeout, id))
+            }
+            _ => None,
+        };
+        if let Some((timeout, id)) = timer
+            && let Err(error) = watchdog::schedule(timeout, block, id)
+        {
+            block.term.untime_nested(id);
+            return Err(error);
+        }
         let wait = WaitHandle::new(block);
-        block.channel.request(request).map_err(channel)?;
-        let _waiting = Counted::enter(&self.session.waits);
-        self.await_response(block, &wait, true, host)
+        let result = block
+            .channel
+            .request(request)
+            .map_err(channel)
+            .and_then(|()| {
+                let _waiting = Counted::enter(&self.session.waits);
+                self.await_response(block, &wait, true, host)
+            });
+        if let Some((_, id)) = timer
+            && !wait.forked()
+        {
+            watchdog::clear(block, id);
+            block.term.untime_nested(id);
+        }
+        result
     }
 
     // Once the dispatch is abandoned, callbacks still in flight are answered
@@ -661,6 +750,9 @@ fn adopt(inherited: &ControlBlock, stop: bool) -> Held {
     if !generation.quiesced() {
         return orphaned(false, false);
     }
+    let Some(tasks) = inherited.tasks.inherited() else {
+        return orphaned(true, false);
+    };
     let Some(isolate) = inherited
         .custody
         .try_lock()
@@ -669,7 +761,7 @@ fn adopt(inherited: &ControlBlock, stop: bool) -> Held {
     else {
         return orphaned(true, false);
     };
-    let block = Arc::new(ControlBlock::new(inherited.config.clone()));
+    let block = Arc::new(ControlBlock::with_tasks(inherited.config.clone(), tasks));
     *lock(&block.custody) = Some(isolate);
     if stop {
         block.term.request(Interrupt::Stop);

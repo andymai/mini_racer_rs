@@ -44,8 +44,11 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | Task | File |
 |---|---|
 | Flag normalization, single-threaded detection, stack size | `crates/mini_racer_engine/src/process/platform.rs` |
-| V8 initialization and version | `crates/mini_racer_engine/src/process.rs` |
+| V8 initialization (a custom platform, so foreground tasks come to the runners) and version | `crates/mini_racer_engine/src/process.rs` |
 | Runner thread, script evaluation, attach and the callback trampoline, mini_racer's error formats | `crates/mini_racer_engine/src/runner.rs` |
+| `eval_await` and `call_await` (`settle`), `pump_message_loop`, `perform_microtask_checkpoint`, the nested await refusal | `crates/mini_racer_engine/src/runner.rs` |
+| V8's foreground tasks: the platform hook, each process's queues by isolate, registering and retiring an isolate's queue | `crates/mini_racer_engine/src/process/tasks.rs`, `crates/mini_racer_engine/src/runner.rs` (`retire`) |
+| One isolate's task queue: posting order, delays, non-nestable tasks, the wait a post or termination ends | `crates/mini_racer_sync/src/tasks.rs` |
 | Sanitizing results, the filter's safe context, serializing with the filter retry | `crates/mini_racer_engine/src/serialize.rs` |
 | Context handle, dispatch, nested dispatch from callbacks, the `Host` contract, stop, dispose | `crates/mini_racer_engine/src/context.rs` |
 | Control block shared by a handle and its runner, request types, context config | `crates/mini_racer_engine/src/control.rs` |

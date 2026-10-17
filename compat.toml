@@ -180,7 +180,7 @@ status = "done"
 status = "done"
 
 [ids."imethod:MiniRacer::Context#call_await"]
-status = "todo:M4"
+status = "done"
 
 [ids."imethod:MiniRacer::Context#dispose"]
 status = "done"
@@ -189,7 +189,7 @@ status = "done"
 status = "done"
 
 [ids."imethod:MiniRacer::Context#eval_await"]
-status = "todo:M4"
+status = "done"
 
 [ids."imethod:MiniRacer::Context#eval_in_context@truffleruby"]
 status = "done"
@@ -210,10 +210,10 @@ status = "done"
 status = "done"
 
 [ids."imethod:MiniRacer::Context#perform_microtask_checkpoint@ruby"]
-status = "todo:M4"
+status = "done"
 
 [ids."imethod:MiniRacer::Context#pump_message_loop@ruby"]
-status = "todo:M4"
+status = "done"
 
 [ids."imethod:MiniRacer::Context#stop"]
 status = "done"
@@ -262,7 +262,7 @@ status = "done"
 status = "done"
 
 [ids."kwarg:MiniRacer::Context#eval_await:filename@ruby"]
-status = "todo:M4"
+status = "done"
 
 [ids."kwarg:MiniRacer::Context#initialize:ensure_gc_after_idle"]
 status = "todo:M3"

@@ -1,4 +1,5 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -40,14 +41,18 @@ struct Runtime {
     // The exception last thrown for a raising callback; mini_racer keeps one
     // per isolate and compares what escapes a dispatch against it.
     raised: Mutex<Option<v8::Global<v8::Value>>>,
+    // The address V8 posts this isolate's tasks under.
+    key: usize,
+    // Tasks running, one inside another when a task's script pumps.
+    running: AtomicU32,
 }
 
 impl Runtime {
     fn new(
         block: &Arc<ControlBlock>,
         generation: &'static Generation,
-        context: v8::Global<v8::Context>,
-        filter: Filter,
+        (context, filter): (v8::Global<v8::Context>, Filter),
+        key: usize,
     ) -> Self {
         Self {
             block: Arc::clone(block),
@@ -56,7 +61,17 @@ impl Runtime {
             context,
             filter,
             raised: Mutex::default(),
+            key,
+            running: AtomicU32::new(0),
         }
+    }
+}
+
+struct Running<'a>(&'a AtomicU32);
+
+impl Drop for Running<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Relaxed);
     }
 }
 
@@ -131,22 +146,29 @@ fn serve(
         None => params,
     };
     let mut isolate = v8::Isolate::new(params);
+    let key = sys::isolate_key(&isolate);
+    generation.tasks().register(key, &block.tasks);
     let contexts = {
         v8::scope!(let scope, &mut isolate);
         serialize::contexts(scope, from_snapshot)
     };
-    let Some((context, filter)) = contexts else {
-        drop(isolate);
+    let Some(contexts) = contexts else {
+        retire(block, generation, key, isolate);
         return refuse(block, "context setup failed");
     };
-    let runtime = Arc::new(Runtime::new(block, generation, context, filter));
+    let runtime = Arc::new(Runtime::new(block, generation, contexts, key));
     isolate.set_slot(Arc::clone(&runtime));
     // Installed only once the context exists, so nothing terminates its setup.
-    block
-        .term
-        .install(IsolateTerminator(isolate.thread_safe_handle()));
-    let Some(shared) = sys::share(isolate) else {
-        return refuse(block, "isolate could not be shared");
+    block.term.install(IsolateTerminator::new(
+        isolate.thread_safe_handle(),
+        &block.tasks,
+    ));
+    let shared = match sys::share(isolate) {
+        Ok(shared) => shared,
+        Err(refused) => {
+            retire(block, generation, key, refused);
+            return refuse(block, "isolate could not be shared");
+        }
     };
     let _ = block.isolate.set(shared.thread_safe_handle());
     serve_isolate(block, shared, runtime)
@@ -163,28 +185,33 @@ fn adopt(
     let inherited = shared.lock().get_slot::<Arc<Runtime>>().cloned();
     let Some(inherited) = inherited else {
         // Disposed here, before the runner counts as idle to a fork.
+        drop(block.tasks.close());
         drop(shared);
         return refuse(block, "inherited isolate has no context");
     };
     let runtime = {
         let mut locker = shared.lock();
+        let key = sys::isolate_key(&locker);
+        generation.tasks().register(key, &block.tasks);
         let runtime = Arc::new(Runtime::new(
             block,
             generation,
-            inherited.context.clone(),
-            inherited.filter.clone(),
+            (inherited.context.clone(), inherited.filter.clone()),
+            key,
         ));
         locker.set_slot(Arc::clone(&runtime));
         runtime
     };
-    block
-        .term
-        .install(IsolateTerminator(shared.thread_safe_handle()));
+    block.term.install(IsolateTerminator::new(
+        shared.thread_safe_handle(),
+        &block.tasks,
+    ));
     let _ = block.isolate.set(shared.thread_safe_handle());
     serve_isolate(block, shared, runtime)
 }
 
 fn serve_isolate(block: &ControlBlock, shared: v8::SharedIsolate, runtime: Arc<Runtime>) -> bool {
+    let (generation, key) = (runtime.generation, runtime.key);
     let (disposed, shared) = if runtime.released {
         serve_released(block, shared, &runtime)
     } else {
@@ -192,14 +219,26 @@ fn serve_isolate(block: &ControlBlock, shared: v8::SharedIsolate, runtime: Arc<R
     };
     block.term.uninstall();
     // Its handles are released under the lock, before the isolate goes.
-    if let Some(shared) = shared {
-        let mut isolate = shared.lock();
-        drop(isolate.remove_slot::<Arc<Runtime>>());
-        drop(runtime);
-        drop(isolate);
-        drop(shared);
+    match shared {
+        Some(shared) => {
+            let mut isolate = shared.lock();
+            drop(isolate.remove_slot::<Arc<Runtime>>());
+            drop(runtime);
+            drop(isolate);
+            retire(block, generation, key, shared);
+        }
+        None => retire(block, generation, key, ()),
     }
     disposed
+}
+
+// Queued tasks are dropped while their isolate exists. Its entry stays until
+// the isolate is gone, so a task V8 posts during the teardown meets the closed
+// queue and is dropped too, never kept for a later isolate at that address.
+fn retire<I>(block: &ControlBlock, generation: &Generation, key: usize, isolate: I) {
+    drop(block.tasks.close());
+    drop(isolate);
+    generation.tasks().unregister(key, &block.tasks);
 }
 
 enum Served {
@@ -318,17 +357,30 @@ fn handle(
             Depth::Nested => Err(EngineError::Internal("setup inside a callback".to_owned())),
         },
         Request::Eval {
+            depth: Depth::Nested,
+            awaited: true,
+            ..
+        }
+        | Request::Call {
+            depth: Depth::Nested,
+            awaited: true,
+            ..
+        } => refuse_nested_await(scope, runtime),
+        Request::Eval {
             filename,
             source,
             depth,
+            awaited,
         } => script(scope, runtime, depth, DispatchKind::Script, |tc| {
-            evaluate(tc, &runtime.filter, &filename, &source)
+            evaluate(tc, runtime, (&filename, &source), awaited)
         }),
-        Request::Call { request, depth } => {
-            script(scope, runtime, depth, DispatchKind::Script, |tc| {
-                invoke(tc, &runtime.filter, &request)
-            })
-        }
+        Request::Call {
+            request,
+            depth,
+            awaited,
+        } => script(scope, runtime, depth, DispatchKind::Script, |tc| {
+            invoke(tc, runtime, &request, awaited)
+        }),
         Request::Attach { request, depth } => {
             script(scope, runtime, depth, DispatchKind::Maintenance, |tc| {
                 attach(tc, &request)
@@ -343,6 +395,19 @@ fn handle(
                 Depth::Outermost(dispatch) => ended(runtime, dispatch),
                 Depth::Nested => Ok(Vec::new()),
             }
+        }
+        // mini_racer leaves a termination this meets for the dispatch around
+        // it, or for the next script.
+        Request::MicrotaskCheckpoint { depth } => {
+            script(scope, runtime, depth, DispatchKind::Maintenance, |tc| {
+                tc.perform_microtask_checkpoint();
+                Ok(Vec::new())
+            })
+        }
+        Request::PumpMessageLoop { depth } => {
+            script(scope, runtime, depth, DispatchKind::Pump, |tc| {
+                Ok(vec![u8::from(pump(tc, runtime))])
+            })
         }
         // The extension refuses a dispose from inside a callback before it
         // gets here.
@@ -414,9 +479,9 @@ fn escaped(tc: &Tc<'_, '_, '_, '_>, runtime: &Runtime) -> bool {
 
 fn evaluate(
     tc: &mut Tc<'_, '_, '_, '_>,
-    filter: &Filter,
-    filename: &JsText,
-    source: &JsText,
+    runtime: &Runtime,
+    (filename, source): (&JsText, &JsText),
+    awaited: bool,
 ) -> Result<Vec<u8>, EngineError> {
     let too_large = || EngineError::Internal("source too large".to_owned());
     let source = string(tc, source).ok_or_else(too_large)?;
@@ -427,8 +492,106 @@ fn evaluate(
     let value = script
         .run(tc)
         .ok_or_else(|| failure(tc, JsErrorKind::Runtime))?;
+    let value = if awaited {
+        settle(tc, runtime, value)?
+    } else {
+        value
+    };
     let value = serialize::sanitize(tc, value);
-    serialize::reply(tc, filter, value).ok_or_else(|| failure(tc, JsErrorKind::Runtime))
+    serialize::reply(tc, &runtime.filter, value).ok_or_else(|| failure(tc, JsErrorKind::Runtime))
+}
+
+// V8 runs no microtask checkpoint inside another, so an await nested in a
+// callback could never settle; mini_racer refuses one before running anything.
+// With a stop or timeout pending, it reports the refusal as terminated, and the
+// refusal's text stays the message.
+fn refuse_nested_await(
+    scope: &mut v8::PinScope<'_, '_>,
+    runtime: &Runtime,
+) -> Result<Vec<u8>, EngineError> {
+    v8::tc_scope!(let tc, scope);
+    let failed = |tc: &Tc<'_, '_, '_, '_>| failure(tc, JsErrorKind::Runtime);
+    let message = v8::String::new(tc, "nested call_await/eval_await is not supported")
+        .ok_or_else(|| failed(tc))?;
+    let exception = v8::Exception::error(tc, message);
+    tc.throw_exception(exception);
+    let refused = failed(tc);
+    let halt = runtime.block.term.check(DispatchKind::Script).map(halted);
+    Err(match (halt, refused) {
+        (Some(EngineError::Js(halt)), EngineError::Js(refused)) => EngineError::from(JsError {
+            kind: halt.kind,
+            message: refused.message,
+        }),
+        (_, refused) => refused,
+    })
+}
+
+// mini_racer's await: run the microtasks, then look at the promise. While it
+// is pending, run due tasks one at a time, sleeping until one is due, until
+// the promise settles or the dispatch is halted.
+fn settle<'s>(
+    tc: &mut Tc<'s, '_, '_, '_>,
+    runtime: &Runtime,
+    value: v8::Local<'s, v8::Value>,
+) -> Result<v8::Local<'s, v8::Value>, EngineError> {
+    let Ok(promise) = v8::Local::<v8::Promise>::try_from(value) else {
+        return Ok(value);
+    };
+    loop {
+        tc.perform_microtask_checkpoint();
+        match promise.state() {
+            v8::PromiseState::Fulfilled => return Ok(promise.result(tc)),
+            v8::PromiseState::Rejected => {
+                let reason = promise.result(tc);
+                tc.throw_exception(reason);
+                return Err(failure(tc, JsErrorKind::Runtime));
+            }
+            v8::PromiseState::Pending => {}
+        }
+        if tc.is_execution_terminating() || runtime.block.term.check(DispatchKind::Script).is_some()
+        {
+            return Err(EngineError::from(JsError::terminated(
+                TerminationCause::Stop,
+            )));
+        }
+        match runtime.block.tasks.pop(false) {
+            Some(task) => run_task(runtime, task),
+            None => wait_for_task(runtime),
+        }
+    }
+}
+
+// Waiting, the runner holds its isolate but runs nothing in it, so a fork need
+// not wait for it.
+fn wait_for_task(runtime: &Runtime) {
+    if runtime.released {
+        runtime.block.phase.set(Phase::Parked);
+    }
+    runtime.block.tasks.wait();
+    if runtime.released {
+        runtime.generation.resume(&runtime.block);
+    }
+}
+
+fn run_task(runtime: &Runtime, task: v8::Task) {
+    runtime.running.fetch_add(1, Ordering::Relaxed);
+    let _running = Running(&runtime.running);
+    task.run();
+}
+
+// mini_racer's pump: one due task, then a microtask checkpoint if it ran and
+// left nothing thrown or terminating. A pump from a running task's script
+// passes over non-nestable tasks, as V8's own runner does.
+fn pump(tc: &mut Tc<'_, '_, '_, '_>, runtime: &Runtime) -> bool {
+    let nested = runtime.running.load(Ordering::Relaxed) > 0;
+    let Some(task) = runtime.block.tasks.pop(nested) else {
+        return false;
+    };
+    run_task(runtime, task);
+    if !tc.is_execution_terminating() && !tc.has_caught() {
+        tc.perform_microtask_checkpoint();
+    }
+    true
 }
 
 struct Reader;
@@ -464,40 +627,46 @@ fn read_request<'s>(
 // is called on its parent.
 fn invoke(
     tc: &mut Tc<'_, '_, '_, '_>,
-    filter: &Filter,
+    runtime: &Runtime,
     request: &[u8],
+    awaited: bool,
 ) -> Result<Vec<u8>, EngineError> {
     let context = tc.get_current_context();
-    let runtime = |tc: &Tc<'_, '_, '_, '_>| failure(tc, JsErrorKind::Runtime);
+    let failed = |tc: &Tc<'_, '_, '_, '_>| failure(tc, JsErrorKind::Runtime);
     let (request, path) = read_request(tc, request)?;
     let mut receiver = context.global(tc);
     let mut keys = path.split('.').peekable();
     let mut function = None;
     while let Some(key) = keys.next() {
-        let key = v8::String::new(tc, key).ok_or_else(|| runtime(tc))?;
-        let value = receiver.get(tc, key.into()).ok_or_else(|| runtime(tc))?;
+        let key = v8::String::new(tc, key).ok_or_else(|| failed(tc))?;
+        let value = receiver.get(tc, key.into()).ok_or_else(|| failed(tc))?;
         if keys.peek().is_none() {
             function = Some(value);
         } else {
-            receiver = value.to_object(tc).ok_or_else(|| runtime(tc))?;
+            receiver = value.to_object(tc).ok_or_else(|| failed(tc))?;
         }
     }
     let Some(Ok(function)) = function.map(v8::Local::<v8::Function>::try_from) else {
-        let message = v8::String::new(tc, "not a function").ok_or_else(|| runtime(tc))?;
+        let message = v8::String::new(tc, "not a function").ok_or_else(|| failed(tc))?;
         let exception = v8::Exception::type_error(tc, message);
         tc.throw_exception(exception);
-        return Err(runtime(tc));
+        return Err(failed(tc));
     };
     let count = v8::Local::<v8::Array>::try_from(request).map_or(0, |array| array.length());
     let mut args = Vec::new();
     for index in 1..count {
-        args.push(request.get_index(tc, index).ok_or_else(|| runtime(tc))?);
+        args.push(request.get_index(tc, index).ok_or_else(|| failed(tc))?);
     }
     let value = function
         .call(tc, receiver.into(), &args)
-        .ok_or_else(|| runtime(tc))?;
+        .ok_or_else(|| failed(tc))?;
+    let value = if awaited {
+        settle(tc, runtime, value)?
+    } else {
+        value
+    };
     let value = serialize::sanitize(tc, value);
-    serialize::reply(tc, filter, value).ok_or_else(|| runtime(tc))
+    serialize::reply(tc, &runtime.filter, value).ok_or_else(|| failed(tc))
 }
 
 // mini_racer's attach: any failure is an internal error. Each dotted segment
@@ -596,7 +765,7 @@ fn callback<'s>(
     loop {
         // Waiting for Ruby, V8 is still: a fork need not wait for this.
         if runtime.released {
-            runtime.block.phase.set(Phase::ParkedInChannel);
+            runtime.block.phase.set(Phase::Parked);
         }
         let message = receive(&runtime.block);
         if runtime.released {
