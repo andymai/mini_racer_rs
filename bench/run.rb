@@ -46,8 +46,8 @@ WORKLOADS = {
   "react_first_render" => ["React in a new context: load the bundle and render 1,000 items, through ExecJS (ms)", 1e6],
   "handlebars_render" => ["Handlebars render of 50 rows, through Context#call (us)", 1e3],
   "autoprefixer_bootstrap" => ["Autoprefixer on Bootstrap's 280 KB stylesheet, through ExecJS (ms)", 1e6],
-  "mui_render" => ["MUI dashboard server render of 200 rows (285 KB of HTML), through ExecJS (ms)", 1e6],
-  "mui_first_render" => ["MUI in a new context: load the 1.3 MB bundle and render 200 rows, through ExecJS (ms)", 1e6],
+  "mui_render" => ["MUI dashboard server render of 200 rows and 299 icons (469 KB of HTML), through ExecJS (ms)", 1e6],
+  "mui_first_render" => ["MUI in a new context: load the 8.2 MB bundle and render once, through ExecJS (ms)", 1e6],
 }.freeze
 EXTERNAL = {
   "external_ssr_load" => ["load the bundle in a new context, through ExecJS (ms)", 1e6],

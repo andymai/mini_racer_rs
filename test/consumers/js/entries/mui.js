@@ -2,6 +2,7 @@ import "./ssr-globals.js";
 import createCache from "@emotion/cache";
 import { CacheProvider } from "@emotion/react";
 import createEmotionServer from "@emotion/server/create-instance";
+import * as Icons from "@mui/icons-material";
 import {
   AppBar,
   Avatar,
@@ -41,6 +42,11 @@ const statuses = [
   ["Overdue", "error"],
 ];
 const columns = ["Customer", "Email", "Status", "Total", "Actions"];
+// Looking the icons up by name keeps every one of them in the bundle, as an
+// application that renders icons chosen at runtime has them.
+const shelf = Object.keys(Icons)
+  .sort()
+  .filter((_, index) => index % 36 === 0);
 
 function customers(count) {
   return Array.from({ length: count }, (_, i) => ({
@@ -114,6 +120,21 @@ function CustomerRow({ customer }) {
   );
 }
 
+function IconShelf() {
+  return createElement(
+    Box,
+    { sx: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 1, mt: 3 } },
+    shelf.map((name) =>
+      createElement(
+        Stack,
+        { key: name, sx: { alignItems: "center" } },
+        createElement(Icons[name], { titleAccess: name }),
+        createElement(Typography, { variant: "caption", noWrap: true }, name),
+      ),
+    ),
+  );
+}
+
 function Dashboard({ rows }) {
   const list = customers(rows);
   const revenue = list.reduce((sum, customer) => sum + customer.total, 0);
@@ -167,6 +188,7 @@ function Dashboard({ rows }) {
           ),
         ),
       ),
+      createElement(IconShelf),
     ),
   );
 }
