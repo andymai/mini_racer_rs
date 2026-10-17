@@ -9,16 +9,12 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # Strings that look like paths but name none: build outputs the docs describe
-# on purpose, the repository's GitHub slug, mini_racer's benchmark/serde case
-# names, and slash-joined names in prose. An entry ending in / covers everything
-# under it.
+# on purpose, the repository's GitHub slug, and slash-joined names in prose. An
+# entry ending in / covers everything under it.
 allowed=(
   "andymai/mini_racer_rs"
   "call_await/eval_await"
-  "callback/"
   "class/object"
-  "js_to_ruby/"
-  "ruby_to_js/"
   "lib/mini_racer_rs/mini_racer_rs.so"
   "pkg/"
   "target/"
@@ -31,11 +27,15 @@ fenced_blocks() {
   awk '/^```/ { fenced = !fenced; next } fenced { print }' "$1"
 }
 
-# The verbatim third-party texts are left as written.
+# mini_racer's benchmark/serde case names, such as ruby_to_js/call_no_args.
+case_name='^(callback|js_to_ruby|ruby_to_js)/[A-Za-z0-9_]+$'
+
+# These are kept verbatim or generated from commits, so a path in them is not
+# ours to fix.
 docs=()
 for doc in *.md .claude/skills/*/*.md .github/*.md .github/ISSUE_TEMPLATE/*.md; do
   case "$doc" in
-    CODE_OF_CONDUCT.md | THIRD_PARTY_NOTICES.md | AI-DISCLOSURE.md) ;;
+    CODE_OF_CONDUCT.md | THIRD_PARTY_NOTICES.md | AI-DISCLOSURE.md | CHANGELOG.md) ;;
     *) [ -f "$doc" ] && docs+=("$doc") ;;
   esac
 done
@@ -50,11 +50,15 @@ for doc in "${docs[@]}"; do
         *) [ "$path" = "$skip" ] && continue 2 ;;
       esac
     done
-    if [ ! -e "$path" ] && [ ! -e "vendor/mini_racer/$path" ] && [ ! -e "vendor/execjs/$path" ] &&
-      [ ! -e ".github/workflows/$path" ]; then
-      echo "VIOLATION [doc-path]: $doc names $path, which does not exist"
-      fail=1
-    fi
+    [[ "$path" =~ $case_name ]] && continue
+    [ -e "$path" ] && continue
+    case "$path" in
+      test/* | benchmark/*) [ -e "vendor/mini_racer/$path" ] || [ -e "vendor/execjs/$path" ] && continue ;;
+      */*) ;;
+      *.yml) [ -e ".github/workflows/$path" ] && continue ;;
+    esac
+    echo "VIOLATION [doc-path]: $doc names $path, which does not exist"
+    fail=1
   done < <({ grep -oE '`[^`]+`' "$doc" | tr -d '`'; fenced_blocks "$doc"; } |
     tr -s ' \t()"' '\n' |
     grep -E '^\.?[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_.-]+)*/?$' |
