@@ -4,9 +4,10 @@
 # over for a while; fails on any wrong result or exception, or when resident
 # memory grows after a warm-up by more than the allowed bytes per context plus
 # a fixed slack. The bound is not zero because rusty_v8 152.2.0 leaks a 64-byte
-# cell for every isolate it creates (denoland/rusty_v8#2075; 80 bytes with
-# glibc's malloc). The slack absorbs allocator and GC noise, which is a fixed
-# amount rather than one per context, so short runs pass too.
+# cell for every isolate it creates (denoland/rusty_v8#2075); runs measure about
+# 80 bytes per context on Linux and 175 on macOS. The slack absorbs allocator
+# and GC noise, which is a fixed amount rather than one per context, so short
+# runs pass too.
 # The V8 platform mode is fixed per process, so each mode is its own run.
 #   ruby -Ilib test/stress/churn.rb single|multi [threads] [seconds] [max_bytes_per_context]
 
