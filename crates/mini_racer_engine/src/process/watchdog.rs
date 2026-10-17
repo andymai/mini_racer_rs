@@ -40,13 +40,10 @@ struct Timers {
     seq: u64,
 }
 
-struct Watchdog {
-    epoch: u64,
+pub struct Watchdog {
     timers: Mutex<Timers>,
     changed: Condvar,
 }
-
-static WATCHDOG: Mutex<Option<Arc<Watchdog>>> = Mutex::new(None);
 
 impl Watchdog {
     fn push(&self, at: Instant, block: Weak<ControlBlock>) {
@@ -59,17 +56,15 @@ impl Watchdog {
     }
 }
 
-// One thread per process serves every context's timeouts. A forked child has
-// the parent's watchdog state but not its thread, so it starts its own and
-// leaves the inherited one untouched.
+// One thread per process serves every context's timeouts. It is kept per
+// fork generation: a forked child has the parent's watchdog state but not its
+// thread, and a runner of the parent may have held its lock at the fork.
 fn current() -> Result<Arc<Watchdog>, EngineError> {
-    let epoch = super::fork::epoch();
-    let mut slot = lock(&WATCHDOG);
-    if let Some(watchdog) = slot.as_ref().filter(|watchdog| watchdog.epoch == epoch) {
+    let mut slot = lock(super::fork::current().watchdog());
+    if let Some(watchdog) = slot.as_ref() {
         return Ok(Arc::clone(watchdog));
     }
     let watchdog = Arc::new(Watchdog {
-        epoch,
         timers: Mutex::default(),
         changed: Condvar::new(),
     });

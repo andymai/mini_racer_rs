@@ -387,16 +387,15 @@ fn receive_within(block: &ControlBlock, idle: Duration) -> Received {
     let deadline = std::time::Instant::now().checked_add(idle);
     spin_until(IDLE_SPIN.min(idle), || block.channel.ready(Side::V8));
     loop {
+        // As mini_racer's runner: once the deadline has passed it collects
+        // before it looks for a request, which then waits in the channel.
+        let left = deadline.map(|at| at.saturating_duration_since(std::time::Instant::now()));
+        if left.is_some_and(|left| left.is_zero()) {
+            return Received::Idle;
+        }
         match block.channel.recv_v8() {
             Ok(Some(message)) => return Received::Message(Some(message)),
-            Ok(None) => {
-                let left =
-                    deadline.map(|at| at.saturating_duration_since(std::time::Instant::now()));
-                if left.is_some_and(|left| left.is_zero()) {
-                    return Received::Idle;
-                }
-                block.channel.park(Side::V8, left);
-            }
+            Ok(None) => block.channel.park(Side::V8, left),
             Err(_) => return Received::Message(None),
         }
     }
