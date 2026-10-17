@@ -13,7 +13,7 @@ description: Use when moving the pinned v8 crate (rusty_v8) to a new version, wh
 2. Set the pin in `Cargo.toml` and run `cargo update -p v8`. If V8's ICU major changed, move `deno_core_icudata` to the matching release and rename the `set_common_data_<major>` call.
 3. `scripts/update-v8-archives.sh` downloads every target's archive and source binding and rewrites `ext/mini_racer_rs/v8-archives.sha256`; then `. scripts/fetch-v8-archive.sh`.
 4. Build and fix API changes: `scripts/gate.sh --quick`, then `cargo nextest run --workspace --exclude mini_racer_rs`.
-5. Exports: `scripts/check-exports.sh --write` on Linux. On macOS, CI's `ruby` job prints the built list in its "Built exports" group when the check fails; copy it into `ext/mini_racer_rs/exports.allow.macos`.
+5. Exports: `scripts/check-exports.sh --write` on Linux. For macOS, a failing "Check exports" step in CI's `ruby` job uploads the built list as the `exports-macos-15-ruby-<version>` artifact; commit its `exports.allow.macos`.
 6. Wire goldens: `cargo run -p mini_racer_engine --example gen_wire_golden`, then `UPDATE_GOLDEN=1 cargo test -p mini_racer_wire --test golden`, and read every changed `.txt`. A new wire version or tag is a `mini_racer_wire` change first.
 7. Notices: `scripts/update-notices.sh`. It fails when an archive links source that `licenses/v8/components.tsv` does not list; add the component and its license there.
 8. Ruby: `test/ruby/loader_test.rb` checks the V8 major and minor in `MiniRacerRs::V8_VERSION`; update it, then `bundle exec rake test`.

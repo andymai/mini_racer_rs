@@ -294,6 +294,7 @@ jobs:
           drift=$(git status --porcelain -- crates/mini_racer_wire/tests/golden)
           if [ -n "$drift" ]; then
             echo "$drift"
+            echo "::error::The wire golden bytes differ from what V8 writes. Run cargo run -p mini_racer_engine --example gen_wire_golden, then UPDATE_GOLDEN=1 cargo test -p mini_racer_wire --test golden, and read every changed .txt before committing."
             exit 1
           fi
 
@@ -408,14 +409,29 @@ jobs:
         with:
           ruby: ${{ matrix.ruby }}
       - run: bundle exec rake compile
+      # A mismatch leaves the built list in the allowlist file and uploads it, since
+      # the macOS list cannot be regenerated on Linux.
       - name: Check exports
+        id: exports
+        env:
+          ARTIFACT: exports-${{ matrix.os }}-ruby-${{ matrix.ruby }}
         run: |
           if ! scripts/check-exports.sh; then
-            echo "::group::Built exports"
-            scripts/check-exports.sh --print
+            scripts/check-exports.sh --write
+            allow=$(git diff --name-only -- 'ext/mini_racer_rs/exports.allow.*')
+            echo "::group::Changes to $allow"
+            git diff -- "$allow"
             echo "::endgroup::"
+            echo "::error file=$allow::The built exports differ from $allow. Commit $allow from the $ARTIFACT artifact, or run scripts/check-exports.sh --write on this OS."
             exit 1
           fi
+      - name: Keep the built export list
+        if: failure() && steps.exports.outcome == 'failure'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: exports-${{ matrix.os }}-ruby-${{ matrix.ruby }}
+          path: ext/mini_racer_rs/exports.allow.*
+          retention-days: 14
       - run: bundle exec rake test
       - name: Fork stress
         run: bundle exec ruby -Ilib test/stress/fork_loop.rb
