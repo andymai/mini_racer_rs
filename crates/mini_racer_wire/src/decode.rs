@@ -787,7 +787,7 @@ impl<'a, 'v, V: Visitor> Decoder<'a, 'v, V> {
         let mut properties = 0u32;
         while self.reader.peek()? != tag::END_SPARSE_ARRAY {
             // A run stops short of the entry that overflows the count, so the
-            // general path inserts it and then fails, as it always has.
+            // general path inserts it and then fails.
             let room = usize::try_from(u32::MAX.saturating_sub(properties)).unwrap_or(usize::MAX);
             let taken = match self.int32_keyed(&mut frame, depth, room)? {
                 0 => {

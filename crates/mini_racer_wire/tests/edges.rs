@@ -228,6 +228,19 @@ fn a_dense_array_keeps_its_holes() {
     assert_eq!(body(b"A\x02-I\x02$\x00\x02"), "[hole, 1]");
 }
 
+// An int32-keyed property after the last element is encoded like two more
+// elements, so only the array's length ends a run there.
+#[test]
+fn a_dense_run_stops_at_the_arrays_length() {
+    assert_eq!(body(b"A\x01I\x02I\x00I\x04$\x01\x01"), "[1, 0: 2]");
+    let elements = [double(1.5), double(2.5)].concat();
+    let property = [int32(0), double(3.5)].concat();
+    assert_eq!(
+        body(&[b"A\x02".as_slice(), &elements, &property, b"$\x01\x02"].concat()),
+        "[num(1.5), num(2.5), 0: num(3.5)]"
+    );
+}
+
 fn varint(mut value: u64) -> Vec<u8> {
     let mut bytes = Vec::new();
     loop {
