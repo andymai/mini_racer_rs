@@ -339,5 +339,103 @@
         "source": "(() => { const a = []; a[2 ** 31] = 1; a[2 ** 30 + 5] = 2; a[3] = 3; return a })()"
       }
     ]
+  },
+  {
+    "id": "curated-number-runs",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "(() => { const ints = Array.from({length: 150}, (_, i) => i * 37 - 2000); const edges = [-0, 0.5, 2 ** 53, 2 ** 53 + 2, 2 ** 63, -(2 ** 63), 2 ** 64, 1e300, NaN, Infinity, -Infinity, 5e-324, 2 ** 31, -(2 ** 31) - 1]; const doubles = Array.from({length: 70}, (_, i) => edges[i % edges.length]); return [ints, doubles, [1, 2, 3.5, -0, 'x', 4, null, 2 ** 63, 5, 6.5]] })()"
+      }
+    ]
+  },
+  {
+    "id": "curated-holey-number-runs",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "(() => { const a = new Array(150); for (let i = 0; i < 150; i++) a[i] = i % 5 ? i - 75 : i + 0.5; a[149] = 2 ** 64; a.extra = 1; a[200] = -0; return a })()"
+      }
+    ]
+  },
+  {
+    "id": "curated-call-number-runs",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "globalThis.same = (x) => x",
+        "setup": true
+      },
+      {
+        "op": "call",
+        "path": "same",
+        "args": [
+          [
+            "array",
+            [
+              [
+                "int",
+                "0"
+              ],
+              [
+                "int",
+                "1"
+              ],
+              [
+                "int",
+                "-1"
+              ],
+              [
+                "int",
+                "2147483647"
+              ],
+              [
+                "int",
+                "-2147483648"
+              ],
+              [
+                "int",
+                "2147483648"
+              ],
+              [
+                "float",
+                "3ff8000000000000"
+              ],
+              [
+                "float",
+                "8000000000000000"
+              ],
+              [
+                "float",
+                "01a56e1fc2f8f359"
+              ],
+              [
+                "float",
+                "7ff0000000000000"
+              ],
+              [
+                "int",
+                "1099511627776"
+              ],
+              [
+                "int",
+                "1180591620717411303424"
+              ],
+              [
+                "int",
+                "3"
+              ],
+              [
+                "float",
+                "4011000000000000"
+              ]
+            ]
+          ]
+        ]
+      }
+    ]
   }
 ]

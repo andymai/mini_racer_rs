@@ -1,6 +1,6 @@
 mod common;
 
-use common::{Node, Tree, render};
+use common::{Node, Tree, render, render_runs};
 use mini_racer_wire::{Limits, Writer, decode_value, decode_values};
 
 fn body(body: &[u8]) -> String {
@@ -226,6 +226,246 @@ fn writer_ids_match_the_ids_v8_reads() {
 #[test]
 fn a_dense_array_keeps_its_holes() {
     assert_eq!(body(b"A\x02-I\x02$\x00\x02"), "[hole, 1]");
+}
+
+fn varint(mut value: u64) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    loop {
+        let low = u8::try_from(value & 0x7F).unwrap_or_default();
+        value >>= 7;
+        if value == 0 {
+            bytes.push(low);
+            return bytes;
+        }
+        bytes.push(low | 0x80);
+    }
+}
+
+// The bytes `write` puts after a frame's header.
+fn element(write: impl FnOnce(&mut Writer<'_>)) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    write(&mut Writer::new(&mut bytes));
+    bytes.split_off(2)
+}
+
+fn int32(n: i32) -> Vec<u8> {
+    element(|writer| writer.integer(n.into()))
+}
+
+fn double(n: f64) -> Vec<u8> {
+    element(|writer| writer.number(n))
+}
+
+fn dense(elements: &[Vec<u8>]) -> Vec<u8> {
+    let length = varint(u64::try_from(elements.len()).unwrap_or_default());
+    [
+        b"A".as_slice(),
+        &length,
+        &elements.concat(),
+        b"$\x00",
+        &length,
+    ]
+    .concat()
+}
+
+fn sparse(length: u64, entries: &[[Vec<u8>; 2]]) -> Vec<u8> {
+    let count = varint(u64::try_from(entries.len()).unwrap_or_default());
+    let length = varint(length);
+    let entries = entries.concat().concat();
+    [b"a".as_slice(), &length, &entries, b"@", &count, &length].concat()
+}
+
+#[test]
+fn runs_of_numbers_span_the_buffer() {
+    let ints: Vec<_> = (0..150).map(|n| int32(n * 1000 - 70_000)).collect();
+    let (rendered, runs) = render_runs(&frame(&dense(&ints)), Limits::default());
+    let expected: Vec<_> = (0..150).map(|n| (n * 1000 - 70_000).to_string()).collect();
+    assert_eq!(rendered, format!("[{}]", expected.join(", ")));
+    assert_eq!(runs, [("int32s", 64), ("int32s", 64), ("int32s", 22)]);
+
+    let doubles: Vec<_> = (0..129).map(|n| double(f64::from(n) + 0.5)).collect();
+    let (rendered, runs) = render_runs(&frame(&dense(&doubles)), Limits::default());
+    let expected: Vec<_> = (0..129).map(|n| format!("num({n}.5)")).collect();
+    assert_eq!(rendered, format!("[{}]", expected.join(", ")));
+    assert_eq!(runs, [("numbers", 64), ("numbers", 64), ("numbers", 1)]);
+
+    let entries: Vec<_> = (0..130).map(|n| [int32(n), int32(-n)]).collect();
+    let (rendered, runs) = render_runs(&frame(&sparse(130, &entries)), Limits::default());
+    let expected: Vec<_> = (0..130).map(|n| format!("{n}: {}", -n)).collect();
+    assert_eq!(rendered, format!("sparse[{}]", expected.join(", ")));
+    assert_eq!(
+        runs,
+        [
+            ("int32 entries", 64),
+            ("int32 entries", 64),
+            ("int32 entries", 2)
+        ]
+    );
+}
+
+#[test]
+fn a_run_ends_at_any_other_element() {
+    let elements = [
+        int32(1),
+        int32(2),
+        double(1.5),
+        double(-0.0),
+        b"\"\x01a".to_vec(),
+        int32(3),
+        b"0".to_vec(),
+        double(4.5),
+        b"-".to_vec(),
+        int32(5),
+        int32(6),
+    ];
+    let (rendered, runs) = render_runs(&frame(&dense(&elements)), Limits::default());
+    assert_eq!(
+        rendered,
+        "[1, 2, num(1.5), num(-0), \"a\", 3, null, num(4.5), hole, 5, 6]"
+    );
+    assert_eq!(
+        runs,
+        [
+            ("int32s", 2),
+            ("numbers", 2),
+            ("int32s", 1),
+            ("numbers", 1),
+            ("int32s", 2)
+        ]
+    );
+}
+
+#[test]
+fn padding_before_an_element_leaves_it_to_the_general_path() {
+    let padded = [b"\x00".as_slice(), &int32(2)].concat();
+    let elements = [int32(1), padded, int32(3), int32(4)];
+    let (rendered, runs) = render_runs(&frame(&dense(&elements)), Limits::default());
+    assert_eq!(rendered, "[1, 2, 3, 4]");
+    assert_eq!(runs, [("int32s", 1), ("int32s", 2)]);
+}
+
+fn fails_after_runs(input: &[&[u8]], message: &str, handed: &[(&str, usize)]) {
+    let (rendered, runs) = render_runs(&frame(&input.concat()), Limits::default());
+    assert_eq!(rendered, format!("error: {message}"), "{input:?}");
+    assert_eq!(runs, handed, "{input:?}");
+}
+
+#[test]
+fn a_run_hands_over_what_it_read_before_the_input_fails() {
+    let (one, two) = (int32(1), int32(2));
+    fails_after_runs(
+        &[b"A\x04", &one, &two, b"I"],
+        "input too short",
+        &[("int32s", 2)],
+    );
+    let (half, more) = (double(1.5), double(2.5));
+    fails_after_runs(
+        &[b"A\x03", &half, &more, b"N\x00\x00"],
+        "input too short",
+        &[("numbers", 2)],
+    );
+    fails_after_runs(
+        &[b"A\x03", &one, b"I", &[0xFF; 10]],
+        "bad varint",
+        &[("int32s", 1)],
+    );
+    fails_after_runs(
+        &[b"A\x03", &one, b"I\x80\x80\x80\x80\x10"],
+        "bad varint",
+        &[("int32s", 1)],
+    );
+    let zero = int32(0);
+    fails_after_runs(
+        &[b"a\x03", &zero, &one, &one, b"I"],
+        "input too short",
+        &[("int32 entries", 1)],
+    );
+}
+
+#[test]
+fn every_prefix_of_a_run_is_too_short() {
+    let elements: Vec<_> = (0..70)
+        .map(|n| match n % 7 {
+            3 => double(f64::from(n) / 4.0),
+            5 => element(|writer| writer.utf8(b"text")),
+            _ => int32(n * 40_000),
+        })
+        .collect();
+    let entries: Vec<_> = (0..70)
+        .zip(&elements)
+        .map(|(n, element)| [int32(n), element.clone()])
+        .collect();
+    for whole in [frame(&dense(&elements)), frame(&sparse(70, &entries))] {
+        assert!(!render(&whole, Limits::default()).starts_with("error"));
+        for end in 0..whole.len() {
+            assert_eq!(
+                render(&whole[..end], Limits::default()),
+                "error: input too short",
+                "{end}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_run_checks_the_depth_as_its_first_element_would() {
+    let flat = Limits {
+        max_depth: 0,
+        ..Limits::default()
+    };
+    let too_deep = "error: too much recursion";
+    assert_eq!(
+        render(&frame(&dense(&[int32(1), int32(2)])), flat),
+        too_deep
+    );
+    assert_eq!(render(&frame(&dense(&[double(1.5)])), flat), too_deep);
+    let entry = [int32(0), double(1.5)];
+    assert_eq!(render(&frame(&sparse(1, &[entry])), flat), too_deep);
+    let keyed = [int32(0), b"S\x01x".to_vec()];
+    assert_eq!(render(&frame(&sparse(1, &[keyed])), flat), too_deep);
+    let holes = [b"-".to_vec(), b"-".to_vec()];
+    assert_eq!(render(&frame(&dense(&holes)), flat), "[hole, hole]");
+}
+
+#[test]
+fn counts_after_a_run_are_checked() {
+    let two = [int32(1), int32(2)].concat();
+    assert_eq!(
+        body(&[b"A\x02".as_slice(), &two, b"$\x00\x03"].concat()),
+        "error: array element count mismatch"
+    );
+    let entries = [int32(0), int32(1), int32(1), int32(2)].concat();
+    assert_eq!(
+        body(&[b"a\x02".as_slice(), &entries, b"@\x03\x02"].concat()),
+        "error: element count mismatch"
+    );
+}
+
+#[test]
+fn sparse_runs_take_int32_keys_with_number_values() {
+    let entries = [
+        [int32(0), int32(1)],
+        [int32(1), int32(2)],
+        [b"S\x01x".to_vec(), int32(3)],
+        [int32(4), int32(5)],
+        [int32(1000), double(-0.0)],
+        [int32(-3), double(2.5)],
+        [int32(7), b"S\x01y".to_vec()],
+        [int32(8), [b"\x00".as_slice(), &int32(9)].concat()],
+    ];
+    let (rendered, runs) = render_runs(&frame(&sparse(1001, &entries)), Limits::default());
+    assert_eq!(
+        rendered,
+        "sparse[0: 1, 1: 2, \"x\": 3, 4: 5, 1000: num(-0), -3: num(2.5), 7: \"y\", 8: 9]"
+    );
+    assert_eq!(
+        runs,
+        [
+            ("int32 entries", 2),
+            ("int32 entries", 1),
+            ("number entries", 2)
+        ]
+    );
 }
 
 #[test]

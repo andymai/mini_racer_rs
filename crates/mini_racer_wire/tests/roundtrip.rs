@@ -7,7 +7,7 @@
 
 mod common;
 
-use common::{Tree, hex, number};
+use common::{Tree, hex, number, render};
 use mini_racer_wire::{Limits, Writer, decode_value, text};
 use proptest::prelude::*;
 
@@ -47,6 +47,21 @@ fn value() -> impl Strategy<Value = Value> {
             proptest::collection::vec(("[a-z]{1,6}", inner), 0..6).prop_map(Value::Object),
         ]
     })
+}
+
+// Long enough to cross the decoder's runs of numbers, and mostly numbers, so
+// runs of every length end at every other kind of element.
+fn numbers() -> impl Strategy<Value = Value> {
+    let element = prop_oneof![
+        8 => (-100_000i64..100_000).prop_map(Value::Int),
+        2 => any::<i64>().prop_map(Value::Int),
+        6 => any::<f64>()
+            .prop_filter("finite", |f| f.is_finite())
+            .prop_map(Value::Float),
+        1 => Just(Value::Null),
+        1 => ".{0,3}".prop_map(Value::Utf8),
+    ];
+    proptest::collection::vec(element, 0..200).prop_map(Value::Array)
 }
 
 fn write(writer: &mut Writer<'_>, value: &Value) {
@@ -130,5 +145,20 @@ proptest! {
         let mut tree = Tree::default();
         let root = decode_value(&bytes, Limits::default(), &mut tree).expect("decodes");
         prop_assert_eq!(tree.render(root), expected(&value));
+    }
+}
+
+// Each case decodes every prefix of its array, so fewer cases.
+proptest! {
+    #![proptest_config(ProptestConfig { cases: 128, ..ProptestConfig::default() })]
+
+    #[test]
+    fn long_arrays_of_numbers_decode_and_their_prefixes_are_too_short(value in numbers()) {
+        let mut bytes = Vec::new();
+        write(&mut Writer::new(&mut bytes), &value);
+        prop_assert_eq!(render(&bytes, Limits::default()), expected(&value));
+        for end in 0..bytes.len() {
+            prop_assert_eq!(render(&bytes[..end], Limits::default()), "error: input too short");
+        }
     }
 }

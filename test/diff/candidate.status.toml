@@ -9,6 +9,9 @@ status = "same"
 [cases."curated-call-nested-path"]
 status = "same"
 
+[cases."curated-call-number-runs"]
+status = "same"
+
 [cases."curated-cyclic"]
 status = "same"
 
@@ -33,6 +36,9 @@ status = "same"
 [cases."curated-holey-array"]
 status = "same"
 
+[cases."curated-holey-number-runs"]
+status = "same"
+
 [cases."curated-invalid-date"]
 status = "same"
 
@@ -46,6 +52,9 @@ status = "same"
 status = "same"
 
 [cases."curated-nesting-past-the-limit"]
+status = "same"
+
+[cases."curated-number-runs"]
 status = "same"
 
 [cases."curated-padded-regexp-pattern"]
