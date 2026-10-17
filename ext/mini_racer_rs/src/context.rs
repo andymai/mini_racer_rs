@@ -192,9 +192,6 @@ fn config(ruby: &Ruby, keywords: RHash) -> Result<ContextConfig, Error> {
             errors::raised(ruby, ruby.exception_arg_error(), error.to_string())
         }
         OptionError::Keyword(_) => errors::runtime(ruby, error.to_string()),
-        OptionError::Unsupported(_) => {
-            errors::raised(ruby, ruby.exception_not_imp_error(), error.to_string())
-        }
     })
 }
 

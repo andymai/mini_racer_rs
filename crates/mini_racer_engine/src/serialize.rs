@@ -210,6 +210,9 @@ pub fn reply(
     filter: &Filter,
     value: v8::Local<'_, v8::Value>,
 ) -> Option<Vec<u8>> {
+    // mini_racer serializes in a TryCatch of its own, which is not verbose, and
+    // rethrows from it; V8 never reports a rethrown exception.
+    tc.set_verbose(false);
     if let Some(bytes) = write(tc, value) {
         return Some(bytes);
     }

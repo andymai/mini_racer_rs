@@ -287,7 +287,7 @@ status = "done"
 status = "done"
 
 [ids."kwarg:MiniRacer::Context#initialize:verbose_exceptions@ruby"]
-status = "todo:M3"
+status = "done"
 
 [ids."module:MiniRacer"]
 status = "done"

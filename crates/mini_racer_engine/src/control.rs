@@ -143,6 +143,9 @@ pub struct ContextConfig {
     /// full garbage collection, once, as `mini_racer`'s
     /// `ensure_gc_after_idle:` does. Single-threaded runners never do.
     pub gc_after_idle: Option<Duration>,
+    /// Has V8 report each exception that escapes a script, as `mini_racer`'s
+    /// verbose `TryCatch` does: it prints where it happened to stdout.
+    pub verbose_exceptions: bool,
 }
 
 /// The context's pending timeout and the earliest deadline the watchdog holds
