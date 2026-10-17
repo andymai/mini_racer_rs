@@ -37,8 +37,6 @@ pub enum OptionError {
     Range(&'static str),
     #[error("bad keyword: {0}")]
     Keyword(String),
-    #[error("Context option {0} is not supported yet")]
-    Unsupported(String),
 }
 
 const INT32_MAX: i64 = i32::MAX as i64;
@@ -100,8 +98,10 @@ pub fn configure(
                 other => return Err(OptionError::SnapshotType(other.type_name())),
             },
             // nil and false are what leaving it out means.
-            "verbose_exceptions" if matches!(value, OptionValue::Nil | OptionValue::False) => {}
-            "verbose_exceptions" => return Err(OptionError::Unsupported(key)),
+            // mini_racer turns it on for any value but nil and false.
+            "verbose_exceptions" => {
+                config.verbose_exceptions = !matches!(value, OptionValue::Nil | OptionValue::False);
+            }
             _ => return Err(OptionError::Keyword(key)),
         }
     }
@@ -211,6 +211,20 @@ mod tests {
     }
 
     #[test]
+    fn verbose_exceptions_is_any_value_but_nil_and_false() {
+        for (value, verbose) in [
+            (OptionValue::Nil, false),
+            (OptionValue::False, false),
+            (OptionValue::Other("TrueClass".to_owned()), true),
+            (OptionValue::Other("String".to_owned()), true),
+            (OptionValue::Fixnum(0), true),
+        ] {
+            let config = configure_pairs(&[("verbose_exceptions", value)]);
+            assert_eq!(config.map(|c| c.verbose_exceptions), Ok(verbose));
+        }
+    }
+
+    #[test]
     fn a_snapshot_must_be_one_and_an_empty_one_is_none() {
         let config = configure_pairs(&[("snapshot", OptionValue::Snapshot(b"blob".to_vec()))]);
         assert_eq!(
@@ -231,16 +245,5 @@ mod tests {
             .map(drop),
             Err(OptionError::SnapshotType("mini_racer/context".to_owned()))
         );
-    }
-
-    #[test]
-    fn options_not_built_yet_say_so() {
-        assert!(matches!(
-            configure_pairs(&[(
-                "verbose_exceptions",
-                OptionValue::Other("TrueClass".to_owned()),
-            )]),
-            Err(OptionError::Unsupported(_))
-        ));
     }
 }

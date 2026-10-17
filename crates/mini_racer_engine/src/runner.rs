@@ -528,6 +528,7 @@ fn script(
 ) -> Result<Vec<u8>, EngineError> {
     let term = &runtime.block.term;
     v8::tc_scope!(let tc, scope);
+    tc.set_verbose(runtime.block.config.verbose_exceptions);
     let result = if let Err(error) = arm_timeout(runtime, depth, kind) {
         Err(error)
     } else if term.check(kind).is_some() {
@@ -623,6 +624,7 @@ fn refuse_nested_await(
     runtime: &Runtime,
 ) -> Result<Vec<u8>, EngineError> {
     v8::tc_scope!(let tc, scope);
+    tc.set_verbose(runtime.block.config.verbose_exceptions);
     let failed = |tc: &Tc<'_, '_, '_, '_>| failure(tc, JsErrorKind::Runtime);
     let message = v8::String::new(tc, "nested call_await/eval_await is not supported")
         .ok_or_else(|| failed(tc))?;
