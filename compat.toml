@@ -73,6 +73,7 @@ reason = "mini_racer_rs returns the same filtered results from a snapshot-based 
 status = "deviation"
 
 [ids."behavior:timeout-bounds-leftover-microtasks@ruby"]
+approved = "2026-10-17"
 reason = "mini_racer_rs applies the context’s timeout once more while running microtasks left by a script that reached its own timeout. Both gems run leftover microtasks before returning, but mini_racer 0.22.1's watchdog has already fired for that call, so it runs them without a time limit. For example, with `timeout: 200`, evaluating `Promise.resolve().then(() => { while (true) {} }); while (true) {}` never returns in mini_racer. In mini_racer_rs it raises `MiniRacer::ScriptTerminatedError` after about 400 ms, and the context remains usable. This also means mini_racer_rs cuts short a finite leftover microtask that needs more than the second 200 ms, while mini_racer finishes it. Microtasks left by a script ended another way, such as by `stop`, a memory limit, or an interrupt, keep the original deadline in both gems. Without `timeout:`, both run leftover microtasks without a limit. mini_racer_rs differs because `timeout:` often bounds untrusted JavaScript, and an endless microtask should not remove that bound."
 status = "deviation"
 
