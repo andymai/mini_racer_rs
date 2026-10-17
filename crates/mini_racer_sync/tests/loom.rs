@@ -563,10 +563,11 @@ fn a_stop_racing_a_spent_termination_is_reported_exactly_once() {
         let stopper_cell = Arc::clone(&cell);
         let stopper = thread::spawn(move || stopper_cell.request(Interrupt::Stop));
 
+        let since = cell.mark();
         let attach = cell
             .begin(DispatchKind::Maintenance)
             .expect("nothing armed");
-        cell.spend();
+        cell.spend(since, false);
         let attached = cell.end(attach);
         let first = run(&cell, DispatchKind::Script);
         stopper.join().expect("stopper thread");
@@ -578,6 +579,31 @@ fn a_stop_racing_a_spent_termination_is_reported_exactly_once() {
         assert_eq!(first, stopped);
         assert!(second.is_none() || second == stopped);
         assert_eq!(third, None);
+        assert!(!isolate.terminating());
+    });
+}
+
+// Model 17: a nested dispatch lifting the termination it used up never lifts
+// a stop that races it: the stop keeps the script around terminated and is
+// reported when it ends.
+#[test]
+fn a_stop_racing_a_nested_lift_is_never_lost() {
+    loom::model(|| {
+        let (cell, isolate) = term_cell(None);
+        let outer = cell.begin(DispatchKind::Script).expect("nothing armed");
+        let since = cell.mark();
+        let stopper_cell = Arc::clone(&cell);
+        let stopper = thread::spawn(move || stopper_cell.request(Interrupt::Stop));
+
+        cell.spend(since, true);
+        stopper.join().expect("stopper thread");
+
+        assert!(isolate.terminating());
+        assert!(cell.refuses(DispatchKind::Script));
+        assert_eq!(
+            cell.end(outer),
+            Some(Halt::Terminated(TerminationCause::Stop))
+        );
         assert!(!isolate.terminating());
     });
 }

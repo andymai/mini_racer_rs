@@ -314,7 +314,10 @@ fn serve_released(
         let Some(shared) = lock(&block.custody).take() else {
             return (false, None);
         };
-        let served = serve_one(&mut shared.lock(), block, runtime, message);
+        let mut locked = shared.lock();
+        block.term.relocked();
+        let served = serve_one(&mut locked, block, runtime, message);
+        drop(locked);
         held = Some(shared);
         if let Served::Stop { disposed } = served {
             return (disposed, held);
@@ -536,6 +539,7 @@ fn script(
     } else {
         run(tc)
     };
+    let since = term.mark();
     // mini_racer's maintenance never cancels a termination it meets, so the
     // interrupt is used up while the cause waits for the next script. Inside
     // a callback, the termination caught here would otherwise unwind the
@@ -543,15 +547,29 @@ fn script(
     // when it ends.
     if kind == DispatchKind::Maintenance
         && tc.has_terminated()
-        && term.spend()
-        && matches!(depth, Depth::Nested)
+        && term.spend(since, matches!(depth, Depth::Nested))
     {
+        // Lifted, the termination this caught must not be rethrown as the
+        // scope closes.
         tc.reset();
-        tc.cancel_terminate_execution();
     }
     let raised = result.is_err() && kind == DispatchKind::Script && escaped(tc, runtime);
     let halt = match depth {
         Depth::Outermost(dispatch) if result.is_ok() => term.finish(dispatch),
+        // mini_racer replies to a terminated script with its termination
+        // cancelled, and V8 runs the microtasks the script left then, still
+        // within the dispatch. A cause landing meanwhile fails the reply, and
+        // mini_racer's retry consumes it with this script.
+        Depth::Outermost(dispatch) if kind == DispatchKind::Script && tc.has_terminated() => {
+            let verdict = term.settle(dispatch);
+            if verdict.is_some_and(|halt| halt != Halt::Disposed) {
+                tc.perform_microtask_checkpoint();
+            }
+            match term.end(dispatch) {
+                Some(Halt::Disposed) => Some(Halt::Disposed),
+                _ => verdict,
+            }
+        }
         Depth::Outermost(dispatch) => term.end(dispatch),
         // Its verdict came before it serialized, but a dispose still cancels
         // the wait for it, as in mini_racer.
