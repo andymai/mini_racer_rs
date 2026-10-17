@@ -85,6 +85,8 @@ pub fn init(ruby: &Ruby, racer: RModule) -> Result<(), Error> {
         "pump_message_loop",
         export!(method Context::pump_message_loop, 0),
     )?;
+    class.define_method("heap_stats", export!(method Context::heap_stats, 0))?;
+    class.define_method("heap_snapshot", export!(method Context::heap_snapshot, 0))?;
     class.define_method("attach", export!(method Context::attach, 2))?;
     class.define_method(
         "low_memory_notification",
@@ -323,6 +325,26 @@ impl Context {
     fn pump_message_loop(ruby: &Ruby, rb_self: &Self) -> Result<bool, Error> {
         let handle = rb_self.handle(ruby)?;
         rb_self.dispatch(ruby, |host| handle.pump_message_loop(host))
+    }
+
+    // mini_racer turns each statistic's name into a symbol.
+    fn heap_stats(ruby: &Ruby, rb_self: &Self) -> Result<RHash, Error> {
+        let handle = rb_self.handle(ruby)?;
+        let bytes = rb_self.dispatch(ruby, |host| handle.heap_stats(host))?;
+        let named = RHash::from_value(decode::value(ruby, &bytes)?)
+            .ok_or_else(|| errors::internal(ruby, "heap statistics are not an object"))?;
+        let stats = ruby.hash_new();
+        named.foreach(|name: RString, value: Value| {
+            stats.aset(ruby.to_symbol(name.to_string()?), value)?;
+            Ok(ForEach::Continue)
+        })?;
+        Ok(stats)
+    }
+
+    fn heap_snapshot(ruby: &Ruby, rb_self: &Self) -> Result<RString, Error> {
+        let handle = rb_self.handle(ruby)?;
+        let json = rb_self.dispatch(ruby, |host| handle.heap_snapshot(host))?;
+        Ok(ruby.enc_str_new(json, ruby.utf8_encoding()))
     }
 
     // The lock is held from choosing the id to sending it, so two threads

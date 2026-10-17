@@ -6,6 +6,7 @@ use std::time::Duration;
 use mini_racer_sync::{
     DispatchId, DispatchKind, Halt, Interrupt, Phase, Side, TerminationCause, ToV8, lock,
 };
+use mini_racer_wire::Writer;
 use v8::ValueDeserializerHelper;
 
 use crate::control::{CallbackReply, ControlBlock, Depth, IsolateTerminator, JsText, Request};
@@ -424,6 +425,16 @@ fn handle(
                 Ok(Vec::new())
             })
         }
+        Request::HeapStats { depth } => {
+            script(scope, runtime, depth, DispatchKind::Maintenance, |tc| {
+                Ok(heap_stats(tc))
+            })
+        }
+        Request::HeapSnapshot { depth } => {
+            script(scope, runtime, depth, DispatchKind::Maintenance, |tc| {
+                Ok(heap_snapshot(tc))
+            })
+        }
         Request::PumpMessageLoop { depth } => {
             script(scope, runtime, depth, DispatchKind::Pump, |tc| {
                 Ok(vec![u8::from(pump(tc, runtime))])
@@ -620,6 +631,61 @@ fn run_task(runtime: &Runtime, task: v8::Task) {
     runtime.running.fetch_add(1, Ordering::Relaxed);
     let _running = Running(&runtime.running);
     task.run();
+}
+
+// mini_racer's heap statistics, in its order: the numbers V8 reports, which
+// it hands JavaScript as doubles.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "mini_racer passes each statistic to Ruby as a V8 number"
+)]
+fn heap_stats(isolate: &mut v8::Isolate) -> Vec<u8> {
+    let stats = isolate.get_heap_statistics();
+    let named = [
+        ("total_heap_size", stats.total_heap_size()),
+        (
+            "total_heap_size_executable",
+            stats.total_heap_size_executable(),
+        ),
+        ("total_physical_size", stats.total_physical_size()),
+        ("total_available_size", stats.total_available_size()),
+        (
+            "total_global_handles_size",
+            stats.total_global_handles_size(),
+        ),
+        ("used_global_handles_size", stats.used_global_handles_size()),
+        ("used_heap_size", stats.used_heap_size()),
+        ("heap_size_limit", stats.heap_size_limit()),
+        ("malloced_memory", stats.malloced_memory()),
+        ("external_memory", stats.external_memory()),
+        ("peak_malloced_memory", stats.peak_malloced_memory()),
+        (
+            "number_of_native_contexts",
+            stats.number_of_native_contexts(),
+        ),
+        (
+            "number_of_detached_contexts",
+            stats.number_of_detached_contexts(),
+        ),
+    ];
+    let mut out = Vec::new();
+    let mut writer = Writer::new(&mut out);
+    writer.begin_object();
+    for (name, value) in named {
+        writer.utf8(name.as_bytes());
+        writer.number(value as f64);
+    }
+    writer.end_object(u32::try_from(named.len()).unwrap_or(u32::MAX));
+    out
+}
+
+fn heap_snapshot(isolate: &mut v8::Isolate) -> Vec<u8> {
+    let mut json = Vec::new();
+    isolate.take_heap_snapshot(|chunk| {
+        json.extend_from_slice(chunk);
+        true
+    });
+    json
 }
 
 // mini_racer's pump: one due task, then a microtask checkpoint if it ran and

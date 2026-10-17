@@ -303,13 +303,13 @@ status = "pass"
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_estimated_size"]
-status = "xfail:M1"
+status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_estimated_size".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_estimated_size_when_disposed"]
-status = "xfail:M3"
+status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_estimated_size_when_disposed".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
@@ -348,7 +348,7 @@ status = "pass"
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_heap_dump"]
-status = "xfail:M3"
+status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_heap_dump".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
@@ -508,7 +508,7 @@ status = "pass"
 status = "upstream-skip"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_releasing_memory"]
-status = "xfail:M3"
+status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_releasing_memory".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"

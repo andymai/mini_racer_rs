@@ -327,6 +327,25 @@ impl ContextHandle {
         .map(drop)
     }
 
+    /// V8's heap statistics under `mini_racer`'s names: a wire object whose
+    /// values are numbers.
+    pub fn heap_stats(&self, host: &mut impl Host) -> Result<Vec<u8>, EngineError> {
+        self.dispatch(
+            DispatchKind::Maintenance,
+            |depth| Request::HeapStats { depth },
+            host,
+        )
+    }
+
+    /// A heap snapshot, as the JSON V8 writes.
+    pub fn heap_snapshot(&self, host: &mut impl Host) -> Result<Vec<u8>, EngineError> {
+        self.dispatch(
+            DispatchKind::Maintenance,
+            |depth| Request::HeapSnapshot { depth },
+            host,
+        )
+    }
+
     /// Runs one due task of V8's, then the microtasks it queued; returns
     /// whether a task ran.
     pub fn pump_message_loop(&self, host: &mut impl Host) -> Result<bool, EngineError> {
