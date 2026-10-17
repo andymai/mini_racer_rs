@@ -23,6 +23,7 @@ reason = "Both gems allow an attached callback to call `eval`, `call`, or `attac
 status = "deviation"
 
 [ids."behavior:dispose-in-flight@ruby"]
+approved = "2026-10-16"
 reason = "`MiniRacer::Context#dispose` in mini_racer_rs returns only after the runner has finished any eval or call in flight and dropped the isolate, on both platforms, so the isolate and its memory cannot outlive disposal. On mini_racer 0.22.1’s default platform, `dispose` returns once the context’s V8 thread has taken the eval or call in flight, and that thread finishes the work and frees the isolate afterward (`context_dispose_do` in `mini_racer_extension.c`). With `:single_threaded`, mini_racer joins the runner and waits. When `dispose` was called 10 ms into serialization of a 64 MiB snapshot string, default mini_racer returned at 10 ms and mini_racer_rs at about 60 ms, after serialization finished. With `:single_threaded`, they returned at 85 ms and 62 ms, respectively. For busy loops, both returned within milliseconds. The in-flight operation always raises `MiniRacer::ContextDisposedError` in mini_racer_rs. mini_racer 0.22.1 usually raises that class, but raised `MiniRacer::ScriptTerminatedError` in 2 of 12 busy-loop runs; its test accepts either class."
 status = "deviation"
 
@@ -88,7 +89,7 @@ status = "deviation"
 
 [ids."behavior:v8-version@ruby"]
 approved = "2026-10-16"
-reason = "On CRuby, `mini_racer_rs` embeds V8 15.2.124.1 through the `v8` crate 152.2.0, while `mini_racer` 0.22.1 uses V8 13.6.233.17 through `libv8-node` 24.12.0.1. V8-generated text, including parse and runtime error messages and locale formatting, can therefore differ. So can the nesting depth at which V8 stops reading a value: with the default stack limit, `Context#call` accepts arguments about 6,250 levels deep in `mini_racer_rs` and about 3,100 in `mini_racer` 0.22.1, and both limits halve with half the stack. Affected upstream tests are marked `deviation:behavior:v8-version@ruby` in `test/upstream/mini_racer.status.toml`. This difference does not apply on TruffleRuby, where both gems use upstream's GraalJS backend."
+reason = "On CRuby, `mini_racer_rs` embeds V8 15.2.124.1 through the `v8` crate 152.2.0, while `mini_racer` 0.22.1 uses V8 13.6.233.17 through `libv8-node` 24.12.0.1. V8-generated text, including parse and runtime error messages and locale formatting, can therefore differ. So can the nesting depth at which V8 stops reading a value: with the default stack limit, `Context#call` accepts arguments about 6,250 levels deep in `mini_racer_rs` and about 3,100 in `mini_racer` 0.22.1, and both limits halve with half the stack. In single-threaded mode, after `low_memory_notification` on a new context, `pump_message_loop` returns `true` in `mini_racer_rs` and `false` in `mini_racer` 0.22.1 because V8 15.2 posts a zero-delay foreground task during collection. Later pumps return `false` in both, as they do in the default multi-threaded mode. Affected upstream tests are marked `deviation:behavior:v8-version@ruby` in `test/upstream/mini_racer.status.toml`. This difference does not apply on TruffleRuby, where both gems use upstream's GraalJS backend."
 status = "deviation"
 
 [ids."behavior:warmup-discards-context@ruby"]
