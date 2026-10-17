@@ -12,6 +12,7 @@ use v8::ValueDeserializerHelper;
 use crate::control::{CallbackReply, ControlBlock, Depth, IsolateTerminator, JsText, Request};
 use crate::process::fork::Generation;
 use crate::process::platform::{self, Mode};
+use crate::process::watchdog;
 use crate::serialize::{self, Filter, Tc};
 use crate::spin::spin_until;
 use crate::{EngineError, JsError, JsErrorKind};
@@ -276,15 +277,21 @@ fn serve_held(block: &ControlBlock, shared: &v8::SharedIsolate, runtime: &Arc<Ru
         let message = match block.config.gc_after_idle {
             Some(idle) if !collected => match receive_within(block, idle) {
                 Received::Message(message) => message,
+                // A collection for a context about to be torn down is wasted.
                 Received::Idle => {
-                    isolate.low_memory_notification();
+                    if !block.term.is_disposing() {
+                        isolate.low_memory_notification();
+                    }
                     collected = true;
                     continue;
                 }
             },
             _ => receive(block),
         };
-        collected = false;
+        // mini_racer's context has sent nothing before its first request.
+        if !matches!(message, Some(ToV8::Request(Request::Init { .. }))) {
+            collected = false;
+        }
         if let Served::Stop { disposed } = serve_one(&mut isolate, block, runtime, message) {
             return disposed;
         }
@@ -522,7 +529,9 @@ fn script(
 ) -> Result<Vec<u8>, EngineError> {
     let term = &runtime.block.term;
     v8::tc_scope!(let tc, scope);
-    let result = if term.check(kind).is_some() {
+    let result = if let Err(error) = arm_timeout(runtime, depth, kind) {
+        Err(error)
+    } else if term.check(kind).is_some() {
         Err(EngineError::Internal("halted without a cause".to_owned()))
     } else {
         run(tc)
@@ -545,6 +554,19 @@ fn script(
         }));
     }
     halt.map_or(result, |halt| Err(halted(halt)))
+}
+
+// mini_racer starts a script's watchdog on its V8 thread as it takes the
+// request, so time spent waiting for the runner, such as behind a collection
+// after `ensure_gc_after_idle`, never counts against the timeout. Setup and
+// maintenance are never timed.
+fn arm_timeout(runtime: &Runtime, depth: Depth, kind: DispatchKind) -> Result<(), EngineError> {
+    match (depth, kind, runtime.block.config.timeout) {
+        (Depth::Outermost(dispatch), DispatchKind::Script, Some(timeout)) => {
+            watchdog::schedule(timeout, &runtime.block, dispatch)
+        }
+        _ => Ok(()),
+    }
 }
 
 fn escaped(tc: &Tc<'_, '_, '_, '_>, runtime: &Runtime) -> bool {

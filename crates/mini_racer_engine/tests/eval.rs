@@ -627,3 +627,34 @@ fn an_idle_context_collects_garbage_after_ensure_gc_after_idle() {
     assert!(collected_while_idle(Some(Duration::from_millis(5))));
     assert!(!collected_while_idle(None));
 }
+
+// mini_racer starts a script's watchdog as its runner takes the request, so a
+// script that waits behind the collection after ensure_gc_after_idle still
+// gets its whole timeout. Collecting four million live objects takes far
+// longer than the timeout on any runner.
+#[test]
+fn waiting_behind_an_idle_collection_does_not_count_against_a_timeout() {
+    let blob = ContextHandle::create_snapshot(
+        JsText::from("var keep = Array.from({length: 4000000}, (_, i) => ({i}))"),
+        None,
+        &mut Parking,
+    )
+    .expect("snapshot");
+    let context = ContextHandle::spawn(
+        ContextConfig {
+            timeout: Some(Duration::from_millis(30)),
+            snapshot: Some(blob),
+            gc_after_idle: Some(Duration::from_millis(1)),
+        },
+        &mut Parking,
+    )
+    .expect("spawn");
+    eval(&context, "0").expect("eval");
+    std::thread::sleep(Duration::from_millis(5));
+    let started = Instant::now();
+    assert_eq!(eval(&context, "1").expect("its whole timeout"), Out::Int(1));
+    assert!(
+        started.elapsed() > Duration::from_millis(30),
+        "the script waited for the collection"
+    );
+}
