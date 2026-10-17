@@ -437,3 +437,30 @@ fn a_dispose_while_a_nested_result_serializes_fails_it() {
     assert!(matches!(nested, Some(Err(_))), "{nested:?}");
     context.dispose(&mut adding()).expect("dispose");
 }
+
+// mini_racer throws a raising callback's exception even with a stop pending:
+// the exception escaping the script takes precedence, and the stop takes over
+// once a script catches it.
+#[test]
+fn a_callback_raising_under_a_pending_stop_still_throws() {
+    let context = spawn();
+    context
+        .attach(name_and_id("fails", 0), &mut adding())
+        .expect("attach");
+    let mut host = Answering(|_args: &[i64], _id| {
+        context.stop().expect("live context");
+        CallbackReply::Raised(JsText::from("x"))
+    });
+
+    let escaped = eval(&context, "fails(); 5", &mut host);
+    assert!(
+        matches!(escaped, Err(EngineError::Js(ref js)) if js.kind == JsErrorKind::HostException),
+        "{escaped:?}"
+    );
+    let caught = eval(&context, "try { fails() } catch (e) { 7 }", &mut host);
+    assert!(
+        matches!(caught, Err(EngineError::Js(ref js)) if js.kind == JsErrorKind::Terminated(TerminationCause::Stop)),
+        "{caught:?}"
+    );
+    assert_eq!(eval(&context, "1 + 1", &mut adding()).expect("eval"), [2]);
+}
