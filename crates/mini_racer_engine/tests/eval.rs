@@ -461,3 +461,29 @@ fn an_await_after_dispose_is_refused() {
         Err(EngineError::Disposed)
     ));
 }
+
+// User and system CPU time of this process, in clock ticks.
+#[cfg(target_os = "linux")]
+fn cpu_ticks() -> u64 {
+    let stat = std::fs::read_to_string("/proc/self/stat").expect("stat");
+    let after_name = stat.rfind(')').expect("process name") + 2;
+    let fields: Vec<&str> = stat[after_name..].split(' ').collect();
+    let ticks = |index: usize| fields[index].parse::<u64>().expect("a tick count");
+    ticks(11) + ticks(12)
+}
+
+// The runner sleeps until the task is due: an await that spun instead would
+// spend most of the 300 ms on the CPU.
+#[cfg(target_os = "linux")]
+#[test]
+fn an_await_sleeps_rather_than_spins() {
+    let context = spawn();
+    let before = cpu_ticks();
+    let settled = eval_await(
+        &context,
+        "Atomics.waitAsync(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300).value.then(() => 1)",
+    );
+    assert_eq!(settled.expect("settles"), Out::Int(1));
+    let spent = cpu_ticks() - before;
+    assert!(spent < 10, "the await used {spent} ticks of CPU");
+}

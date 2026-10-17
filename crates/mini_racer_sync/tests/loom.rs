@@ -448,7 +448,7 @@ fn a_stop_wakes_a_runner_awaiting_a_task() {
         let stopper = thread::spawn(move || stopper_cell.request(Interrupt::Stop));
 
         while cell.check(DispatchKind::Script).is_none() {
-            tasks.wait(false);
+            tasks.wait();
         }
         stopper.join().expect("stopper thread");
 
@@ -471,7 +471,7 @@ fn a_task_posted_while_the_runner_waits_is_never_missed() {
             if let Some(task) = tasks.pop(false) {
                 break task;
             }
-            tasks.wait(false);
+            tasks.wait();
         };
         poster.join().expect("poster thread");
 
@@ -549,5 +549,25 @@ fn a_stop_is_reported_exactly_once() {
             1
         );
         assert!(!isolate.terminating());
+    });
+}
+
+// Model 14: a nested script's own timeout firing as the script ends never
+// leaves the untimed dispatch around it terminated.
+#[test]
+fn a_nested_timeout_racing_its_end_leaves_the_outer_dispatch_running() {
+    loom::model(|| {
+        let (cell, isolate) = term_cell(None);
+        let pump = cell.begin(DispatchKind::Pump).expect("nothing armed");
+        let nested = cell.time_nested().expect("an untimed dispatch");
+        let watchdog_cell = Arc::clone(&cell);
+        let watchdog = thread::spawn(move || watchdog_cell.request(Interrupt::Timeout(nested)));
+
+        cell.untime_nested(nested);
+        watchdog.join().expect("watchdog thread");
+
+        assert!(!isolate.terminating());
+        assert_eq!(cell.check(DispatchKind::Script), None);
+        assert_eq!(cell.end(pump), None);
     });
 }

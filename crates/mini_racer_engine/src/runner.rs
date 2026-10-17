@@ -357,14 +357,21 @@ fn handle(
             Depth::Nested => Err(EngineError::Internal("setup inside a callback".to_owned())),
         },
         Request::Eval {
+            depth: Depth::Nested,
+            awaited: true,
+            ..
+        }
+        | Request::Call {
+            depth: Depth::Nested,
+            awaited: true,
+            ..
+        } => refuse_nested_await(scope, runtime),
+        Request::Eval {
             filename,
             source,
             depth,
             awaited,
         } => script(scope, runtime, depth, DispatchKind::Script, |tc| {
-            if awaited && depth == Depth::Nested {
-                return refuse_nested_await(tc);
-            }
             evaluate(tc, runtime, (&filename, &source), awaited)
         }),
         Request::Call {
@@ -372,9 +379,6 @@ fn handle(
             depth,
             awaited,
         } => script(scope, runtime, depth, DispatchKind::Script, |tc| {
-            if awaited && depth == Depth::Nested {
-                return refuse_nested_await(tc);
-            }
             invoke(tc, runtime, &request, awaited)
         }),
         Request::Attach { request, depth } => {
@@ -499,13 +503,27 @@ fn evaluate(
 
 // V8 runs no microtask checkpoint inside another, so an await nested in a
 // callback could never settle; mini_racer refuses one before running anything.
-fn refuse_nested_await(tc: &Tc<'_, '_, '_, '_>) -> Result<Vec<u8>, EngineError> {
+// With a stop or timeout pending, it reports the refusal as terminated, and the
+// refusal's text stays the message.
+fn refuse_nested_await(
+    scope: &mut v8::PinScope<'_, '_>,
+    runtime: &Runtime,
+) -> Result<Vec<u8>, EngineError> {
+    v8::tc_scope!(let tc, scope);
     let failed = |tc: &Tc<'_, '_, '_, '_>| failure(tc, JsErrorKind::Runtime);
     let message = v8::String::new(tc, "nested call_await/eval_await is not supported")
         .ok_or_else(|| failed(tc))?;
     let exception = v8::Exception::error(tc, message);
     tc.throw_exception(exception);
-    Err(failed(tc))
+    let refused = failed(tc);
+    let halt = runtime.block.term.check(DispatchKind::Script).map(halted);
+    Err(match (halt, refused) {
+        (Some(EngineError::Js(halt)), EngineError::Js(refused)) => EngineError::from(JsError {
+            kind: halt.kind,
+            message: refused.message,
+        }),
+        (_, refused) => refused,
+    })
 }
 
 // mini_racer's await: run the microtasks, then look at the promise. While it
@@ -549,7 +567,7 @@ fn wait_for_task(runtime: &Runtime) {
     if runtime.released {
         runtime.block.phase.set(Phase::Parked);
     }
-    runtime.block.tasks.wait(false);
+    runtime.block.tasks.wait();
     if runtime.released {
         runtime.generation.resume(&runtime.block);
     }

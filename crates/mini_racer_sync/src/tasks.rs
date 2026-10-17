@@ -126,15 +126,16 @@ impl<T> TaskQueue<T> {
         entry.map(|entry| entry.task)
     }
 
-    /// Sleeps until a task `pop` would return is due, a task is posted, or
-    /// `ring` is called; returns at once if a task is due already or the
-    /// queue is closed. May return early: callers check again.
-    pub fn wait(&self, nested: bool) {
+    /// Sleeps until a task is due, a task is posted, or `ring` is called;
+    /// returns at once if a task is due already or the queue is closed. May
+    /// return early: callers check again. Only an outermost dispatch waits,
+    /// so every task counts.
+    pub fn wait(&self) {
         let timeout = {
             let mut queue = lock(&self.queue);
             let now = Instant::now();
             queue.promote(now);
-            if queue.closed || queue.position(nested).is_some() {
+            if queue.closed || !queue.ready.is_empty() {
                 return;
             }
             queue
@@ -160,9 +161,9 @@ impl<T> TaskQueue<T> {
         tasks
     }
 
-    /// What a forked child takes over with an idle isolate: a queue holding
-    /// the same tasks. `None` while the lock is held, which in a child means
-    /// by a thread that is gone.
+    /// What a forked child takes over with an idle isolate: the queued tasks,
+    /// moved into a new queue and out of this one. `None` while the lock is
+    /// held, which in a child means by a thread that is gone.
     #[must_use]
     pub fn inherited(&self) -> Option<Self> {
         let mut queue = self.queue.try_lock().ok()?;
@@ -225,10 +226,14 @@ mod tests {
         queue.post(2, true, NOW).expect("open");
         assert_eq!(drained(&queue, false), [2]);
         let started = Instant::now();
+        let mut waits = 0;
         while queue.pop(false).is_none() {
-            queue.wait(false);
+            queue.wait();
+            waits += 1;
         }
         assert!(started.elapsed() >= Duration::from_millis(25));
+        // The posts left the doorbell rung once; then one sleep to the deadline.
+        assert!(waits <= 3, "woke {waits} times");
     }
 
     // As V8's runner moves expired delayed tasks: behind those already ready,
@@ -260,26 +265,6 @@ mod tests {
     }
 
     #[test]
-    fn a_nested_wait_does_not_return_for_a_non_nestable_task() {
-        let queue = Arc::new(TaskQueue::default());
-        queue.post(1, false, NOW).expect("open");
-        let ringer = Arc::clone(&queue);
-        let rung = Arc::new(AtomicUsize::new(0));
-        let rings = Arc::clone(&rung);
-        let thread = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(30));
-            rings.store(1, Ordering::SeqCst);
-            ringer.ring();
-        });
-        // A post leaves the doorbell rung, so the first wait may return early.
-        while rung.load(Ordering::SeqCst) == 0 {
-            queue.wait(true);
-        }
-        thread.join().expect("ringer");
-        assert_eq!(queue.pop(false), Some(1));
-    }
-
-    #[test]
     fn close_hands_back_everything_and_refuses_later_posts() {
         let queue = TaskQueue::default();
         queue.post(1, true, Duration::from_secs(60)).expect("open");
@@ -287,7 +272,7 @@ mod tests {
         assert_eq!(queue.close(), [2, 1]);
         assert_eq!(queue.post(3, true, NOW), Err(3));
         assert_eq!(queue.pop(false), None);
-        queue.wait(false);
+        queue.wait();
     }
 
     #[test]
@@ -298,7 +283,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(20));
             ringer.ring();
         });
-        queue.wait(false);
+        queue.wait();
         thread.join().expect("ringer");
     }
 

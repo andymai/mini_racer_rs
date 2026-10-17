@@ -49,6 +49,10 @@ impl CauseSet {
         Self(self.0 | cause.bit())
     }
 
+    const fn without(self, cause: TerminationCause) -> Self {
+        Self(self.0 & !cause.bit())
+    }
+
     const fn contains(self, cause: TerminationCause) -> bool {
         self.0 & cause.bit() != 0
     }
@@ -173,6 +177,8 @@ struct State<T> {
     causes: CauseSet,
     disposing: bool,
     suspended: bool,
+    // A script nested in an untimed dispatch, timed on its own.
+    nested_timer: Option<DispatchId>,
     next: u64,
 }
 
@@ -216,6 +222,7 @@ impl<T> Default for TermCell<T> {
                 causes: CauseSet::default(),
                 disposing: false,
                 suspended: false,
+                nested_timer: None,
                 next: 0,
             }),
         }
@@ -264,6 +271,7 @@ impl<T: Terminator> TermCell<T> {
         let mut state = lock(&self.state);
         if let Some(id) = interrupt.dispatch()
             && state.armed.map(|armed| armed.id) != Some(id)
+            && !(matches!(interrupt, Interrupt::Timeout(_)) && state.nested_timer == Some(id))
         {
             return false;
         }
@@ -322,6 +330,41 @@ impl<T: Terminator> TermCell<T> {
         }
     }
 
+    /// Gives a script nested in an untimed dispatch (a pump or a microtask
+    /// checkpoint, through a callback) a timeout of its own, as `mini_racer`
+    /// arms its watchdog for any script when none is armed: an id the timeout
+    /// names. `None` when the armed dispatch is a script, whose own timeout
+    /// covers what it runs, or when an enclosing nested script has one.
+    pub fn time_nested(&self) -> Option<DispatchId> {
+        let mut state = lock(&self.state);
+        let armed = state.armed?;
+        if armed.kind == DispatchKind::Script || state.nested_timer.is_some() {
+            return None;
+        }
+        let id = DispatchId(state.next);
+        state.next = state.next.wrapping_add(1);
+        state.nested_timer = Some(id);
+        drop(state);
+        Some(id)
+    }
+
+    /// Ends a nested script's own timeout. One that fired is dropped, and the
+    /// dispatch around the script carries on unless another cause needs the
+    /// termination, as `mini_racer` lifts its watchdog's.
+    pub fn untime_nested(&self, id: DispatchId) {
+        let mut state = lock(&self.state);
+        if state.nested_timer != Some(id) {
+            return;
+        }
+        state.nested_timer = None;
+        if state.causes.contains(TerminationCause::Timeout) {
+            state.causes = state.causes.without(TerminationCause::Timeout);
+            if state.causes.is_empty() && !state.disposing {
+                state.cancel_armed();
+            }
+        }
+    }
+
     /// Terminates the armed dispatch's script for an abandoned nested dispatch
     /// without recording a cause, so the dispatch it runs in carries on once
     /// `release` lifts it.
@@ -360,6 +403,7 @@ impl<T: Terminator> TermCell<T> {
         }
         state.cancel_armed();
         state.suspended = false;
+        state.nested_timer = None;
         let armed = state.armed.take()?;
         if state.disposing {
             return Some(Halt::Disposed);
@@ -629,6 +673,52 @@ mod tests {
         run(&cell, DispatchKind::Script);
 
         assert_eq!(calls.cancel.get(), 0);
+    }
+
+    #[test]
+    fn a_script_nested_in_an_untimed_dispatch_is_timed_on_its_own() {
+        let (cell, calls) = cell();
+        let pump = cell.begin(DispatchKind::Pump).expect("nothing armed");
+        let nested = cell.time_nested().expect("an untimed dispatch");
+        assert_eq!(cell.time_nested(), None);
+
+        assert!(cell.request(Interrupt::Timeout(nested)));
+        assert_eq!(calls.terminate.get(), 1);
+        assert_eq!(
+            cell.check(DispatchKind::Script),
+            Some(Halt::Terminated(TerminationCause::Timeout))
+        );
+        cell.untime_nested(nested);
+        assert_eq!(calls.cancel.get(), 1);
+        assert_eq!(cell.check(DispatchKind::Script), None);
+        assert!(!cell.request(Interrupt::Timeout(nested)));
+        assert_eq!(cell.end(pump), None);
+    }
+
+    #[test]
+    fn a_nested_timeout_keeps_a_stop_that_came_with_it() {
+        let (cell, calls) = cell();
+        let checkpoint = cell
+            .begin(DispatchKind::Maintenance)
+            .expect("nothing armed");
+        let nested = cell.time_nested().expect("an untimed dispatch");
+        cell.request(Interrupt::Timeout(nested));
+        cell.request(Interrupt::Stop);
+
+        cell.untime_nested(nested);
+        assert_eq!(calls.cancel.get(), 0);
+        assert_eq!(cell.check(DispatchKind::Script), STOPPED);
+        assert_eq!(cell.end(checkpoint), None);
+        assert_eq!(run(&cell, DispatchKind::Script), STOPPED);
+    }
+
+    #[test]
+    fn a_script_inside_a_script_is_covered_by_the_outer_timeout() {
+        let (cell, _) = cell();
+        let id = cell.begin(DispatchKind::Script).expect("nothing armed");
+        assert_eq!(cell.time_nested(), None);
+        assert_eq!(cell.end(id), None);
+        assert_eq!(cell.time_nested(), None);
     }
 
     #[test]

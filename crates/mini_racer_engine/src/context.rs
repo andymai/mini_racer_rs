@@ -551,7 +551,7 @@ impl ContextHandle {
         match self.session.owner.load(Ordering::Acquire) {
             0 => {}
             _ if self.session.in_callback(thread) => {
-                return self.nested(block, request(Depth::Nested), host);
+                return self.nested(block, kind, request(Depth::Nested), host);
             }
             _ => return Err(EngineError::Busy),
         }
@@ -585,19 +585,45 @@ impl ContextHandle {
         result
     }
 
+    // A script nested in an untimed dispatch gets a timeout of its own.
     fn nested(
         &self,
-        block: &ControlBlock,
+        block: &Arc<ControlBlock>,
+        kind: DispatchKind,
         request: Request,
         host: &mut impl Host,
     ) -> Result<Vec<u8>, EngineError> {
         if block.term.is_disposing() {
             return Err(EngineError::Disposed);
         }
+        let timer = match (kind, block.config.timeout) {
+            (DispatchKind::Script, Some(timeout)) => {
+                block.term.time_nested().map(|id| (timeout, id))
+            }
+            _ => None,
+        };
+        if let Some((timeout, id)) = timer
+            && let Err(error) = watchdog::schedule(timeout, block, id)
+        {
+            block.term.untime_nested(id);
+            return Err(error);
+        }
         let wait = WaitHandle::new(block);
-        block.channel.request(request).map_err(channel)?;
-        let _waiting = Counted::enter(&self.session.waits);
-        self.await_response(block, &wait, true, host)
+        let result = block
+            .channel
+            .request(request)
+            .map_err(channel)
+            .and_then(|()| {
+                let _waiting = Counted::enter(&self.session.waits);
+                self.await_response(block, &wait, true, host)
+            });
+        if let Some((_, id)) = timer
+            && !wait.forked()
+        {
+            watchdog::clear(block, id);
+            block.term.untime_nested(id);
+        }
+        result
     }
 
     // Once the dispatch is abandoned, callbacks still in flight are answered
