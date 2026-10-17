@@ -564,6 +564,7 @@ fn refuse_nested_await(
             kind: halt.kind,
             message: refused.message,
         }),
+        (Some(disposed @ EngineError::Disposed), _) => disposed,
         (_, refused) => refused,
     })
 }
