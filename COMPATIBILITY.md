@@ -4,7 +4,7 @@
 
 | Engine | Done | Planned | Deviation |
 |---|---|---|---|
-| CRuby | 49 | 5 | 20 |
+| CRuby | 49 | 5 | 21 |
 | TruffleRuby | 58 | 0 | 0 |
 
 ## Surface
@@ -107,6 +107,12 @@ Approved 2026-10-16.
 Both gems allow an attached callback to call `eval`, `call`, or `attach` on its own context, running the nested call inside the script that invoked the callback. mini_racer_rs accepts the call only from the fiber running the callback. A call from another fiber on the same thread, such as code inside `Enumerator#next`, raises `ThreadError` (`deadlock; lock already owned by another fiber belonging to the same thread`). mini_racer 0.22.1 accepts it: `Enumerator.new { |y| y << context.eval("1") }.next` inside a callback returns `1`. A signal trap that calls the context while a callback waits on a nested `eval` gets `ThreadError` in mini_racer_rs; when rescued, the script completes. With mini_racer 0.22.1, the same program hangs until killed. mini_racer_rs refuses these calls because each nested call must finish before its callback replies, preventing out-of-order replies from being paired with the wrong callback.
 
 Approved 2026-10-16.
+
+### `behavior:dispose-in-flight@ruby`
+
+`MiniRacer::Context#dispose` in mini_racer_rs returns only after the runner has finished any eval or call in flight and dropped the isolate, on both platforms, so the isolate and its memory cannot outlive disposal. On mini_racer 0.22.1’s default platform, `dispose` returns once the context’s V8 thread has taken the eval or call in flight, and that thread finishes the work and frees the isolate afterward (`context_dispose_do` in `mini_racer_extension.c`). With `:single_threaded`, mini_racer joins the runner and waits. When `dispose` was called 10 ms into serialization of a 64 MiB snapshot string, default mini_racer returned at 10 ms and mini_racer_rs at about 60 ms, after serialization finished. With `:single_threaded`, they returned at 85 ms and 62 ms, respectively. For busy loops, both returned within milliseconds. The in-flight operation always raises `MiniRacer::ContextDisposedError` in mini_racer_rs. mini_racer 0.22.1 usually raises that class, but raised `MiniRacer::ScriptTerminatedError` in 2 of 12 busy-loop runs; its test accepts either class.
+
+Pending review.
 
 ### `behavior:fiber-scheduler@ruby`
 

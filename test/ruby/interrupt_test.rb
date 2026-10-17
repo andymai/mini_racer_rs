@@ -76,8 +76,8 @@ class InterruptTest < Minitest::Test
       end
       running = Thread.new do
         context.eval("while (true) {}")
-      rescue MiniRacer::ScriptTerminatedError
-        puts "eval terminated"
+      rescue MiniRacer::ContextDisposedError
+        puts "eval disposed"
       end
       sleep 0.1
       Process.kill("USR1", Process.pid)
@@ -87,7 +87,7 @@ class InterruptTest < Minitest::Test
     RUBY
 
     assert_predicate status, :success?, err
-    assert_equal "eval terminated\ndisposed\n", out
+    assert_equal "eval disposed\ndisposed\n", out
   end
 
   def test_forked_child_reports_an_inherited_context

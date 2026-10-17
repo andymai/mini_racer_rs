@@ -108,6 +108,7 @@ class ContextTest < Minitest::Test
     sleep 0.05
     @context.dispose
 
-    assert_raises(MiniRacer::ScriptTerminatedError) { running.value }
+    error = assert_raises(MiniRacer::ContextDisposedError) { running.value }
+    assert_equal "disposed context", error.message
   end
 end
