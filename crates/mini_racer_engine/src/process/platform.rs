@@ -166,8 +166,23 @@ mod tests {
         assert_eq!(normalize(b"use_strict", None).map(|n| n.mode), Ok(None));
     }
 
+    // Flags freeze at the first initialization in a process, so this runs in
+    // a process of its own even where other tests share one.
     #[test]
     fn rejects_flags_after_initialization() {
+        const ALONE: &str = "MINI_RACER_RS_TEST_ALONE";
+        if std::env::var_os(ALONE).is_none() {
+            let status = std::process::Command::new(std::env::current_exe().expect("test binary"))
+                .args([
+                    "process::platform::tests::rejects_flags_after_initialization",
+                    "--exact",
+                ])
+                .env(ALONE, "1")
+                .status()
+                .expect("run the test binary");
+            assert!(status.success(), "{status}");
+            return;
+        }
         assert_eq!(push_flag(b"use_strict", None), Ok(()));
         assert_eq!(freeze(), vec!["--use_strict".to_owned()]);
         assert!(is_initialized());

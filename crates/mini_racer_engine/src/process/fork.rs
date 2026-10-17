@@ -18,6 +18,8 @@ const POLL: Duration = Duration::from_micros(200);
 const INTERRUPT_AFTER: Duration = Duration::from_millis(50);
 // How long V8's worker threads get to finish the tasks ahead of the fork's.
 const HOLD: Duration = Duration::from_millis(100);
+// How often a fork posts another holding task while workers are still free.
+const REPOST: Duration = Duration::from_millis(1);
 
 // Forks since the engine's fork handlers were registered, counted by the child
 // handler. A process is told apart from its ancestors by this, never by pid,
@@ -252,8 +254,10 @@ impl Workers {
             hold.held = 0;
             hold.fork
         };
+        let post =
+            || crate::sys::post_on_worker_thread(platform, Box::new(move || self.keep(fork)));
         for _ in 0..count {
-            crate::sys::post_on_worker_thread(platform, Box::new(move || self.keep(fork)));
+            post();
         }
         let mut hold = lock(&self.hold);
         let all = loop {
@@ -264,7 +268,16 @@ impl Workers {
             if left.is_zero() {
                 break false;
             }
-            hold = wait_timeout(&self.changed, hold, left);
+            hold = wait_timeout(&self.changed, hold, left.min(REPOST));
+            // V8 wakes one idle worker per post, from a list that keeps a
+            // worker whose timed wait for a delayed task expired, so a post
+            // can wake no one. Another post per slice reaches the rest; a
+            // spare one returns once the fork is over.
+            if hold.held < count {
+                drop(hold);
+                post();
+                hold = lock(&self.hold);
+            }
         };
         drop(hold);
         all
@@ -314,4 +327,69 @@ pub(crate) fn child() {
         usize::from(FORK_INTENDED.load(Ordering::SeqCst)),
         Ordering::SeqCst,
     );
+}
+
+/// Taken by every test that holds or counts V8's worker threads, so tests
+/// sharing a process take turns with them.
+#[cfg(test)]
+pub(crate) static WORKER_TESTS: Mutex<()> = Mutex::new(());
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, MutexGuard};
+    use std::time::{Duration, Instant};
+
+    use mini_racer_sync::lock;
+
+    use super::{WORKER_TESTS, Workers};
+
+    fn workers() -> (MutexGuard<'static, ()>, &'static Workers) {
+        let turn = lock(&WORKER_TESTS);
+        crate::process::ensure_initialized();
+        (turn, Box::leak(Box::default()))
+    }
+
+    // Held, then let go: a task posted afterwards runs.
+    #[test]
+    fn holds_every_worker_until_released() {
+        let (_turn, workers) = workers();
+        assert!(workers.hold(Instant::now() + Duration::from_secs(5)));
+        workers.release();
+        let platform = crate::process::platform_with_workers().expect("initialized");
+        let ran = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&ran);
+        crate::sys::post_on_worker_thread(
+            platform,
+            Box::new(move || flag.store(true, Ordering::SeqCst)),
+        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !ran.load(Ordering::SeqCst) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(ran.load(Ordering::SeqCst));
+    }
+
+    // A worker whose timed wait for a delayed task expired stays on V8's
+    // idle list, so one post per worker misses one.
+    #[test]
+    fn holds_every_worker_after_a_delayed_task() {
+        let (_turn, workers) = workers();
+        let platform = crate::process::platform_with_workers().expect("initialized");
+        std::thread::sleep(Duration::from_millis(50));
+        crate::sys::post_delayed_on_worker_thread(platform, 0.05, Box::new(|| {}));
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(workers.hold(Instant::now() + Duration::from_secs(5)));
+        workers.release();
+    }
+
+    // A task left from a fork that timed out returns at once in a later one.
+    #[test]
+    fn a_task_of_an_earlier_fork_holds_nothing() {
+        let (_turn, workers) = workers();
+        assert!(!workers.hold(Instant::now()));
+        workers.release();
+        assert!(workers.hold(Instant::now() + Duration::from_secs(5)));
+        workers.release();
+    }
 }

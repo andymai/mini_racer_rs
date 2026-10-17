@@ -108,6 +108,9 @@ const POST_TASK_ON_WORKER_THREAD_IMPL: usize = 20;
 const USER_BLOCKING: u8 = 2;
 
 type TaskMethod = unsafe extern "C" fn(*mut WorkerTask);
+// Apple's arm64 ABI has a complete destructor return `this`; elsewhere the
+// returned value is ignored.
+type TaskDestructor = unsafe extern "C" fn(*mut WorkerTask) -> *mut WorkerTask;
 
 // A C++ vtable as clang lays one out for v8::Task: the object points past the
 // first two words, at the destructors and then `Run`.
@@ -115,7 +118,7 @@ type TaskMethod = unsafe extern "C" fn(*mut WorkerTask);
 struct TaskVtable {
     offset_to_top: isize,
     type_info: *const c_void,
-    complete_destructor: TaskMethod,
+    complete_destructor: TaskDestructor,
     deleting_destructor: TaskMethod,
     run: TaskMethod,
 }
@@ -137,7 +140,7 @@ struct WorkerTask {
     run: Option<Box<dyn FnOnce() + Send>>,
 }
 
-unsafe extern "C" fn destroy_task(task: *mut WorkerTask) {
+unsafe extern "C" fn destroy_task(task: *mut WorkerTask) -> *mut WorkerTask {
     let destroyed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         // SAFETY: V8 destroys a task it owns once, and it was built in
         // `post_on_worker_thread`.
@@ -146,6 +149,7 @@ unsafe extern "C" fn destroy_task(task: *mut WorkerTask) {
     if destroyed.is_err() {
         std::process::abort();
     }
+    task
 }
 
 unsafe extern "C" fn delete_task(task: *mut WorkerTask) {
@@ -202,7 +206,7 @@ pub fn worker_threads(platform: &v8::Platform) -> usize {
 /// Has V8 run `run` once on one of its worker threads.
 pub fn post_on_worker_thread(platform: &v8::Platform, run: Box<dyn FnOnce() + Send>) {
     let task = Box::into_raw(Box::new(WorkerTask {
-        vtable: &raw const TASK_VTABLE.complete_destructor,
+        vtable: (&raw const TASK_VTABLE.complete_destructor).cast(),
         run: Some(run),
     }));
     // v8::SourceLocation holds one pointer, which V8 reads as no location when
@@ -251,39 +255,86 @@ extern "C" fn on_child() {
     }
 }
 
+/// Has V8 run `run` on one of its worker threads after `delay` seconds, as
+/// V8's own delayed worker tasks do.
+#[cfg(test)]
+pub fn post_delayed_on_worker_thread(
+    platform: &v8::Platform,
+    delay: f64,
+    run: Box<dyn FnOnce() + Send>,
+) {
+    // v8::Platform::PostDelayedTaskOnWorkerThreadImpl, after the immediate one.
+    const SLOT: usize = POST_TASK_ON_WORKER_THREAD_IMPL + 1;
+    let task = Box::into_raw(Box::new(WorkerTask {
+        vtable: (&raw const TASK_VTABLE.complete_destructor).cast(),
+        run: Some(run),
+    }));
+    let location: *const c_void = std::ptr::null();
+    let method = platform_method(platform, SLOT);
+    // SAFETY: the slot holds `void PostDelayedTaskOnWorkerThreadImpl(
+    // TaskPriority, std::unique_ptr<Task>, double, const SourceLocation&)`,
+    // the unique_ptr passed as in `post_on_worker_thread`.
+    let method = unsafe {
+        std::mem::transmute::<
+            *const c_void,
+            unsafe extern "C" fn(
+                *const v8::Platform,
+                u8,
+                *mut WorkerTask,
+                f64,
+                *const *const c_void,
+            ),
+        >(method)
+    };
+    // SAFETY: as in `post_on_worker_thread`.
+    unsafe { method(platform, USER_BLOCKING, task, delay, &raw const location) };
+}
+
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::collections::HashSet;
+    use std::sync::{Arc, Condvar, Mutex};
+    use std::thread::ThreadId;
     use std::time::{Duration, Instant};
 
-    // The vtable slots match the V8 this crate links: a task posted through
-    // them runs on a worker thread and is deleted.
+    // The vtable slots match the V8 this crate links: tasks posted through
+    // them run on every worker thread, each on its own, and are deleted.
+    // Each waits for the rest to start, so one worker cannot run them all.
     #[test]
     fn runs_a_task_on_each_of_v8s_worker_threads() {
+        let _turn = mini_racer_sync::lock(&crate::process::fork::WORKER_TESTS);
         crate::process::ensure_initialized();
         let platform = crate::process::platform_with_workers().expect("initialized");
         let workers = super::worker_threads(platform);
         assert!(workers > 0);
-        let ran = Arc::new(AtomicUsize::new(0));
+        let started = Arc::new((Mutex::new(Vec::<ThreadId>::new()), Condvar::new()));
         for _ in 0..workers {
-            let ran = Arc::clone(&ran);
+            let started = Arc::clone(&started);
             super::post_on_worker_thread(
                 platform,
                 Box::new(move || {
-                    ran.fetch_add(1, Ordering::SeqCst);
+                    let (threads, all) = &*started;
+                    let mut threads = threads.lock().expect("lock");
+                    threads.push(std::thread::current().id());
+                    all.notify_all();
+                    let deadline = Instant::now() + Duration::from_secs(10);
+                    while threads.len() < workers && Instant::now() < deadline {
+                        threads = all
+                            .wait_timeout(threads, Duration::from_millis(10))
+                            .expect("wait")
+                            .0;
+                    }
+                    drop(threads);
                 }),
             );
         }
         let deadline = Instant::now() + Duration::from_secs(10);
-        while ran.load(Ordering::SeqCst) < workers && Instant::now() < deadline {
+        while Arc::strong_count(&started) > 1 && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(1));
         }
-        assert_eq!(ran.load(Ordering::SeqCst), workers);
-        // Each closure is dropped with its task, after it ran.
-        while Arc::strong_count(&ran) > 1 && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(1));
-        }
-        assert_eq!(Arc::strong_count(&ran), 1);
+        let threads = started.0.lock().expect("lock");
+        assert_eq!(threads.len(), workers);
+        assert_eq!(threads.iter().collect::<HashSet<_>>().len(), workers);
+        assert_eq!(Arc::strong_count(&started), 1);
     }
 }

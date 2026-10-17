@@ -133,7 +133,7 @@ The public API and require path stay the same. The main changes are native insta
 
 - You're affected if JavaScript reads a non-ASCII message from a callback exception. mini_racer_rs passes UTF-8, such as `"café"`, while mini_racer passes `"cafÃ©"`.
 
-- You're affected if `fork`, `IO.popen("-")`, or `Process.daemon` runs while another thread uses a context. Both modes interrupt JavaScript after 50 ms and wait up to 500 ms for runners; default mode waits up to 100 ms more for V8 workers. Non-interruptible work such as a large `JSON.parse` can outlast the wait; the fork then proceeds, and a `:single_threaded` child refuses every inherited context. Otherwise `:single_threaded` children take over idle contexts and reject busy ones, and default-mode children reject all inherited contexts.
+- You're affected if `fork`, `IO.popen("-")`, or `Process.daemon` runs after V8 starts. Both modes wait up to 500 ms for runners, interrupting JavaScript after 50 ms; default then waits up to 100 ms for workers. Uninterruptible operations and workers can outlast these best-effort waits, and the fork proceeds. Default children reject inherited contexts; new contexts can hang on worker work, or hang or abort after timeout. `:single_threaded` children take over idle inherited contexts, reject busy ones (all after runner timeout), and accept new contexts.
 
 - You're affected if, with `:single_threaded`, you fork in a way that bypasses Ruby's `fork`, such as a C-level `fork()`. Inherited contexts are unusable in the child.
 
