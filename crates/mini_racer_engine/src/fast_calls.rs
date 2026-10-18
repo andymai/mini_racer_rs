@@ -282,13 +282,13 @@ fn plain_run(text: &[u8], mut at: usize) -> usize {
 mod tests {
     use super::{Hoisted, MAX_DEPTH, Shape, recognize};
 
-    const RESET: &str =
-        "if (typeof console !== \"undefined\" && console.history) {\n  console.history = [];\n}\n";
-    const REPLAY: &str = "(function (history) {\n  if (history && history.length > 0) {\n    \
-        result += '\\n<scr'+'ipt class=\"react-rails-console-replay\">';\n    \
-        history.forEach(function (msg) {\n      \
-        result += '\\nconsole.' + msg.level + '.apply(console, ' + JSON.stringify(msg.arguments) + ');';\n    \
-        });\n    result += '\\n</scr'+'ipt>';\n  }\n})(console.history);\n";
+    // Code a renderer runs around each render, as react-rails' console
+    // replay does.
+    const BEFORE: &str = "var logged = [];\nconsole.history = logged;\n";
+    const AFTER: &str = "if (logged.length > 0) {\n  result += \"\\n<!--\" + \
+        logged.map(function (entry) {\n    \
+        return \" \" + entry.level + \" \" + JSON.stringify(entry.arguments);\n  \
+        }).join(\"\") + \" -->\";\n}\n";
 
     // What react-rails 3.2.1 and 3.3.1 hand ExecJS's eval, which wraps it in
     // parentheses.
@@ -301,9 +301,9 @@ mod tests {
 
     fn render(function: &str, component: &str, props: &str) -> String {
         compose_js(
-            RESET,
+            BEFORE,
             &format!("this.ReactRailsUJS.serverRender('{function}', '{component}', {props})"),
-            REPLAY,
+            AFTER,
         )
     }
 
@@ -465,9 +465,9 @@ mod tests {
             ])
         );
         let expected = compose_js(
-            RESET,
+            BEFORE,
             "this.ReactRailsUJS.serverRender(read(0), read(1), read(2))",
-            REPLAY,
+            AFTER,
         );
         assert_eq!(
             shape.and_then(|shape| shape.template(b"read")),
@@ -476,7 +476,7 @@ mod tests {
     }
 
     #[test]
-    fn a_render_without_console_replay_is_recognized() {
+    fn a_render_with_no_code_around_its_call_is_recognized() {
         let source = compose_js(
             "",
             "this.ReactRailsUJS.serverRender('renderToStaticMarkup', 'A', [])",
@@ -493,21 +493,21 @@ mod tests {
         let call = "this.ReactRailsUJS.serverRender('renderToString', 'A', {})";
         let second = "this.ReactRailsUJS.serverRender('renderToString', 'B', {});";
         let sources = [
-            compose_js(RESET, call, REPLAY).replacen("(          (", "(         (", 1),
-            compose_js(RESET, call, REPLAY).replacen("var result = ", "var result  = ", 1),
-            compose_js(RESET, call, REPLAY).replacen("return result;\n", "return result; \n", 1),
-            compose_js(RESET, call, REPLAY).replacen("{});", "{} );", 1),
-            compose_js(RESET, call, REPLAY).replacen("'A', {}", "'A',{}", 1),
-            compose_js(RESET, call, REPLAY)
+            compose_js(BEFORE, call, AFTER).replacen("(          (", "(         (", 1),
+            compose_js(BEFORE, call, AFTER).replacen("var result = ", "var result  = ", 1),
+            compose_js(BEFORE, call, AFTER).replacen("return result;\n", "return result; \n", 1),
+            compose_js(BEFORE, call, AFTER).replacen("{});", "{} );", 1),
+            compose_js(BEFORE, call, AFTER).replacen("'A', {}", "'A',{}", 1),
+            compose_js(BEFORE, call, AFTER)
                 .trim_end_matches(')')
                 .to_owned(),
-            compose_js(second, call, REPLAY),
-            compose_js(RESET, call, second),
-            compose_js(RESET, &format!("{call} + {call}"), REPLAY),
+            compose_js(second, call, AFTER),
+            compose_js(BEFORE, call, second),
+            compose_js(BEFORE, &format!("{call} + {call}"), AFTER),
             compose_js(
-                RESET,
+                BEFORE,
                 "ReactRailsUJS.serverRender('renderToString', 'A', {})",
-                REPLAY,
+                AFTER,
             ),
             render("renderToString", "He'llo", "{}"),
             render("renderToString", "A\\u0041", "{}"),

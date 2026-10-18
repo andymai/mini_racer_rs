@@ -1,10 +1,11 @@
 # frozen_string_literal: true
 
 # ExecJS calls whose arguments keep every source the same length past 16,383
-# characters, beyond which V8 hashes a string by its length alone. Compiling
-# each call's source made V8's compilation cache compare it with the earlier
-# ones: on x86_64 Linux a call with 24 KB of arguments went from 0.35 ms to
-# 17.9 ms after 3,000 calls. Fails when the median of the last tenth of the
+# characters, beyond which V8 hashes a string by its length alone. The normal
+# path, which MINI_RACER_RS_FAST_CALLS=off takes, compiles each source, and
+# V8's compilation cache compares it with every earlier one of that length: on
+# x86_64 Linux a call with 24 KB of arguments takes 0.57 ms there at first and
+# 19 ms after 3,000 calls. Fails when the median of the last tenth of the
 # calls is over `max_ratio` times the median of the first tenth.
 #   ruby -Ilib -Ivendor/execjs/lib test/stress/large_arguments.rb [calls] [max_ratio]
 

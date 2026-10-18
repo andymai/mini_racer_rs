@@ -35,23 +35,22 @@ module FastCallsFixtures
     };
   JS
 
-  # react-rails 3.3.1's console_reset.js and console_replay.js, which
-  # BundleRenderer puts around every render when it replays the console.
-  RESET = "if (typeof console !== \"undefined\" && console.history) {\n  console.history = [];\n}\n"
-  REPLAY = <<~JS
-    (function (history) {
-      if (history && history.length > 0) {
-        result += '\\n<scr'+'ipt class="react-rails-console-replay">';
-        history.forEach(function (msg) {
-          result += '\\nconsole.' + msg.level + '.apply(console, ' + JSON.stringify(msg.arguments) + ');';
-        });
-        result += '\\n</scr'+'ipt>';
-      }
-    })(console.history);
+  # Code a renderer runs around each render, here collecting what the render
+  # logged into the HTML, which react-rails does with its console replay.
+  BEFORE = <<~JS
+    var logged = [];
+    console.history = logged;
+  JS
+  AFTER = <<~JS
+    if (logged.length > 0) {
+      result += "\\n<!--" + logged.map(function (entry) {
+        return " " + entry.level + " " + JSON.stringify(entry.arguments);
+      }).join("") + " -->";
+    }
   JS
 
   THROWN = ["Error: boom {\"k\":1}", ["inner (<eval>:2:27)", "outer (<eval>:3:28)", "<eval>:1:8"]].freeze
-  RENDER_THROWN = ["TypeError: bad 3", ["Object.serverRender (<eval>:16:34)", "<eval>:6:45", "<eval>:18:13"]].freeze
+  RENDER_THROWN = ["TypeError: bad 3", ["Object.serverRender (<eval>:16:34)", "<eval>:5:45", "<eval>:13:13"]].freeze
 
   module_function
 
@@ -68,9 +67,9 @@ module FastCallsFixtures
     JS
   end
 
-  def render(component, props, replay: true)
+  def render(component, props, before: BEFORE, after: AFTER)
     main = "this.ReactRailsUJS.serverRender('renderToString', '#{component}', #{props})"
-    compose_js(replay ? RESET : "", main, replay ? REPLAY : "")
+    compose_js(before, main, after)
   end
 
   # The message and the JavaScript frames ExecJS puts ahead of Ruby's.
@@ -118,23 +117,18 @@ class FastCallsTest < Minitest::Test
   end
 
   def test_renders_return_what_mini_racer_returns
-    replayed = "<renderToString:Logs>{\"n\":3}\n<script class=\"react-rails-console-replay\">\n" \
-               "console.log.apply(console, [\"hi\",3]);\n</script>"
-
     assert_equal "<renderToString:Hello>{\"name\":\"W\u00e9\"}",
                  @context.eval(render("Hello", { "name" => "W\u00e9" }.to_json))
-    assert_equal replayed, @context.eval(render("Logs", '{"n":3}'))
-    assert_equal "<renderToString:Logs>{\"n\":3}", @context.eval(render("Logs", '{"n":3}', replay: false))
+    assert_equal "<renderToString:Logs>{\"n\":3}\n<!-- log [\"hi\",3] -->", @context.eval(render("Logs", '{"n":3}'))
+    assert_equal "<renderToString:Logs>{\"n\":3}", @context.eval(render("Logs", '{"n":3}', before: "", after: ""))
   end
 
   def test_render_errors_carry_mini_racers_frames_before_and_after_the_props
     circular = [
       "JavaScript --> starting at object with constructor 'Object'",
       "JavaScript --- property 'o' closes the circle",
-      "JSON.stringify ((execjs))", "<eval>:11:70", "Array.forEach ((execjs))", "<eval>:10:13", "<eval>:15:3",
-      "<eval>:18:13",
+      "JSON.stringify ((execjs))", "<eval>:8:43", "Array.map ((execjs))", "<eval>:7:31", "<eval>:13:13",
     ]
-
     cyclic = failure { @context.eval(render("Cyclic", "{}")) }
 
     assert_equal(RENDER_THROWN, failure { @context.eval(render("Throws", '{"n":3}')) })
@@ -142,7 +136,7 @@ class FastCallsTest < Minitest::Test
   end
 
   def test_props_that_are_not_json_on_one_line_render_as_mini_racer_renders_them
-    pretty = ["Object.serverRender (<eval>:16:34)", "<eval>:6:45", "<eval>:20:13"]
+    pretty = ["Object.serverRender (<eval>:16:34)", "<eval>:5:45", "<eval>:15:13"]
 
     assert_equal(["TypeError: bad 4", pretty], failure { @context.eval(render("Throws", "{\n  \"n\": 4\n}")) })
     assert_equal "<renderToString:Hello>{\"n\":\"js1\"}", @context.eval(render("Hello", "{n: 'js' + 1}"))
@@ -187,7 +181,7 @@ class FastCallsContextTest < Minitest::Test
       var ReactRailsUJS = { serverRender: function () { return bottom(function (frame) { return frame.getPosition() }) } };
     JS
     call = "(hash.apply(this, [1]))"
-    rendered = Array.new(3) { context.eval("(#{render("Hello", '{"n":1}', replay: false)})") }
+    rendered = Array.new(3) { context.eval("(#{render("Hello", '{"n":1}', before: "", after: "")})") }
 
     assert_equal [Digest::SHA256.hexdigest(call)] * 2, Array.new(3) { context.eval(call) }.drop(1)
     assert_equal [185, 185], rendered.drop(1)
@@ -253,8 +247,9 @@ class FastCallsProcessTest < Minitest::Test
     ])
   RUBY
 
-  # Each source compiled to a script V8 kept until a full collection: 40,000
-  # of these calls grew the heap by 30 MB, and as many renders by 97 MB.
+  # The normal path compiles each source to a script V8 keeps until a full
+  # collection, about 30 MB of heap over 40,000 of these calls and 97 MB over
+  # as many renders.
   def test_calls_and_renders_keep_no_compiled_script_each
     head, tail = "(#{render("Hello", "PROPS")})".split("PROPS")
     out, err, status = run_ruby(<<~RUBY, env: { "MINI_RACER_RS_FAST_CALLS" => nil })
@@ -302,7 +297,7 @@ class FastCallsProcessTest < Minitest::Test
       puts JSON.generate([context.call("receiver"), context.call("stack"), rendered])
     RUBY
     rendered = ["TypeError: Cannot read properties of undefined (reading 'ReactRailsUJS')",
-                ["<eval>:6:31", "<eval>:18:13"],]
+                ["<eval>:5:31", "<eval>:13:13"],]
 
     assert_predicate status, :success?, err
     assert_equal [true, "Error: s\n    at stack (<eval>:4:27)\n    at <eval>:1:8", rendered], JSON.parse(out)
@@ -311,21 +306,19 @@ class FastCallsProcessTest < Minitest::Test
   # mini_racer's verbose TryCatch prints the offset in the script where an
   # exception happened, past the props here.
   def test_verbose_exceptions_report_the_offset_mini_racer_reports
-    replay = "(function (history) {\n  JSON.stringify(history[0].arguments);\n})(console.history);\n"
-    main = "this.ReactRailsUJS.serverRender('renderToString', 'Cyclic', {\"n\":1})"
     out, err, status = run_ruby(<<~RUBY)
       require "mini_racer"
       context = MiniRacer::Context.new(verbose_exceptions: true)
       context.eval(#{SOURCE.dump})
       begin
-        context.eval(#{"(#{compose_js(RESET, main, replay)})".dump})
+        context.eval(#{"(#{render("Cyclic", '{"n":1}')})".dump})
       rescue MiniRacer::RuntimeError
         nil
       end
     RUBY
 
     assert_predicate status, :success?, err
-    assert_equal "<eval>:258: Uncaught TypeError: Converting circular structure to JSON\n    " \
+    assert_equal "<eval>:309: Uncaught TypeError: Converting circular structure to JSON\n    " \
                  "--> starting at object with constructor 'Object'\n    " \
                  "--- property 'o' closes the circle\n",
                  out
