@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::hash_map::RandomState;
 use std::hash::BuildHasher;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -17,6 +18,7 @@ use crate::process::code_cache::{Building, Plan};
 use crate::process::fork::Generation;
 use crate::process::platform::{self, Mode};
 use crate::process::watchdog;
+use crate::request::Read;
 use crate::serialize::{self, Filter, Tc};
 use crate::spin::spin_until;
 use crate::{EngineError, JsError, JsErrorKind};
@@ -258,10 +260,9 @@ fn serve(block: &Arc<ControlBlock>, generation: &'static Generation) -> bool {
     ));
     isolate.set_slot(Arc::clone(&runtime));
     // Installed only once the context exists, so nothing terminates its setup.
-    block.term.install(IsolateTerminator::new(
-        isolate.thread_safe_handle(),
-        &block.tasks,
-    ));
+    block
+        .term
+        .install(IsolateTerminator::new(block, isolate.thread_safe_handle()));
     let shared = match sys::share(isolate) {
         Ok(shared) => shared,
         Err(refused) => {
@@ -301,10 +302,9 @@ fn adopt(
         locker.set_slot(Arc::clone(&runtime));
         runtime
     };
-    block.term.install(IsolateTerminator::new(
-        shared.thread_safe_handle(),
-        &block.tasks,
-    ));
+    block
+        .term
+        .install(IsolateTerminator::new(block, shared.thread_safe_handle()));
     let _ = block.isolate.set(shared.thread_safe_handle());
     serve_isolate(block, shared, runtime)
 }
@@ -1265,6 +1265,12 @@ fn read_request<'s>(
     Some((request, path))
 }
 
+// A call's arguments: built by the runner, or in the array V8 read.
+enum Arguments<'s> {
+    Built(Vec<v8::Local<'s, v8::Value>>),
+    Read(v8::Local<'s, v8::Object>),
+}
+
 // mini_racer's order: everything from the path walk on fails as a runtime
 // error. Each dotted segment but the last becomes an object, and the function
 // is called on its parent.
@@ -1276,8 +1282,16 @@ fn invoke(
 ) -> Result<Vec<u8>, EngineError> {
     let context = tc.get_current_context();
     let failed = |tc: &Tc<'_, '_, '_, '_>| failure(tc, JsErrorKind::Runtime);
-    let (request, path) =
-        read_request(tc, request).ok_or_else(|| failure(tc, JsErrorKind::Internal))?;
+    let (path, arguments) =
+        match crate::request::read(tc, request, &runtime.block.termination_requested) {
+            Read::Built(call) => (call.path, Arguments::Built(call.args)),
+            Read::Failed => return Err(failure(tc, JsErrorKind::Internal)),
+            Read::Unbuilt => {
+                let (request, path) =
+                    read_request(tc, request).ok_or_else(|| failure(tc, JsErrorKind::Internal))?;
+                (Cow::Owned(path), Arguments::Read(request))
+            }
+        };
     let mut receiver = context.global(tc);
     let mut keys = path.split('.').peekable();
     let mut function = None;
@@ -1296,11 +1310,17 @@ fn invoke(
         tc.throw_exception(exception);
         return Err(failed(tc));
     };
-    let count = v8::Local::<v8::Array>::try_from(request).map_or(0, |array| array.length());
-    let mut args = Vec::new();
-    for index in 1..count {
-        args.push(request.get_index(tc, index).ok_or_else(|| failed(tc))?);
-    }
+    let args = match arguments {
+        Arguments::Built(args) => args,
+        Arguments::Read(request) => {
+            let count = v8::Local::<v8::Array>::try_from(request).map_or(0, |array| array.length());
+            let mut args = Vec::new();
+            for index in 1..count {
+                args.push(request.get_index(tc, index).ok_or_else(|| failed(tc))?);
+            }
+            args
+        }
+    };
     let value = function
         .call(tc, receiver.into(), &args)
         .ok_or_else(|| failed(tc))?;
@@ -1372,7 +1392,7 @@ fn trampoline<'s>(
     };
     let outcome = catch_unwind(AssertUnwindSafe(|| callback(scope, &runtime, &args, rv)));
     if outcome.is_err() {
-        scope.terminate_execution();
+        terminate(scope, &runtime);
         runtime.block.channel.close();
     }
 }
@@ -1406,7 +1426,7 @@ fn callback<'s>(
         return;
     };
     if runtime.block.channel.callback(bytes).is_err() {
-        scope.terminate_execution();
+        terminate(scope, runtime);
         return;
     }
     loop {
@@ -1424,13 +1444,13 @@ fn callback<'s>(
                     handle(scope, runtime, request)
                 };
                 if runtime.block.channel.respond(response).is_err() {
-                    scope.terminate_execution();
+                    terminate(scope, runtime);
                     return;
                 }
                 continue;
             }
             None => {
-                scope.terminate_execution();
+                terminate(scope, runtime);
                 return;
             }
         };
@@ -1448,7 +1468,7 @@ fn callback<'s>(
                     scope.throw_exception(exception);
                 }
                 if !runtime.block.term.is_settled() {
-                    scope.terminate_execution();
+                    terminate(scope, runtime);
                 }
             }
             // mini_racer throws a raising callback's exception even with a
@@ -1463,11 +1483,11 @@ fn callback<'s>(
                 *lock(&runtime.raised) = Some(v8::Global::new(scope, exception));
                 scope.throw_exception(exception);
                 if terminating {
-                    scope.terminate_execution();
+                    terminate(scope, runtime);
                 }
             }
             _ if terminating => {
-                scope.terminate_execution();
+                terminate(scope, runtime);
             }
             // As mini_racer reads the reply: a termination pending for this
             // script makes the read throw it, and the script ends here.
@@ -1483,6 +1503,16 @@ fn callback<'s>(
         }
         return;
     }
+}
+
+// Sets the flag a runner's own reads consult before V8 is asked to terminate,
+// as the termination cell's requests do.
+fn terminate(isolate: &v8::Isolate, runtime: &Runtime) {
+    runtime
+        .block
+        .termination_requested
+        .store(true, Ordering::Release);
+    isolate.terminate_execution();
 }
 
 fn error<'s>(scope: &v8::PinScope<'s, '_>, message: &JsText) -> v8::Local<'s, v8::Value> {

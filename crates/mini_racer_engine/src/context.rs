@@ -784,6 +784,11 @@ fn adopt(inherited: &ControlBlock, carried: Inherited) -> Held {
     let block = Arc::new(ControlBlock::with_tasks(inherited.config.clone(), tasks));
     *lock(&block.custody) = Some(isolate);
     block.term.adopt(carried);
+    // The isolate keeps whatever termination V8 still held for it.
+    block.termination_requested.store(
+        inherited.termination_requested.load(Ordering::Acquire),
+        Ordering::Release,
+    );
     match start(&block, generation, Start::Adopted) {
         Ok(()) => Held::Block(block),
         Err(_) => orphaned(true, false),
