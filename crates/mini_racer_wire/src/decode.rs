@@ -517,11 +517,6 @@ impl<'a, 'v, V: Visitor> Decoder<'a, 'v, V> {
         if let Some(text) = self.text(tag)? {
             return Self::visit(self.visitor.scalar(Scalar::Text(text)));
         }
-        self.tagged(tag, depth)
-    }
-
-    // Any value but a string, after its tag.
-    fn tagged(&mut self, tag: u8, depth: u32) -> Decoded<V> {
         let scalar = match tag {
             tag::UNDEFINED => Scalar::Undefined,
             tag::NULL => Scalar::Null,
@@ -667,12 +662,19 @@ impl<'a, 'v, V: Visitor> Decoder<'a, 'v, V> {
         Self::visit(self.visitor.insert(frame, key, value))
     }
 
+    // A key that is not a string is read again as a value: handing `value` its
+    // tag would split `value` in two, and the half with the containers takes
+    // them all inline. Out of line, so `insert` stays inside the container's
+    // frame; a deep result repeats every frame on the way down.
+    #[inline(never)]
     fn entry_key(&mut self, frame: &V::Frame, depth: u32) -> Decoded<V> {
+        let start = self.reader;
         let tag = self.tag()?;
-        match self.text(tag)? {
-            Some(text) => Self::visit(self.visitor.key(frame, text)),
-            None => self.tagged(tag, depth),
+        if let Some(text) = self.text(tag)? {
+            return Self::visit(self.visitor.key(frame, text));
         }
+        self.reader = start;
+        self.value(depth)
     }
 
     // Reads keyed entries up to `end`, which may follow padding only if a key does.

@@ -131,3 +131,45 @@ class ContextTest < Minitest::Test
     assert_equal "disposed context", error.message
   end
 end
+
+# Deep results of each shape, on the smaller stacks of fibers and threads.
+class ContextDeepResultsTest < Minitest::Test
+  def setup
+    @context = MiniRacer::Context.new
+  end
+
+  def teardown
+    @context.dispose
+  end
+
+  NESTED = {
+    "objects" => "v = {a: v}",
+    "maps" => "v = new Map([['a', v]])",
+    "objects in arrays" => "v = i % 2 ? [v] : {k: v}",
+  }.freeze
+
+  def depth(value)
+    levels = 0
+    while value.is_a?(Hash) || value.is_a?(Array)
+      value = value.is_a?(Hash) ? value.values.first : value.first
+      levels += 1
+    end
+    levels
+  end
+
+  # The decoder recurses once per level, so a deep result takes its frames
+  # over and over on a fiber's or a thread's smaller stack. mini_racer 0.22.1
+  # decodes each shape 95 deep in both at Ruby's default stack sizes, and
+  # refuses 96.
+  def test_objects_and_maps_nest_as_deep_inside_a_fiber_and_a_thread
+    NESTED.each do |shape, step|
+      source = ->(n) { "(() => { let v = 1; for (let i = 0; i < #{n}; i++) #{step}; return v })()" }
+      fiber = Fiber.new { @context.eval(source.call(95)) }.resume
+      thread = Thread.new { @context.eval(source.call(95)) }.value
+
+      assert_equal [95, 95], [depth(fiber), depth(thread)], shape
+      error = assert_raises(MiniRacer::RuntimeError) { Fiber.new { @context.eval(source.call(96)) }.resume }
+      assert_equal "too much recursion", error.message
+    end
+  end
+end

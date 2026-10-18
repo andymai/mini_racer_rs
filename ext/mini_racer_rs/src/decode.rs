@@ -101,14 +101,17 @@ struct Pairs {
 }
 
 impl Pairs {
-    fn new(ruby: &Ruby) -> Self {
-        Self {
+    // Out of line, as KeyCache::start is, so the values made here never take
+    // room in the decoder's recursive frames, which a deep result repeats.
+    #[inline(never)]
+    fn start<'p>(slot: &'p mut Option<Self>, ruby: &Ruby) -> &'p mut Self {
+        slot.insert(Self {
             values: [ruby.qnil().as_value(); PAIRS],
             spill: None,
             len: 0,
             innermost: None,
             inserted: 0,
-        }
+        })
     }
 
     fn push(&mut self, ruby: &Ruby, value: Value) {
@@ -220,6 +223,14 @@ struct KeyCache {
 }
 
 impl KeyCache {
+    #[inline(never)]
+    fn start<'c>(slot: &'c mut Option<Self>, ruby: &Ruby) -> &'c mut Self {
+        slot.insert(Self {
+            keys: [ruby.qnil().as_value(); CACHED_KEYS],
+            len: 0,
+        })
+    }
+
     fn fetch(&mut self, ruby: &Ruby, bytes: &[u8]) -> Result<Value, Error> {
         let held = self.keys.get(..self.len).unwrap_or_default();
         let found = held.binary_search_by(|&key| {
@@ -348,9 +359,10 @@ impl RubyVisitor<'_> {
     fn open_hash(&mut self) -> RHash {
         let ruby = self.ruby;
         let hash = ruby.hash_new();
-        self.pairs
-            .get_or_insert_with(|| Pairs::new(ruby))
-            .open(ruby, hash);
+        match &mut self.pairs {
+            Some(pairs) => pairs.open(ruby, hash),
+            None => Pairs::start(&mut self.pairs, ruby).open(ruby, hash),
+        }
         hash
     }
 
@@ -443,12 +455,10 @@ impl RubyVisitor<'_> {
         {
             return Ok(rb_raw::interned_utf8(ruby, bytes)?.as_value());
         }
-        self.keys
-            .get_or_insert_with(|| KeyCache {
-                keys: [ruby.qnil().as_value(); CACHED_KEYS],
-                len: 0,
-            })
-            .fetch(ruby, bytes)
+        match &mut self.keys {
+            Some(keys) => keys.fetch(ruby, bytes),
+            None => KeyCache::start(&mut self.keys, ruby).fetch(ruby, bytes),
+        }
     }
 
     // mini_racer splits a millisecond time into seconds and microseconds,
