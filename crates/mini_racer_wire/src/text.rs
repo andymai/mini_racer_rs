@@ -1,14 +1,20 @@
 // Returned HTML is mostly ASCII, which is copied in blocks; only blocks
 // holding another byte are converted a byte at a time.
 const LATIN1_BLOCK: usize = 32;
+// Lengths are counted a block at a time in a u8, which vectorizes; a UTF-16
+// unit adds at most 3.
+const COUNT_BLOCK: usize = 64;
+const _: () = assert!(COUNT_BLOCK * 3 <= u8::MAX as usize);
 
 /// The length in UTF-8 of Latin-1 `bytes`.
 #[must_use]
 pub fn latin1_utf8_len(bytes: &[u8]) -> usize {
-    let wide: usize = bytes
-        .iter()
-        .map(|&byte| usize::from(!byte.is_ascii()))
-        .sum();
+    let wide = bytes.chunks(COUNT_BLOCK).fold(0_usize, |wide, block| {
+        let count = block.iter().fold(0_u8, |count, &byte| {
+            count.wrapping_add(u8::from(!byte.is_ascii()))
+        });
+        wide.saturating_add(usize::from(count))
+    });
     bytes.len().saturating_add(wide)
 }
 
@@ -63,9 +69,40 @@ fn utf16le_chars(bytes: &[u8]) -> Option<impl Iterator<Item = Result<char, ()>>>
 /// byte or a lone surrogate.
 #[must_use]
 pub fn utf16le_utf8_len(bytes: &[u8]) -> Option<usize> {
-    utf16le_chars(bytes)?.try_fold(0_usize, |len, c| {
-        Some(len.saturating_add(c.ok()?.len_utf8()))
-    })
+    let (pairs, rest) = bytes.as_chunks::<2>();
+    if !rest.is_empty() {
+        return None;
+    }
+    // A unit takes one byte, one more from U+0080 and one more from U+0800,
+    // which counts the two units of a surrogate pair as six bytes for its four.
+    let mut len: usize = 0;
+    let mut surrogates = false;
+    for block in pairs.chunks(COUNT_BLOCK) {
+        let mut count: u8 = 0;
+        for &pair in block {
+            let unit = u16::from_le_bytes(pair);
+            count = count
+                .wrapping_add(1)
+                .wrapping_add(u8::from(unit >= 0x80))
+                .wrapping_add(u8::from(unit >= 0x800));
+            surrogates |= (0xD800..0xE000).contains(&unit);
+        }
+        len = len.saturating_add(usize::from(count));
+    }
+    if !surrogates {
+        return Some(len);
+    }
+    let mut surrogate_pairs: usize = 0;
+    let mut units = pairs.iter().copied().map(u16::from_le_bytes);
+    while let Some(unit) = units.next() {
+        if (0xD800..0xDC00).contains(&unit) {
+            units.next().filter(|low| (0xDC00..0xE000).contains(low))?;
+            surrogate_pairs = surrogate_pairs.saturating_add(1);
+        } else if (0xDC00..0xE000).contains(&unit) {
+            return None;
+        }
+    }
+    Some(len.saturating_sub(surrogate_pairs.saturating_mul(2)))
 }
 
 /// Writes the UTF-8 of UTF-16LE `bytes` at the start of `out` and returns how

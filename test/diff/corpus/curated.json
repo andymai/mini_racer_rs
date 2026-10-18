@@ -6209,5 +6209,15 @@
         "source": "[{k: 'na\\u00efve \\u{1F600}'}, new String('\\u00e9t\\u00e9'), new RegExp('caf\\u00e9'), new Map([[1, '\\u6771']]), new Set(['\\u00e9', '\\u00e9'])]"
       }
     ]
+  },
+  {
+    "id": "curated-strings-measured-first",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "[32768, 32769, 70000].flatMap((n) => ['\\u00e9'.repeat(n), 'a'.repeat(n) + '\\u00e9']).concat([21845, 21846, 70000].flatMap((n) => ['\\u0100'.repeat(n), 'x'.repeat(n) + '\\u{1F600}', '\\ud800' + 'y'.repeat(n)]))"
+      }
+    ]
   }
 ]

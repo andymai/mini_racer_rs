@@ -54,6 +54,24 @@ class ResultStringsTest < Minitest::Test
     assert(values.all? { |value| value.encoding == Encoding::UTF_16LE && !value.valid_encoding? })
   end
 
+  # Text whose UTF-8 could pass 64 KiB is measured first and written into a
+  # buffer of its own size: 32,768 Latin-1 bytes or 21,845 UTF-16 units could
+  # just fit the decoder's own buffer, one more could not.
+  def test_strings_measured_first
+    values = @context.eval(<<~JS)
+      [32768, 32769, 70000].flatMap((n) => ['\\u00e9'.repeat(n), 'a'.repeat(n) + '\\u00e9'])
+        .concat([21845, 21846, 70000].flatMap((n) => ['\\u0100'.repeat(n), 'x'.repeat(n) + '\\u{1F600}']))
+    JS
+    expected = [32_768, 32_769, 70_000].flat_map { |n| ["é" * n, "#{"a" * n}é"] } +
+               [21_845, 21_846, 70_000].flat_map { |n| ["Ā" * n, "#{"x" * n}\u{1F600}"] }
+
+    expected.zip(values) { |want, got| assert_utf8 want, got }
+    lone = @context.eval("'\\ud800' + 'y'.repeat(70000)")
+
+    assert_equal "\x00\xD8#{"y\x00" * 70_000}".b, lone.b
+    assert_equal Encoding::UTF_16LE, lone.encoding
+  end
+
   def test_strings_inside_containers_and_patterns
     value = @context.eval(<<~JS)
       [{k: 'na\\u00efve \\u{1F600}'}, new String('\\u00e9t\\u00e9'), new RegExp('caf\\u00e9'), new Map([[1, '\\u6771']])]

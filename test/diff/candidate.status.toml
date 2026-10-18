@@ -264,6 +264,9 @@ status = "same"
 [cases."curated-strings-inside-containers-and-patterns"]
 status = "same"
 
+[cases."curated-strings-measured-first"]
+status = "same"
+
 [cases."curated-thrown-error"]
 status = "same"
 

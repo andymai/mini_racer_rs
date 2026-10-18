@@ -86,6 +86,8 @@ struct Pending {
 
 const PAIRS: usize = 128;
 
+const SCRATCH: usize = 64 << 10;
+
 // Every open hash's pairs wait here, innermost last, until the hash ends and
 // takes them in one rb_hash_bulk_insert while it is still empty, so Ruby sizes
 // its table once, as json 3.1's parser builds objects. A hash's run starts
@@ -386,15 +388,34 @@ impl RubyVisitor<'_> {
         Err(errors::runtime(self.ruby, "bad state"))
     }
 
-    // Text is transcoded into this one buffer, with room for the longest
-    // UTF-8 it could be and zeroed only as it grows, then copied into its
-    // String in one call: making a String to write into costs more Ruby
-    // calls than the copy saves.
-    fn scratch(&mut self, len: usize) -> &mut [u8] {
-        if self.scratch.len() < len {
-            self.scratch.resize(len, 0);
-        }
-        self.scratch.get_mut(..len).unwrap_or_default()
+    // Text is transcoded into one buffer, then copied into its String in one
+    // call: making a String to write into costs more Ruby calls than the copy
+    // saves. Up to SCRATCH bytes it is the decode's own, with room for the
+    // longest UTF-8 the text could be and zeroed only as it grows; longer
+    // text is measured first and gets a buffer its size, freed once copied,
+    // since the longest it could be is up to three times what it takes.
+    fn transcoded(
+        &mut self,
+        most: usize,
+        len: impl FnOnce() -> Option<usize>,
+        write: impl FnOnce(&mut [u8]) -> Option<usize>,
+    ) -> Option<Value> {
+        let ruby = self.ruby;
+        let mut measured;
+        let out = if most <= SCRATCH {
+            if self.scratch.len() < most {
+                self.scratch.resize(most, 0);
+            }
+            self.scratch.get_mut(..most).unwrap_or_default()
+        } else {
+            measured = vec![0; len()?];
+            measured.as_mut_slice()
+        };
+        let written = write(out)?;
+        Some(
+            ruby.enc_str_new(out.get(..written).unwrap_or_default(), ruby.utf8_encoding())
+                .as_value(),
+        )
     }
 
     fn string(&mut self, text: Text<'_>) -> Result<Value, Error> {
@@ -404,20 +425,24 @@ impl RubyVisitor<'_> {
             Text::Latin1(bytes) if bytes.is_ascii() => {
                 ruby.enc_str_new(bytes, ruby.utf8_encoding()).as_value()
             }
-            Text::Latin1(bytes) => {
-                let out = self.scratch(bytes.len().saturating_mul(2));
-                let written = text::latin1_to_utf8_into(bytes, out);
-                ruby.enc_str_new(out.get(..written).unwrap_or_default(), ruby.utf8_encoding())
-                    .as_value()
-            }
+            Text::Latin1(bytes) => self
+                .transcoded(
+                    bytes.len().saturating_mul(2),
+                    || Some(text::latin1_utf8_len(bytes)),
+                    |out| Some(text::latin1_to_utf8_into(bytes, out)),
+                )
+                .ok_or_else(|| errors::internal(ruby, "Latin-1 text not transcoded"))?,
             Text::Utf16Le(bytes) if marker::is_javascript_function(bytes) => {
                 JAVASCRIPT_FUNCTION.get(ruby).new_instance(())?
             }
             Text::Utf16Le(bytes) => {
-                let out = self.scratch(bytes.len().saturating_mul(3).div_ceil(2));
-                if let Some(written) = text::utf16le_to_utf8_into(bytes, out) {
-                    ruby.enc_str_new(out.get(..written).unwrap_or_default(), ruby.utf8_encoding())
-                        .as_value()
+                let most = bytes.len().saturating_mul(3).div_ceil(2);
+                if let Some(utf8) = self.transcoded(
+                    most,
+                    || text::utf16le_utf8_len(bytes),
+                    |out| text::utf16le_to_utf8_into(bytes, out),
+                ) {
+                    utf8
                 } else {
                     let utf16 = ruby
                         .find_encoding("UTF-16LE")
