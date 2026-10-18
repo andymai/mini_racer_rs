@@ -4,8 +4,11 @@
 # contexts in turn, disposing of each after its load, and reads the resident
 # memory the process keeps once they are all gone. One astral character makes
 # V8 keep each source two bytes a unit, 6 MiB of it. A shared copy that only
-# one context read goes at the next large eval, so at most the last script's
-# copy may stay. Fails over the limit.
+# one context read goes at the next large eval, so only the last script's
+# copy stays. On x86_64 Linux, run through `bundle exec`, the process kept
+# about 10 MiB, that copy included, in both platform modes, and 51 MiB when
+# such copies stayed until a new source needed their room. Fails over the
+# limit.
 #   ruby -Ilib test/stress/one_off_load.rb single|multi [scripts] [max_mib]
 
 require "mini_racer"

@@ -73,6 +73,8 @@ pub struct Sources {
     list: Mutex<List>,
     // How many sources, and how many bytes of them, may be kept and read.
     bounds: (usize, usize),
+    // The number the next context's reads are told apart by.
+    next_reader: AtomicU64,
     made: AtomicU64,
     reads: AtomicU64,
     conversions: AtomicU64,
@@ -100,21 +102,45 @@ struct Kept {
     // The references from this process's list and every ancestor's, which a
     // forked child never touches again; the strings reading it hold the rest.
     held: usize,
+    readers: Readers,
+}
+
+// The contexts that have read a kept source. One alone, as a script evaluated
+// once has, gains nothing from a copy no string reads any more; a source more
+// have read is likely to be read again, and an inherited one is only copied
+// again if a child drops it, so both stay until a new source needs the room.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Readers {
+    One(u64),
+    Many,
 }
 
 impl Kept {
     fn unread(&self) -> bool {
         self.units.references() == self.held
     }
+
+    fn spent(&self) -> bool {
+        matches!(self.readers, Readers::One(_)) && self.unread()
+    }
 }
 
 impl List {
-    fn find(&mut self, key: &Key) -> Option<Units> {
+    fn find(&mut self, key: &Key, reader: u64) -> Option<Units> {
         let at = self.kept.iter().position(|kept| kept.key == *key)?;
-        let found = self.kept.remove(at);
+        let mut found = self.kept.remove(at);
+        if found.readers != Readers::One(reader) {
+            found.readers = Readers::Many;
+        }
         let units = found.units.clone();
         self.kept.push(found);
         Some(units)
+    }
+
+    // V8's release of a string touches only the count, so a copy whose last
+    // string has gone waits for the next call that takes the lock.
+    fn sweep(&mut self) -> Vec<Kept> {
+        self.kept.extract_if(.., |kept| kept.spent()).collect()
     }
 
     // Whether `bytes` more fit beside what strings still read, which nothing
@@ -162,30 +188,42 @@ impl Sources {
         Self {
             list: Mutex::default(),
             bounds: (sources, bytes),
+            next_reader: AtomicU64::new(0),
             made: AtomicU64::new(0),
             reads: AtomicU64::new(0),
             conversions: AtomicU64::new(0),
         }
     }
 
+    /// A number for a new context to read shared sources as, told apart from
+    /// every other context of this process.
+    pub(crate) fn reader(&self) -> u64 {
+        self.next_reader.fetch_add(1, Ordering::Relaxed)
+    }
+
     /// The shared source of the script `text` under `key`, kept from the first
-    /// context that asks for it. `None` leaves the context its own copy: the
-    /// source is invalid UTF-8, or too large for what is kept and still read.
-    /// Only a source that may fit is converted, outside the lock.
-    pub(crate) fn units(&self, key: &Key, text: &JsText) -> Option<Units> {
+    /// context that asks for it, for the context `reader`. `None` leaves the
+    /// context its own copy: the source is invalid UTF-8, or too large for
+    /// what is kept and still read. Only a source that may fit is converted,
+    /// outside the lock. Every call first drops each copy that no string
+    /// reads and that one context alone ever read.
+    pub(crate) fn units(&self, key: &Key, text: &JsText, reader: u64) -> Option<Units> {
         let mut list = lock(&self.list);
-        if let Some(units) = list.find(key) {
-            return Some(units);
-        }
-        if !list.room(list.least_bytes(key, text), self.bounds) {
-            return None;
-        }
+        // Found before the sweep, so a copy the context before this one left
+        // unread is read again, and kept, rather than copied again.
+        let found = list.find(key, reader);
+        let spent = list.sweep();
+        let room = found.is_none() && list.room(list.least_bytes(key, text), self.bounds);
         drop(list);
+        drop(spent);
+        if !room {
+            return found;
+        }
         self.conversions.fetch_add(1, Ordering::Relaxed);
         let units = Units::of(text);
         let mut list = lock(&self.list);
         // Made meanwhile by a context loading the same script.
-        if let Some(found) = list.find(key) {
+        if let Some(found) = list.find(key, reader) {
             return Some(found);
         }
         let bytes = units.as_ref().map_or(usize::MAX, Units::bytes);
@@ -216,9 +254,11 @@ impl Sources {
             key: key.clone(),
             units: units.clone(),
             held: 1,
+            readers: Readers::One(reader),
         });
         drop(list);
-        // Freed once the lock is released, as a large source takes a while.
+        // Freed once the lock is released, as a large source takes a while,
+        // like the spent copies above.
         drop(dropped);
         self.made.fetch_add(1, Ordering::Relaxed);
         Some(units)
@@ -243,6 +283,7 @@ impl Sources {
                         key: kept.key.clone(),
                         units: kept.units.clone(),
                         held: kept.held + 1,
+                        readers: Readers::Many,
                     })
                     .collect(),
                 refused: list.refused.clone(),
@@ -355,8 +396,8 @@ mod tests {
         let sources = Sources::default();
         let text = script(1);
         let key = key(&text);
-        let first = one_byte(sources.units(&key, &text));
-        let second = one_byte(sources.units(&key, &text));
+        let first = one_byte(sources.units(&key, &text, sources.reader()));
+        let second = one_byte(sources.units(&key, &text, sources.reader()));
         assert!(Arc::ptr_eq(&first, &second));
         assert_eq!(sources.made(), 1);
         assert_eq!(sources.reading(), 2);
@@ -376,6 +417,12 @@ mod tests {
         }
     }
 
+    // A copy two contexts have read, the second still reading it.
+    fn shared(sources: &Sources, key: &Key, text: &JsText) -> Option<Units> {
+        drop(sources.units(key, text, sources.reader()));
+        sources.units(key, text, sources.reader())
+    }
+
     #[test]
     fn a_source_still_read_is_kept_and_an_unread_one_makes_room() {
         let sources = Sources::default();
@@ -385,29 +432,84 @@ mod tests {
         let mut read: Vec<Option<Units>> = texts
             .iter()
             .zip(&keys)
-            .map(|(text, key)| sources.units(key, text))
+            .map(|(text, key)| shared(&sources, key, text))
             .collect();
         let extra = script(100);
         let extra_key = key(&extra);
-        assert!(sources.units(&extra_key, &extra).is_none());
+        assert!(shared(&sources, &extra_key, &extra).is_none());
         drop(read.remove(3));
         drop(read.remove(0));
-        drop(sources.units(&keys[3], &texts[3]));
+        drop(sources.units(&keys[3], &texts[3], sources.reader()));
         // Of the two unread, the least recently used makes room.
-        assert!(sources.units(&extra_key, &extra).is_some());
+        assert!(shared(&sources, &extra_key, &extra).is_some());
         let made = sources.made();
         assert_eq!(made, u64::from(count) + 1);
-        drop(sources.units(&keys[3], &texts[3]));
+        drop(sources.units(&keys[3], &texts[3], sources.reader()));
         assert_eq!(sources.made(), made);
-        drop(sources.units(&keys[0], &texts[0]));
+        drop(sources.units(&keys[0], &texts[0], sources.reader()));
         assert_eq!(sources.made(), made + 1);
         for (at, held) in [1, 2, 4, 5, 6, 7].into_iter().zip(&read) {
             assert!(same(
-                sources.units(&keys[at], &texts[at]).as_ref(),
+                sources
+                    .units(&keys[at], &texts[at], sources.reader())
+                    .as_ref(),
                 held.as_ref()
             ));
         }
         assert_eq!(sources.made(), made + 1);
+    }
+
+    // One context's copy, however often it read it, waits for no new source
+    // once no string reads it: the next call drops and frees it.
+    #[test]
+    fn a_copy_one_context_read_goes_at_the_next_call_once_unread() {
+        let sources = Sources::default();
+        let (text, other) = (script(70), script(71));
+        let (key, other_key) = (key(&text), key(&other));
+        let reader = sources.reader();
+        let first = one_byte(sources.units(&key, &text, reader));
+        let again = one_byte(sources.units(&key, &text, reader));
+        assert!(Arc::ptr_eq(&first, &again));
+        let copy = Arc::downgrade(&first);
+        drop((first, again));
+        assert!(copy.upgrade().is_some());
+        drop(sources.units(&other_key, &other, sources.reader()));
+        assert!(copy.upgrade().is_none());
+        drop(sources.units(&key, &text, sources.reader()));
+        assert_eq!(sources.made(), 3);
+    }
+
+    #[test]
+    fn a_copy_two_contexts_read_in_turn_stays_once_unread() {
+        let sources = Sources::default();
+        let (text, other) = (script(72), script(73));
+        let (key, other_key) = (key(&text), key(&other));
+        let copy = Arc::downgrade(&one_byte(shared(&sources, &key, &text)));
+        drop(sources.units(&other_key, &other, sources.reader()));
+        let again = one_byte(sources.units(&key, &text, sources.reader()));
+        assert!(
+            copy.upgrade()
+                .is_some_and(|copy| Arc::ptr_eq(&copy, &again))
+        );
+        assert_eq!(sources.made(), 2);
+    }
+
+    #[test]
+    fn a_copy_a_second_context_reads_while_the_first_does_stays_once_unread() {
+        let sources = Sources::default();
+        let (text, other) = (script(74), script(75));
+        let (key, other_key) = (key(&text), key(&other));
+        let first = one_byte(sources.units(&key, &text, sources.reader()));
+        let second = one_byte(sources.units(&key, &text, sources.reader()));
+        let copy = Arc::downgrade(&first);
+        drop((first, second));
+        drop(sources.units(&other_key, &other, sources.reader()));
+        let again = one_byte(sources.units(&key, &text, sources.reader()));
+        assert!(
+            copy.upgrade()
+                .is_some_and(|copy| Arc::ptr_eq(&copy, &again))
+        );
+        assert_eq!(sources.made(), 2);
     }
 
     #[test]
@@ -417,18 +519,26 @@ mod tests {
         let read: Vec<Option<Units>> = (40..40 + count)
             .map(|seed| {
                 let text = script(seed);
-                sources.units(&key(&text), &text)
+                sources.units(&key(&text), &text, sources.reader())
             })
             .collect();
         let converted = sources.conversions();
         let extra = script(100);
         let extra_key = key(&extra);
         for _ in 0..3 {
-            assert!(sources.units(&extra_key, &extra).is_none());
+            assert!(
+                sources
+                    .units(&extra_key, &extra, sources.reader())
+                    .is_none()
+            );
         }
         assert_eq!(sources.conversions(), converted);
         drop(read);
-        assert!(sources.units(&extra_key, &extra).is_some());
+        assert!(
+            sources
+                .units(&extra_key, &extra, sources.reader())
+                .is_some()
+        );
         assert_eq!(sources.conversions(), converted + 1);
     }
 
@@ -439,21 +549,29 @@ mod tests {
     fn a_source_is_converted_only_while_it_may_fit() {
         let sources = Sources::bounded(MAX_SOURCES, 5 << 20);
         let read = script(50);
-        let still_read = sources.units(&key(&read), &read);
+        let still_read = sources.units(&key(&read), &read, sources.reader());
         assert!(still_read.is_some());
         let too_large = JsText::Latin1(vec![51; 4 << 20]);
-        assert!(sources.units(&key(&too_large), &too_large).is_none());
+        assert!(
+            sources
+                .units(&key(&too_large), &too_large, sources.reader())
+                .is_none()
+        );
         assert_eq!(sources.conversions(), 1);
         let mut astral = vec![b'a'; 2 << 20];
         astral.extend_from_slice("\u{1F600}".as_bytes());
         let astral = JsText::Utf8(astral);
         let astral_key = key(&astral);
         for _ in 0..3 {
-            assert!(sources.units(&astral_key, &astral).is_none());
+            assert!(
+                sources
+                    .units(&astral_key, &astral, sources.reader())
+                    .is_none()
+            );
         }
         assert_eq!(sources.conversions(), 2);
         drop(still_read);
-        assert!(two_byte(sources.units(&astral_key, &astral)).len() > 2 << 20);
+        assert!(two_byte(sources.units(&astral_key, &astral, sources.reader())).len() > 2 << 20);
         assert_eq!((sources.conversions(), sources.made()), (3, 2));
     }
 
@@ -465,7 +583,11 @@ mod tests {
         let invalid = JsText::Utf8(invalid);
         let invalid_key = key(&invalid);
         for _ in 0..3 {
-            assert!(sources.units(&invalid_key, &invalid).is_none());
+            assert!(
+                sources
+                    .units(&invalid_key, &invalid, sources.reader())
+                    .is_none()
+            );
         }
         assert_eq!((sources.conversions(), sources.made()), (1, 0));
     }
@@ -475,30 +597,54 @@ mod tests {
         let parent: &'static Sources = Box::leak(Box::default());
         let text = script(2);
         let key = key(&text);
-        let shared = parent.units(&key, &text);
+        let shared = parent.units(&key, &text, parent.reader());
         let child = parent.inherited();
-        let in_child = child.units(&key, &text);
+        let in_child = child.units(&key, &text, child.reader());
         assert!(same(shared.as_ref(), in_child.as_ref()));
         assert_eq!(child.reading(), 2);
         let copy = Arc::downgrade(&one_byte(shared));
         drop(in_child);
+        // Sources the child still reads fill its list, so the unread
+        // inherited copy makes room.
         let count = u8::try_from(MAX_SOURCES).unwrap_or(u8::MAX);
-        for seed in 30..30 + count {
-            let other = script(seed);
-            drop(child.units(&self::key(&other), &other));
-        }
+        let others: Vec<Option<Units>> = (30..30 + count)
+            .map(|seed| {
+                let other = script(seed);
+                child.units(&self::key(&other), &other, child.reader())
+            })
+            .collect();
         assert_eq!(copy.strong_count(), 1);
-        let again = one_byte(child.units(&key, &text));
+        drop(others);
+        let again = one_byte(child.units(&key, &text, child.reader()));
         assert!(
             !copy
                 .upgrade()
                 .is_some_and(|copy| Arc::ptr_eq(&copy, &again))
         );
-        let from_parent = one_byte(parent.units(&key, &text));
+        let from_parent = one_byte(parent.units(&key, &text, parent.reader()));
         assert!(
             copy.upgrade()
                 .is_some_and(|copy| Arc::ptr_eq(&copy, &from_parent))
         );
+    }
+
+    // Dropping an inherited copy frees nothing in a child, and its next
+    // context loading the script would copy it again, so the child keeps
+    // one only its parent's context read.
+    #[test]
+    fn a_child_keeps_an_inherited_copy_one_context_read() {
+        let parent: &'static Sources = Box::leak(Box::default());
+        let (text, other) = (script(76), script(77));
+        let (key, other_key) = (key(&text), key(&other));
+        let copy = Arc::downgrade(&one_byte(parent.units(&key, &text, parent.reader())));
+        let child = parent.inherited();
+        drop(child.units(&other_key, &other, child.reader()));
+        let in_child = one_byte(child.units(&key, &text, child.reader()));
+        assert!(
+            copy.upgrade()
+                .is_some_and(|copy| Arc::ptr_eq(&copy, &in_child))
+        );
+        assert_eq!(child.made(), 1);
     }
 
     // A child's inherited copies stay read while its parent's strings hold
@@ -510,14 +656,14 @@ mod tests {
         let read: Vec<Option<Units>> = (60..60 + count)
             .map(|seed| {
                 let text = script(seed);
-                parent.units(&key(&text), &text)
+                parent.units(&key(&text), &text, parent.reader())
             })
             .collect();
         let child = parent.inherited();
         let extra = script(110);
         let extra_key = key(&extra);
         for _ in 0..3 {
-            assert!(child.units(&extra_key, &extra).is_none());
+            assert!(child.units(&extra_key, &extra, child.reader()).is_none());
         }
         assert_eq!(child.conversions(), 0);
         drop(read);
@@ -528,11 +674,14 @@ mod tests {
         let parent = Sources::default();
         let text = script(3);
         let key = key(&text);
-        let shared = one_byte(parent.units(&key, &text));
+        let shared = one_byte(parent.units(&key, &text, parent.reader()));
         let held = parent.list.lock();
         let child = parent.inherited();
         drop(held);
-        assert!(!Arc::ptr_eq(&shared, &one_byte(child.units(&key, &text))));
+        assert!(!Arc::ptr_eq(
+            &shared,
+            &one_byte(child.units(&key, &text, child.reader()))
+        ));
         assert_eq!(child.made(), 1);
     }
 }

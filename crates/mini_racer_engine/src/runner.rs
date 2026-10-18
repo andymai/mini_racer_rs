@@ -62,6 +62,9 @@ struct Runtime {
     freed: AtomicBool,
     // The startup snapshot this isolate began from, for the code cache's key.
     snapshot: Option<u64>,
+    // Tells this context's reads of a shared source from other contexts', as
+    // a copy only one context read is dropped once no string reads it.
+    reader: u64,
     // Large scripts to cache once their dispatch is over, so making a cache
     // never counts against a timeout.
     uncached: Mutex<Vec<Uncached>>,
@@ -142,6 +145,7 @@ impl Runtime {
             running: AtomicU32::new(0),
             freed: AtomicBool::new(false),
             snapshot,
+            reader: generation.sources().reader(),
             uncached: Mutex::default(),
             hoisting: Mutex::default(),
             frames: Mutex::default(),
@@ -816,7 +820,7 @@ fn shared_source<'s>(
         return None;
     }
     let sources = runtime.generation.sources();
-    let string = sys::external_string(scope, &sources.units(key?, source)?)?;
+    let string = sys::external_string(scope, &sources.units(key?, source, runtime.reader)?)?;
     sources.read();
     Some(string)
 }
