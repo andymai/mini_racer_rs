@@ -50,19 +50,26 @@ module FastCallsFixtures
   JS
 
   # What reflection shows of the bottom frame: its script's hash and raw
-  # offset, and for a render, the wrapper's source through `caller`.
+  # offset. A render also returns the wrapper's source through `caller`, and
+  # its arguments, and keeps the wrapper through `caller` and
+  # `CallSite#getFunction` for `rerun` to call again.
   REFLECTING = <<~JS
-    function bottom(read) {
+    function stack(read) {
       var saved = Error.prepareStackTrace;
-      Error.prepareStackTrace = function (e, frames) { return read(frames[frames.length - 1]) };
+      Error.prepareStackTrace = function (e, frames) { return read(frames) };
       try { return new Error().stack } finally { Error.prepareStackTrace = saved }
     }
-    function hash() { return bottom(function (frame) { return frame.getScriptHash() }) }
-    function position() { return bottom(function (frame) { return frame.getPosition() }) }
+    function hash() { return stack(function (frames) { return frames[frames.length - 1].getScriptHash() }) }
+    function position() { return stack(function (frames) { return frames[frames.length - 1].getPosition() }) }
     function add(a, b) { return a + b }
     var ReactRailsUJS = {
-      serverRender: function () { return [hash(), position(), String(ReactRailsUJS.serverRender.caller)] },
+      serverRender: function (fn, name, props) {
+        globalThis.byCaller = ReactRailsUJS.serverRender.caller;
+        globalThis.byFunction = stack(function (frames) { return frames[2].getFunction() });
+        return [hash(), position(), String(byCaller), [fn, name, props]];
+      },
     };
+    function rerun(kept) { return globalThis[kept].call(globalThis)[3] }
   JS
 
   THROWN = ["Error: boom {\"k\":1}", ["inner (<eval>:2:27)", "outer (<eval>:3:28)", "<eval>:1:8"]].freeze
@@ -196,16 +203,6 @@ class FastCallsContextTest < Minitest::Test
 
     assert_equal [Digest::SHA256.hexdigest(call)] * 2, hashes
     assert_equal [185, 185], offsets
-  ensure
-    context&.dispose
-  end
-
-  def test_a_template_over_1_mib_runs_as_mini_racer_runs_it
-    context = MiniRacer::Context.new
-    context.eval(REFLECTING)
-    source = "(#{render("Hello", '{"n":1}', before: "var pad = 0;\n" * 90_000, after: "")})"
-
-    assert_equal Digest::SHA256.hexdigest(source), context.eval(source).first
   ensure
     context&.dispose
   end
@@ -454,12 +451,12 @@ class FastCallsReaderTest < Minitest::Test
       rescue MiniRacer::Error => e
         e.message
       end
-      reader = run.call(#{first.dump}).last[/__mini_racer_rs_\\h+/]
+      reader = run.call(#{first.dump})[2][/__mini_racer_rs_\\h+/]
       assigned = run.call("(0, eval)('" + reader + " = null')")
       run.call("delete " + reader + "; globalThis['" + reader + "'] = null")
       sums = [run.call("(add.apply(this, [1,2]))"), run.call("(add.apply(this, [3,4]))")]
       rendered = run.call(#{second.dump})
-      puts JSON.generate([assigned, sums, rendered.is_a?(Array) && rendered.last.include?(reader)])
+      puts JSON.generate([assigned, sums, rendered.is_a?(Array) && rendered[2].include?(reader)])
     RUBY
 
     assert_predicate status, :success?, err
@@ -467,29 +464,87 @@ class FastCallsReaderTest < Minitest::Test
   end
 end
 
-class FastCallsDeviationTest < Minitest::Test
+class FastCallsCapTest < Minitest::Test
   include RubyProcess
   include FastCallsFixtures
 
-  # Deviation behavior:fast-calls@ruby: mini_racer 0.22.1 compiles every eval,
-  # so CallSite#getScriptHash of its bottom frame hashes the source, and a
-  # render's wrapper, reached through `caller`, holds the literals it passes.
-  # A first fast call runs a template instead, which only reflection shows.
-  def test_reflection_shows_a_first_fast_call_runs_a_template
-    render = "(#{render("Hello", '{"n":1}', before: "", after: "")})"
+  # A template is kept per context, so one over 1 MiB takes the normal path.
+  # Its length is the source's, less the literals' 30 bytes, plus the three
+  # reads of the reader the first render shows.
+  def test_a_template_of_1_mib_is_a_fast_call_and_one_byte_more_is_not
+    wrapped = "(#{render("Hello", '{"n":1}', before: "BEFORE", after: "")})"
     out, err, status = run_ruby(<<~RUBY, env: { "MINI_RACER_RS_FAST_CALLS" => nil })
       require "digest"
       require "json"
       require "mini_racer"
       context = MiniRacer::Context.new
       context.eval(#{REFLECTING.dump})
-      call = "(hash.apply(this, [1]))"
-      hash, _, wrapper = context.eval(#{render.dump})
-      puts JSON.generate([context.eval(call) == Digest::SHA256.hexdigest(call),
-                          hash == Digest::SHA256.hexdigest(#{render.dump}), wrapper.include?("'renderToString'")])
+      wrapped = ->(before) { #{wrapped.dump}.sub("BEFORE", before) }
+      reader = context.eval(wrapped.call(""))[2][/__mini_racer_rs_\\h+/]
+      template = ->(source) { source.bytesize - 30 + (3 * (reader.size + 3)) }
+      padded = ->(size) { wrapped.call("var pad = 0;" + (" " * (size - template.call(wrapped.call("var pad = 0;"))))) }
+      sources = [padded.call(1 << 20), padded.call((1 << 20) + 1)]
+      puts JSON.generate(sources.map { |source| [template.call(source), context.eval(source)[0] == Digest::SHA256.hexdigest(source)] })
     RUBY
 
     assert_predicate status, :success?, err
-    assert_equal [false, false, false], JSON.parse(out)
+    assert_equal [[1 << 20, false], [(1 << 20) + 1, true]], JSON.parse(out)
+  end
+end
+
+class FastCallsDeviationTest < Minitest::Test
+  include RubyProcess
+  include FastCallsFixtures
+
+  # An ExecJS call before and after two renders with different props, the
+  # first compiling the template and the second hitting it, then the wrapper
+  # the renders kept called again outside a fast call and during one.
+  REFLECTED = <<~RUBY.freeze
+    require "digest"
+    require "json"
+    require "mini_racer"
+    context = MiniRacer::Context.new
+    context.eval(#{REFLECTING.dump})
+    hashes_source = lambda do |source|
+      hash, offset, wrapper, args = context.eval(source)
+      next hash == Digest::SHA256.hexdigest(source) unless offset
+
+      [hash == Digest::SHA256.hexdigest(source), offset, wrapper.include?("'renderToString'"), args]
+    end
+    renders = [1, 2].map { |n| #{FastCallsFixtures.render("Hello", '{"n":N}', before: "", after: "").dump}.sub("N", n.to_s) }
+    reflected = [hashes_source.call("(hash.apply(this, [1]))"), *renders.map { |source| hashes_source.call("(" + source + ")") },
+                 hashes_source.call("(hash.apply(this, [2]))")]
+    kept = %w[byCaller byFunction]
+    again = kept.map { |name| context.eval("rerun('" + name + "')") }
+    during = kept.map { |name| context.eval("(rerun.apply(this, [\\"" + name + "\\"]))") }
+    puts JSON.generate([reflected, again, during])
+  RUBY
+
+  def reflected(switch)
+    out, err, status = run_ruby(REFLECTED, env: { "MINI_RACER_RS_FAST_CALLS" => switch })
+
+    assert_predicate status, :success?, err
+    JSON.parse(out)
+  end
+
+  # Deviation behavior:fast-calls@ruby: mini_racer 0.22.1 compiles every eval,
+  # so its bottom frame's CallSite#getScriptHash hashes the source and its
+  # CallSite#getPosition is the source's (185 for this render), and a render's
+  # wrapper, reached through `caller` or CallSite#getFunction, holds the
+  # literals it passes and passes them again when called again. A fast call
+  # runs a template instead, first or on a hit, which only reflection shows:
+  # called again, the wrapper passes nothing outside a fast call and that
+  # call's values during one.
+  def test_reflection_shows_a_fast_call_runs_a_template
+    args = ->(n) { ["renderToString", "Hello", { "n" => n }] }
+    fast = [
+      [false, [false, 260, false, args[1]], [false, 260, false, args[2]], false],
+      [[nil, nil, nil]] * 2,
+      [[["byCaller"], nil, nil], [["byFunction"], nil, nil]],
+    ]
+    normal = [[true, [true, 185, true, args[1]], [true, 185, true, args[2]], true], [args[2]] * 2, [args[2]] * 2]
+
+    assert_equal fast, reflected(nil)
+    assert_equal normal, reflected("off")
   end
 end
