@@ -4,7 +4,7 @@
 
 | Engine | Done | Planned | Deviation |
 |---|---|---|---|
-| CRuby | 54 | 0 | 23 |
+| CRuby | 54 | 0 | 24 |
 | TruffleRuby | 58 | 0 | 0 |
 
 ## Surface
@@ -113,6 +113,12 @@ Approved 2026-10-16.
 `MiniRacer::Context#dispose` in mini_racer_rs returns only after the runner has finished any eval or call in flight and dropped the isolate, on both platforms, so the isolate and its memory cannot outlive disposal. On mini_racer 0.22.1’s default platform, `dispose` returns once the context’s V8 thread has taken the eval or call in flight, and that thread finishes the work and frees the isolate afterward (`context_dispose_do` in `mini_racer_extension.c`). With `:single_threaded`, mini_racer joins the runner and waits. When `dispose` was called 10 ms into serialization of a 64 MiB snapshot string, default mini_racer returned at 10 ms and mini_racer_rs at about 60 ms, after serialization finished. With `:single_threaded`, they returned at 85 ms and 62 ms, respectively. For busy loops, both returned within milliseconds. The in-flight operation always raises `MiniRacer::ContextDisposedError` in mini_racer_rs. mini_racer 0.22.1 usually raises that class, but raised `MiniRacer::ScriptTerminatedError` in 2 of 12 busy-loop runs; its test accepts either class.
 
 Approved 2026-10-16.
+
+### `behavior:fast-calls@ruby`
+
+TODO
+
+Approved 2026-10-18.
 
 ### `behavior:fiber-scheduler@ruby`
 
