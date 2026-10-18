@@ -7,6 +7,7 @@ cd "$(dirname "$0")/.."
 exec python3 - "$PWD" <<'PY'
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -26,6 +27,10 @@ for raw in filter(None, listing):
         dst = pristine / os.fsdecode(raw)
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
+
+
+# A release PR moves the version, so the planted mismatch starts from it.
+version = re.search(r'VERSION = "([^"]+)"', (root / "lib/mini_racer_rs/version.rb").read_text()).group(1)
 
 
 def replace(path, old, new):
@@ -136,7 +141,7 @@ CASES = [
         write(".github/workflows/planted.yml", "on: push\njobs:\n  x:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n"),
     ]),
     ("gem and Cargo versions disagree", "check-versions.sh", "version", [
-        replace("lib/mini_racer_rs/version.rb", 'VERSION = "0.0.0"', 'VERSION = "9.9.9"'),
+        replace("lib/mini_racer_rs/version.rb", f'VERSION = "{version}"', 'VERSION = "9.9.9"'),
     ]),
     ("platform lists disagree", "check-platforms.sh", "platform", [
         replace("deny.toml", '  "x86_64-apple-darwin",\n', ""),
