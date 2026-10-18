@@ -226,7 +226,6 @@ impl Encoder<'_, '_> {
         Ok(())
     }
 
-    // Writes `value` if it is an immediate of `kind` and reports whether it did.
     fn immediate(&mut self, value: Value, kind: RubyType) -> bool {
         let ruby = self.ruby;
         match kind {

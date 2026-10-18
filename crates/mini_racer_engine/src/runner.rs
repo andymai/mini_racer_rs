@@ -1267,7 +1267,6 @@ fn read_request<'s>(
     Some((request, path))
 }
 
-// A call's arguments: built by the runner, or in the array V8 read.
 enum Arguments<'s> {
     Built(Vec<v8::Local<'s, v8::Value>>),
     Read(v8::Local<'s, v8::Object>),
