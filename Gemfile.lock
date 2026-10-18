@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    mini_racer_rs (1.0.2)
+    mini_racer_rs (1.0.3)
       rb_sys (= 0.9.130)
 
 GEM

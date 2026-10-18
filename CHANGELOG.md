@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.3](https://github.com/andymai/mini_racer_rs/compare/v1.0.2...v1.0.3) (2026-10-18)
+
+
+### Performance
+
+* **decode:** intern hash keys, build each Hash at once, and transcode strings in one pass ([#87](https://github.com/andymai/mini_racer_rs/issues/87)) ([220bfe7](https://github.com/andymai/mini_racer_rs/commit/220bfe7e6a9c8fa5a38befefcb4995756c377944))
+
 ## [1.0.2](https://github.com/andymai/mini_racer_rs/compare/v1.0.1...v1.0.2) (2026-10-18)
 
 
