@@ -153,6 +153,13 @@ impl EncodeError {
     }
 }
 
+// How mini_racer sends a String, by its encoding's name.
+enum Sent {
+    Utf8,
+    Latin1,
+    Utf16,
+}
+
 fn length(len: usize) -> u32 {
     u32::try_from(len).unwrap_or(u32::MAX)
 }
@@ -465,21 +472,37 @@ impl Encoder<'_, '_> {
 
     // mini_racer tells encodings apart by name. The ones it sends as UTF-8
     // that strings most often have are told by index, without the lookup.
+    // Bytes it sends as UTF-8 that are all ASCII are the same characters as
+    // one-byte text, which V8 copies where it would decode UTF-8.
     fn string(&mut self, text: RString) {
         let ruby = self.ruby;
         let index = text.enc_get();
         let utf8 = index == ruby.utf8_encindex()
             || index == ruby.usascii_encindex()
             || index == ruby.ascii8bit_encindex();
-        rb_raw::with_string_bytes(ruby, text, |bytes| {
-            if utf8 {
-                return self.writer.utf8(bytes);
-            }
+        let sent = if utf8 {
+            Sent::Utf8
+        } else {
             match RbEncoding::from(index).name() {
-                "ISO-8859-1" => self.writer.latin1(bytes),
-                "UTF-16LE" => self.writer.utf16le(bytes),
-                _ => self.writer.utf8(bytes),
+                "ISO-8859-1" => Sent::Latin1,
+                "UTF-16LE" => Sent::Utf16,
+                _ => Sent::Utf8,
             }
-        });
+        };
+        let writer = &mut self.writer;
+        match sent {
+            Sent::Latin1 => rb_raw::with_string_bytes(ruby, text, |bytes| writer.latin1(bytes)),
+            Sent::Utf16 => rb_raw::with_string_bytes(ruby, text, |bytes| writer.utf16le(bytes)),
+            Sent::Utf8 => {
+                let ascii = rb_raw::cached_ascii(ruby, text);
+                rb_raw::with_string_bytes(ruby, text, |bytes| {
+                    if ascii.unwrap_or_else(|| bytes.is_ascii()) {
+                        writer.latin1(bytes);
+                    } else {
+                        writer.utf8(bytes);
+                    }
+                });
+            }
+        }
     }
 }

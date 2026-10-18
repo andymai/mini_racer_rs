@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "objspace"
 require "test_helper"
 require "mini_racer"
 
@@ -37,6 +38,32 @@ class CallTest < Minitest::Test
     @context.eval("globalThis['\\ud800'] = () => 'surrogate'; globalThis['\\ufffd'] = () => 'replacement'")
 
     assert_equal "replacement", @context.call([0xD800].pack("v").force_encoding("UTF-16LE"))
+  end
+
+  # mini_racer sends these encodings' bytes as UTF-8, whatever Ruby knows of
+  # them. A String Ruby has scanned goes by the coderange it keeps, and one it
+  # has not is read; both arrive as the characters V8's UTF-8 decoding makes,
+  # alone and in a hash V8 reads.
+  def test_strings_sent_as_utf8_arrive_alike_whether_or_not_ruby_has_scanned_them
+    @context.eval(<<~JS)
+      globalThis.points = (...a) => a.map((s) => Array.from(s, (c) => c.codePointAt(0)))
+      globalThis.valuePoints = (h) => points(...Object.values(h))
+    JS
+    texts = ["", "hello", "a\0b", "café", "東京", "\u{1F600}", "a\xFFb", "the quick brown fox é"]
+    expected = texts.map { |text| text.scrub("�").codepoints }
+    states = %i[scanned unscanned]
+    %w[UTF-8 US-ASCII ASCII-8BIT Windows-1252].each do |encoding|
+      states.each do |state|
+        strings = texts.map { |text| send(state, text.b.force_encoding(encoding)) }
+        keyed = strings.each_with_index.to_h { |text, i| ["k#{i}", text] }
+        if state == :unscanned
+          assert(strings.drop(1).all? { |text| ObjectSpace.dump(text).include?('"coderange":"unknown"') })
+        end
+
+        assert_equal expected, @context.call("points", *strings), "#{encoding} #{state}"
+        assert_equal expected, @context.call("valuePoints", keyed), "#{encoding} #{state} in a hash"
+      end
+    end
   end
 
   def test_unsupported_values_raise_mini_racers_cut_message
@@ -98,5 +125,19 @@ class CallTest < Minitest::Test
 
     assert_predicate status, :success?, err
     assert_equal "[\"hello\"]\n", out
+  end
+
+  private
+
+  def scanned(text)
+    text.tap(&:valid_encoding?)
+  end
+
+  # Setting a byte past ASCII and back leaves Ruby's coderange unknown.
+  def unscanned(text)
+    byte = text.getbyte(0) or return text
+    text.setbyte(0, byte ^ 0x80)
+    text.setbyte(0, byte)
+    text
   end
 end
