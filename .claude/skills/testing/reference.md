@@ -48,6 +48,7 @@ Each script runs alone with `bundle exec ruby -Ilib test/stress/<script>.rb`, ta
 | `test/stress/fork_child_memory.rb [evals] [margin_mib]` | a child of a multi-threaded parent grows more than the margin (8 MiB) past its parent over the same allocating loop in a new context | every CI Ruby leg on Linux: 20,000 evals each |
 | `test/stress/spawn_churn.rb single\|multi [spawns]` | a spawn hangs or takes over a second | every CI Ruby leg, both modes |
 | `test/stress/large_load.rb single\|multi [contexts] [max_mib]` | a context loaded with a generated 3 MiB script costs over 16 MiB of RSS | every CI Ruby leg on Linux, both modes |
+| `test/stress/shared_load.rb single\|multi [contexts] [max_mib]` | a context loading the same generated 3 MiB two-byte script as the others costs over 14 MiB of RSS | every CI Ruby leg on Linux, both modes |
 | `test/stress/large_arguments.rb [calls] [max_ratio]` (also `-Ivendor/execjs/lib`) | the last tenth of ExecJS calls with equal-length 24 KB arguments take over 3 times as long as the first tenth | every CI Ruby leg |
 | `test/stress/madvise_fixture.rb clean\|crash` | the child's outcome is not the expected one | `scripts/madvise-fixture.sh`, CI's ubuntu-24.04 Ruby 3.4 leg |
 
