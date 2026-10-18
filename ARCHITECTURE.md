@@ -67,6 +67,15 @@ Contexts in one process share a V8 code cache for evaluated sources of 1 MiB or 
 
 Later evals compile from cached code. Simultaneous loaders build one entry while others compile from source. V8 rejects entries from other flags, versions, or startup snapshots, so the runner drops them and compiles from source. The cache holds at most eight entries and 256 MiB, evicts least recently used entries first, and neither keeps nor rebuilds an entry larger than 256 MiB. An entry stays found however many other large scripts are seen after it, and forked children inherit entries. On one machine, a 44 MB production rendering bundle loaded in about 200 ms from cache, versus about 1,000 ms from source and with mini_racer 0.22.1. The implementation is in `crates/mini_racer_engine/src/process/code_cache.rs` and `crates/mini_racer_engine/src/runner.rs`.
 
+
+## Fast calls
+
+When `Context#eval` receives a source without a file name in one of two supported shapes, mini_racer_rs runs a template compiled once by that context instead of compiling the source. The shapes are ExecJS 2.10.2's `call`, `(<path>.apply(this, <JSON array>))`, and the `compose_js` wrapper used by react-rails 3.2.1 and 3.3.1 around one `this.ReactRailsUJS.serverRender('<function>', '<component>', <props>)` call. `crates/mini_racer_engine/src/fast_calls.rs` recognizes these shapes, and `crates/mini_racer_engine/src/runner.rs` runs them.
+
+The template is a top-level script like the original source. It replaces each JSON literal with a call to a native function held in a randomly named global `const`, and V8's JSON parser reads the values. Results, error classes and messages, `this`, and stack frame line and column numbers remain those of the source. Recognition falls back to the normal path for another shape, non-JSON values, `__proto__` in any spelling, nesting past 128, a line break in render props, a template over 1 MiB, `verbose_exceptions:`, or a repeated source equal to the context's last fast call. It also rejects render code around the call that cannot compile independently or uses a backtick, `eval`, `caller`, a `\u` escape, or `arguments` except as a property after `.` on the same line.
+
+`MINI_RACER_RS_FAST_CALLS=off`, set before the first context is created, disables fast calls process-wide; forked children retain the setting. Reflection-only differences are recorded under `behavior:fast-calls@ruby`.
+
 ## Forks
 
 With the `:single_threaded` platform flag, a runner serves its isolate as a `v8::SharedIsolate`. Between requests, the isolate remains unlocked in its control block.

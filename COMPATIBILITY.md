@@ -116,7 +116,7 @@ Approved 2026-10-16.
 
 ### `behavior:fast-calls@ruby`
 
-TODO
+Unlike mini_racer 0.22.1, which compiles every source, mini_racer_rs recognizes ExecJS 2.10.2 `call` sources and react-rails 3.2.1 and 3.3.1 server render sources evaluated without a file name, then runs a template compiled once by the context. The template remains a top-level script and replaces each JSON literal with a native function call stored in a randomly named global `const`; V8's JSON parser reads the values. Results, error classes and messages, `this`, and stack frame line and column numbers remain those of the source. The approved `behavior:fast-calls@ruby` deviation is limited to V8 stack reflection: `CallSite#getScriptHash` reports the template hash, and render `CallSite#getPosition` can report a different raw offset after hoisted literals, such as 260 instead of 185. A reflected render wrapper shows template reads instead of literals, and invoking it again receives no values outside a fast call or the current call's values during one, while mini_racer supplies the literals each time. Heap snapshots expose the hidden `const`. Set `MINI_RACER_RS_FAST_CALLS` to `off` before the first context is created to send every eval down the normal path.
 
 Approved 2026-10-18.
 

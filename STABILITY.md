@@ -22,7 +22,7 @@ The gem defines `MiniRacer` and provides `lib/mini_racer.rb`. Under Bundler, `re
 
 ## Not covered
 
-`MINI_RACER_RS_SPIN_US` is an unstable tuning interface. Its format is `<microseconds with the GVL>,<microseconds without>`. `MINI_RACER_RS_CODE_CACHE` is an unstable tuning interface. Set it to `off` before the first context is created to disable caching; forked children retain the parent's setting.
+`MINI_RACER_RS_SPIN_US` is an unstable tuning interface. Its format is `<microseconds with the GVL>,<microseconds without>`. `MINI_RACER_RS_CODE_CACHE` is an unstable tuning interface. Set it to `off` before the first context is created to disable caching; forked children retain the parent's setting. `MINI_RACER_RS_FAST_CALLS` is an unstable tuning interface. Set it to `off` before the first context is created to send every eval down the normal path; the setting is read once per process, and forked children retain it.
 
 The internal Rust crates are unstable. Files under `lib/mini_racer_rs/` are unstable except for what `require "mini_racer"` and `require "mini_racer_rs"` load.
 
