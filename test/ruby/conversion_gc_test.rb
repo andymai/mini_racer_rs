@@ -6,7 +6,7 @@ require "mini_racer"
 # Converts values full of back references while every allocation starts a
 # compacting collection, so a value the decoder or encoder keeps where Ruby's
 # GC cannot see it is freed or moved before it is used.
-class ConversionGcTest < Minitest::Test
+module ConversionGc
   # Moves every movable object while the encoder is part way through the
   # arguments.
   class Stamp
@@ -15,6 +15,32 @@ class ConversionGcTest < Minitest::Test
       Time.at(0)
     end
   end
+
+  def setup
+    skip "needs CRuby's GC.stress and compaction" unless RUBY_ENGINE == "ruby"
+    @context = MiniRacer::Context.new
+  end
+
+  def teardown
+    @context&.dispose
+  end
+
+  private
+
+  def stressed
+    compacting = GC.auto_compact
+    GC.auto_compact = true
+    GC.stress = true
+    yield
+  ensure
+    GC.stress = false
+    GC.auto_compact = compacting
+    GC.verify_compaction_references(expand_heap: true, toward: :empty)
+  end
+end
+
+class ConversionGcTest < Minitest::Test
+  include ConversionGc
 
   SOURCE = <<~JS
     (() => {
@@ -30,15 +56,6 @@ class ConversionGcTest < Minitest::Test
       }
     })()
   JS
-
-  def setup
-    skip "needs CRuby's GC.stress and compaction" unless RUBY_ENGINE == "ruby"
-    @context = MiniRacer::Context.new
-  end
-
-  def teardown
-    @context&.dispose
-  end
 
   def test_back_references_survive_collections_and_moves
     value = stressed { @context.eval(SOURCE) }
@@ -131,15 +148,29 @@ class ConversionGcTest < Minitest::Test
     shared = { "list" => [Stamp.new, [1, +"two"]], "more" => [Stamp.new, { "deep" => [+"x"] }] }
     [Stamp.new, shared, shared, { "other" => [Stamp.new, [3, +"four"]] }, +"caf\u00e9"]
   end
+end
 
-  def stressed
-    compacting = GC.auto_compact
-    GC.auto_compact = true
-    GC.stress = true
-    yield
-  ensure
-    GC.stress = false
-    GC.auto_compact = compacting
-    GC.verify_compaction_references(expand_heap: true, toward: :empty)
+# Immediates are written before anything is pinned, and the leading ones of an
+# array or hash as it is reached; the Stamps then move everything that waits
+# for its turn.
+class ConversionGcImmediatesTest < Minitest::Test
+  include ConversionGc
+
+  def test_immediates_written_before_pinned_values_survive_collections_and_moves
+    if RUBY_PLATFORM.include?("darwin")
+      skip "GC.verify_compaction_references overflows on macOS after repeated heap doublings"
+    end
+
+    @context.eval("globalThis.echo = (...a) => a")
+    hash = { "a" => 1, b: +"two", 3 => 4.5, "stamp" => Stamp.new, "after" => [+"x", :y, nil] }
+    array = [1, +"two", :three, 4.5, nil, true, Stamp.new, +"after", [5]]
+    result = stressed { @context.call("echo", 1, +"two", :three, hash, array, +"last") }
+
+    assert_equal [
+      1, "two", "three",
+      { "3" => 4.5, "a" => 1, "b" => "two", "stamp" => Time.at(0), "after" => ["x", "y", nil] },
+      [1, "two", "three", 4.5, nil, true, Time.at(0), "after", [5]],
+      "last",
+    ], result
   end
 end
