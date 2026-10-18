@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "test_helper"
+require "digest"
 require "json"
 require "mini_racer"
 
@@ -167,6 +168,29 @@ class FastCallsContextTest < Minitest::Test
 
     assert_equal ["outer", [101]], context.eval('(obj.fn.apply(this, ["outer"]))')
     assert_equal [5, 6], context.eval("(nested.apply(this, [5]))")
+  ensure
+    context&.dispose
+  end
+
+  # A source sent again runs as mini_racer runs it, from V8's compilation
+  # cache, down to what reflection shows of its frames: the script's hash and
+  # raw offsets past the values it carries.
+  def test_a_source_sent_again_runs_as_mini_racer_runs_it
+    context = MiniRacer::Context.new
+    context.eval(<<~JS)
+      function bottom(read) {
+        var saved = Error.prepareStackTrace;
+        Error.prepareStackTrace = function (e, frames) { return read(frames[frames.length - 1]) };
+        try { return new Error().stack } finally { Error.prepareStackTrace = saved }
+      }
+      function hash() { return bottom(function (frame) { return frame.getScriptHash() }) }
+      var ReactRailsUJS = { serverRender: function () { return bottom(function (frame) { return frame.getPosition() }) } };
+    JS
+    call = "(hash.apply(this, [1]))"
+    rendered = Array.new(3) { context.eval("(#{render("Hello", '{"n":1}', replay: false)})") }
+
+    assert_equal [Digest::SHA256.hexdigest(call)] * 2, Array.new(3) { context.eval(call) }.drop(1)
+    assert_equal [185, 185], rendered.drop(1)
   ensure
     context&.dispose
   end
