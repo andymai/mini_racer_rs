@@ -30,6 +30,12 @@ status = "same"
 [cases."curated-error-without-message"]
 status = "same"
 
+[cases."curated-execjs-call-shape"]
+status = "same"
+
+[cases."curated-execjs-call-through-execjs"]
+status = "same"
+
 [cases."curated-global-state-across-steps"]
 status = "same"
 
@@ -69,6 +75,9 @@ status = "same"
 [cases."curated-proxy"]
 status = "same"
 
+[cases."curated-react-rails-render-shape"]
+status = "same"
+
 [cases."curated-reference-after-date"]
 status = "accepted:reference-to-a-numbered-object"
 
@@ -77,6 +86,30 @@ status = "accepted:reference-to-a-wrapper-object"
 
 [cases."curated-reference-to-a-regexp"]
 status = "accepted:reference-to-a-numbered-object"
+
+[cases."curated-render-code-arguments-after-comment-dot"]
+status = "same"
+
+[cases."curated-render-code-arguments-after-number-dot"]
+status = "same"
+
+[cases."curated-render-code-callee"]
+status = "same"
+
+[cases."curated-render-code-callee-through-eval"]
+status = "same"
+
+[cases."curated-render-code-deferred"]
+status = "same"
+
+[cases."curated-render-code-loop"]
+status = "same"
+
+[cases."curated-render-code-tagged-template"]
+status = "same"
+
+[cases."curated-render-code-template-literal"]
+status = "same"
 
 [cases."curated-repeated-error"]
 status = "accepted:reference-to-a-numbered-object"

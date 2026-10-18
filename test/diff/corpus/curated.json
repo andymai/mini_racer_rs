@@ -437,5 +437,282 @@
         ]
       }
     ]
+  },
+  {
+    "id": "curated-execjs-call-shape",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "function add(a, b) { return a + b }\nfunction outer(x) { throw new Error(\"boom \" + JSON.stringify(x)) }\nfunction keys(o) { return [Object.keys(o), Object.getPrototypeOf(o) === Object.prototype] }\nfunction receiver() { return this === globalThis }\nvar notfn = 1;\nvar ReactRailsUJS = {\n  serverRender: function (fn, name, props) {\n    if (name === \"Throws\") throw new TypeError(\"bad \" + props.n);\n    if (name === \"Logs\") console.log(\"hi\", props.n);\n    return \"<\" + fn + \":\" + name + \">\" + JSON.stringify(props);\n  },\n};\nvar console = { history: [], log: function () { console.history.push({ level: \"log\", arguments: Array.prototype.slice.call(arguments) }) } };",
+        "setup": true
+      },
+      {
+        "op": "eval",
+        "source": "(add.apply(this, [1,2]))"
+      },
+      {
+        "op": "eval",
+        "source": "(add.apply(this, [\"a \",{\"b\":[1.5,null,true,-0.0,1e400]}]))"
+      },
+      {
+        "op": "eval",
+        "source": "(receiver.apply(this, []))"
+      },
+      {
+        "op": "eval",
+        "source": "(nope.apply(this, [1]))"
+      },
+      {
+        "op": "eval",
+        "source": "(notfn.apply(this, []))"
+      },
+      {
+        "op": "eval",
+        "source": "(outer.apply(this, [{\"k\":1}]))"
+      },
+      {
+        "op": "eval",
+        "source": "(keys.apply(this, [{\"__proto__\":{\"x\":1},\"a\":1}]))"
+      },
+      {
+        "op": "eval",
+        "source": "(keys.apply(this, [{\"\\u005f_proto__\":{\"x\":1},\"a\":1}]))"
+      },
+      {
+        "op": "eval",
+        "source": "(keys.apply(this, [{\"a\":1,\"b\":2,\"a\":3}]))"
+      }
+    ]
+  },
+  {
+    "id": "curated-execjs-call-through-execjs",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "execjs",
+        "source": "function add(a, b) { return a + b }\nfunction outer(x) { throw new Error(\"boom \" + JSON.stringify(x)) }\nfunction keys(o) { return [Object.keys(o), Object.getPrototypeOf(o) === Object.prototype] }\nfunction receiver() { return this === globalThis }\nvar notfn = 1;\nvar ReactRailsUJS = {\n  serverRender: function (fn, name, props) {\n    if (name === \"Throws\") throw new TypeError(\"bad \" + props.n);\n    if (name === \"Logs\") console.log(\"hi\", props.n);\n    return \"<\" + fn + \":\" + name + \">\" + JSON.stringify(props);\n  },\n};\nvar console = { history: [], log: function () { console.history.push({ level: \"log\", arguments: Array.prototype.slice.call(arguments) }) } };",
+        "function": "add",
+        "args": [
+          [
+            "string",
+            "UTF-8",
+            "text",
+            "é "
+          ],
+          [
+            "int",
+            "7"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "curated-react-rails-render-shape",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "function add(a, b) { return a + b }\nfunction outer(x) { throw new Error(\"boom \" + JSON.stringify(x)) }\nfunction keys(o) { return [Object.keys(o), Object.getPrototypeOf(o) === Object.prototype] }\nfunction receiver() { return this === globalThis }\nvar notfn = 1;\nvar ReactRailsUJS = {\n  serverRender: function (fn, name, props) {\n    if (name === \"Throws\") throw new TypeError(\"bad \" + props.n);\n    if (name === \"Logs\") console.log(\"hi\", props.n);\n    return \"<\" + fn + \":\" + name + \">\" + JSON.stringify(props);\n  },\n};\nvar console = { history: [], log: function () { console.history.push({ level: \"log\", arguments: Array.prototype.slice.call(arguments) }) } };",
+        "setup": true
+      },
+      {
+        "op": "eval",
+        "source": "(          (function () {\n            var logged = [];\nconsole.history = logged;\n\n            var result = this.ReactRailsUJS.serverRender('renderToString', 'Hello', {\"name\":\"Wé\"});\n            if (logged.length > 0) {\n  result += \"\\n<!--\" + logged.map(function (entry) {\n    return \" \" + entry.level + \" \" + JSON.stringify(entry.arguments);\n  }).join(\"\") + \" -->\";\n}\n\n            return result;\n          })()\n)"
+      },
+      {
+        "op": "eval",
+        "source": "(          (function () {\n            var logged = [];\nconsole.history = logged;\n\n            var result = this.ReactRailsUJS.serverRender('renderToString', 'Logs', {\"n\":3});\n            if (logged.length > 0) {\n  result += \"\\n<!--\" + logged.map(function (entry) {\n    return \" \" + entry.level + \" \" + JSON.stringify(entry.arguments);\n  }).join(\"\") + \" -->\";\n}\n\n            return result;\n          })()\n)"
+      },
+      {
+        "op": "eval",
+        "source": "(          (function () {\n            var logged = [];\nconsole.history = logged;\n\n            var result = this.ReactRailsUJS.serverRender('renderToString', 'Throws', {\"n\":3});\n            if (logged.length > 0) {\n  result += \"\\n<!--\" + logged.map(function (entry) {\n    return \" \" + entry.level + \" \" + JSON.stringify(entry.arguments);\n  }).join(\"\") + \" -->\";\n}\n\n            return result;\n          })()\n)"
+      },
+      {
+        "op": "eval",
+        "source": "(          (function () {\n            var logged = [];\nconsole.history = logged;\n\n            var result = this.ReactRailsUJS.serverRender('renderToString', 'Hello', {name: 'js' + 1});\n            if (logged.length > 0) {\n  result += \"\\n<!--\" + logged.map(function (entry) {\n    return \" \" + entry.level + \" \" + JSON.stringify(entry.arguments);\n  }).join(\"\") + \" -->\";\n}\n\n            return result;\n          })()\n)"
+      },
+      {
+        "op": "eval",
+        "source": "(          (function () {\n            var logged = [];\nconsole.history = logged;\n\n            var result = this.ReactRailsUJS.serverRender('renderToString', 'Hello', {\"__proto__\":{\"a\":1},\"b\":2});\n            if (logged.length > 0) {\n  result += \"\\n<!--\" + logged.map(function (entry) {\n    return \" \" + entry.level + \" \" + JSON.stringify(entry.arguments);\n  }).join(\"\") + \" -->\";\n}\n\n            return result;\n          })()\n)"
+      }
+    ]
+  },
+  {
+    "id": "curated-render-code-template-literal",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "setup": true,
+        "source": "var ReactRailsUJS = { serverRender: function (fn, name, props) { return [fn, name, props] } };"
+      },
+      {
+        "op": "eval",
+        "source": "(          (function () {\n            var s = `\n            var result = this.ReactRailsUJS.serverRender('renderToString', 'A', {\"n\":1});\n            `; var result = s;\n            return result;\n          })()\n)"
+      },
+      {
+        "op": "eval",
+        "source": "(          (function () {\n            var s = `\n            var result = this.ReactRailsUJS.serverRender('renderToString', 'A', {\"n\":2});\n            `; var result = s;\n            return result;\n          })()\n)"
+      }
+    ]
+  },
+  {
+    "id": "curated-render-code-loop",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "setup": true,
+        "source": "var ReactRailsUJS = { serverRender: function (fn, name, props) { return [fn, name, props] } };"
+      },
+      {
+        "op": "eval",
+        "source": "(          (function () {\n            var seen = []; for (var i = 0; i < 2; i++) {\n            var result = this.ReactRailsUJS.serverRender('renderToString', 'A', {\"n\":1});\n            seen.push(result); } result = seen[0][2] === seen[1][2];\n            return result;\n          })()\n)"
+      },
+      {
+        "op": "eval",
+        "source": "(          (function () {\n            var seen = []; for (var i = 0; i < 2; i++) {\n            var result = this.ReactRailsUJS.serverRender('renderToString', 'A', {\"n\":2});\n            seen.push(result); } result = seen[0][2] === seen[1][2];\n            return result;\n          })()\n)"
+      }
+    ]
+  },
+  {
+    "id": "curated-render-code-deferred",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "setup": true,
+        "source": "var ReactRailsUJS = { serverRender: function (fn, name, props) { return [fn, name, props] } };"
+      },
+      {
+        "op": "eval",
+        "source": "(          (function () {\n            var result; globalThis.later = function () {\n            var result = this.ReactRailsUJS.serverRender('renderToString', 'A', {\"n\":1});\n            return result; };\n            return result;\n          })()\n)"
+      },
+      {
+        "op": "eval",
+        "source": "later()"
+      },
+      {
+        "op": "eval",
+        "source": "(          (function () {\n            var result; globalThis.later = function () {\n            var result = this.ReactRailsUJS.serverRender('renderToString', 'A', {\"n\":2});\n            return result; };\n            return result;\n          })()\n)"
+      },
+      {
+        "op": "eval",
+        "source": "later()"
+      }
+    ]
+  },
+  {
+    "id": "curated-render-code-tagged-template",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "setup": true,
+        "source": "var ReactRailsUJS = { serverRender: function (fn, name, props) { return [fn, name, props] } };"
+      },
+      {
+        "op": "eval",
+        "source": "(          (function () {\n            function tag(strings) { return strings }\nvar strings = tag`x`;\n            var result = this.ReactRailsUJS.serverRender('renderToString', 'A', {\"n\":1});\n            if (!globalThis.kept) globalThis.kept = strings;\nresult = globalThis.kept === strings;\n            return result;\n          })()\n)"
+      },
+      {
+        "op": "eval",
+        "source": "(          (function () {\n            function tag(strings) { return strings }\nvar strings = tag`x`;\n            var result = this.ReactRailsUJS.serverRender('renderToString', 'A', {\"n\":2});\n            if (!globalThis.kept) globalThis.kept = strings;\nresult = globalThis.kept === strings;\n            return result;\n          })()\n)"
+      }
+    ]
+  },
+  {
+    "id": "curated-render-code-callee",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "setup": true,
+        "source": "var ReactRailsUJS = { serverRender: function (fn, name, props) { return [fn, name, props] } };"
+      },
+      {
+        "op": "eval",
+        "source": "(          (function () {\n            globalThis.again = arguments.callee;\n            var result = this.ReactRailsUJS.serverRender('renderToString', 'A', {\"n\":1});\n            \n            return result;\n          })()\n)"
+      },
+      {
+        "op": "eval",
+        "source": "again()"
+      },
+      {
+        "op": "eval",
+        "source": "(          (function () {\n            globalThis.again = arguments.callee;\n            var result = this.ReactRailsUJS.serverRender('renderToString', 'A', {\"n\":2});\n            \n            return result;\n          })()\n)"
+      },
+      {
+        "op": "eval",
+        "source": "again()"
+      }
+    ]
+  },
+  {
+    "id": "curated-render-code-callee-through-eval",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "setup": true,
+        "source": "var ReactRailsUJS = { serverRender: function (fn, name, props) { return [fn, name, props] } };"
+      },
+      {
+        "op": "eval",
+        "source": "(          (function () {\n            globalThis.again = eval('argu' + 'ments').callee;\n            var result = this.ReactRailsUJS.serverRender('renderToString', 'A', {\"n\":1});\n            \n            return result;\n          })()\n)"
+      },
+      {
+        "op": "eval",
+        "source": "again()"
+      },
+      {
+        "op": "eval",
+        "source": "(          (function () {\n            globalThis.again = eval('argu' + 'ments').callee;\n            var result = this.ReactRailsUJS.serverRender('renderToString', 'A', {\"n\":2});\n            \n            return result;\n          })()\n)"
+      },
+      {
+        "op": "eval",
+        "source": "again()"
+      }
+    ]
+  },
+  {
+    "id": "curated-render-code-arguments-after-comment-dot",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "setup": true,
+        "source": "var ReactRailsUJS = { serverRender: function (fn, name, props) { return ++props.n } };"
+      },
+      {
+        "op": "eval",
+        "source": "(          (function () {\n            if (!globalThis.again) {\n  globalThis.again = true;\n  // render once more.\n  arguments.callee.call(this);\n  globalThis.again = false;\n}\n            var result = this.ReactRailsUJS.serverRender('renderToString', 'A', {\"n\":1});\n            \n            return result;\n          })()\n)"
+      },
+      {
+        "op": "eval",
+        "source": "(          (function () {\n            if (!globalThis.again) {\n  globalThis.again = true;\n  // render once more.\n  arguments.callee.call(this);\n  globalThis.again = false;\n}\n            var result = this.ReactRailsUJS.serverRender('renderToString', 'A', {\"n\":2});\n            \n            return result;\n          })()\n)"
+      }
+    ]
+  },
+  {
+    "id": "curated-render-code-arguments-after-number-dot",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "setup": true,
+        "source": "var ReactRailsUJS = { serverRender: function (fn, name, props) { return ++props.n } };"
+      },
+      {
+        "op": "eval",
+        "source": "(          (function () {\n            if (!globalThis.again) {\n  globalThis.again = true;\n  var x = 1.\n  arguments.callee.call(this);\n  globalThis.again = false;\n}\n            var result = this.ReactRailsUJS.serverRender('renderToString', 'A', {\"n\":1});\n            \n            return result;\n          })()\n)"
+      },
+      {
+        "op": "eval",
+        "source": "(          (function () {\n            if (!globalThis.again) {\n  globalThis.again = true;\n  var x = 1.\n  arguments.callee.call(this);\n  globalThis.again = false;\n}\n            var result = this.ReactRailsUJS.serverRender('renderToString', 'A', {\"n\":2});\n            \n            return result;\n          })()\n)"
+      }
+    ]
   }
 ]

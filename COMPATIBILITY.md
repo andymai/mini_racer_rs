@@ -4,7 +4,7 @@
 
 | Engine | Done | Planned | Deviation |
 |---|---|---|---|
-| CRuby | 54 | 0 | 23 |
+| CRuby | 54 | 0 | 24 |
 | TruffleRuby | 58 | 0 | 0 |
 
 ## Surface
@@ -113,6 +113,12 @@ Approved 2026-10-16.
 `MiniRacer::Context#dispose` in mini_racer_rs returns only after the runner has finished any eval or call in flight and dropped the isolate, on both platforms, so the isolate and its memory cannot outlive disposal. On mini_racer 0.22.1’s default platform, `dispose` returns once the context’s V8 thread has taken the eval or call in flight, and that thread finishes the work and frees the isolate afterward (`context_dispose_do` in `mini_racer_extension.c`). With `:single_threaded`, mini_racer joins the runner and waits. When `dispose` was called 10 ms into serialization of a 64 MiB snapshot string, default mini_racer returned at 10 ms and mini_racer_rs at about 60 ms, after serialization finished. With `:single_threaded`, they returned at 85 ms and 62 ms, respectively. For busy loops, both returned within milliseconds. The in-flight operation always raises `MiniRacer::ContextDisposedError` in mini_racer_rs. mini_racer 0.22.1 usually raises that class, but raised `MiniRacer::ScriptTerminatedError` in 2 of 12 busy-loop runs; its test accepts either class.
 
 Approved 2026-10-16.
+
+### `behavior:fast-calls@ruby`
+
+Unlike mini_racer 0.22.1, which compiles every source, mini_racer_rs recognizes ExecJS 2.10.2 `call` sources and react-rails 3.2.1 and 3.3.1 server render sources evaluated without a file name, then runs a template compiled once by the context. The template remains a top-level script and replaces each JSON literal with a native function call stored in a randomly named global `const`; V8's JSON parser reads the values. Results, error classes and messages, `this`, and stack frame line and column numbers remain those of the source. The approved `behavior:fast-calls@ruby` deviation is limited to V8 stack reflection: `CallSite#getScriptHash` reports the template hash, and render `CallSite#getPosition` can report a different raw offset after hoisted literals, such as 260 instead of 185. A reflected render wrapper shows template reads instead of literals, and invoking it again receives no values outside a fast call or the current call's values during one, while mini_racer supplies the literals each time. Heap snapshots expose the hidden `const`. Set `MINI_RACER_RS_FAST_CALLS` to `off` before the first context is created to send every eval down the normal path.
+
+Approved 2026-10-18.
 
 ### `behavior:fiber-scheduler@ruby`
 

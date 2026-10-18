@@ -450,6 +450,8 @@ jobs:
       - name: A multi-threaded fork child's memory against its parent's
         if: runner.os == 'Linux'
         run: bundle exec ruby -Ilib test/stress/fork_child_memory.rb
+      - name: ExecJS calls with equal-length large arguments stay as fast as the first
+        run: bundle exec ruby -Ilib -Ivendor/execjs/lib test/stress/large_arguments.rb
       # On macOS spawns go through fork() and the engine's fork handlers.
       - name: Spawns under context churn, both V8 platform modes
         run: |

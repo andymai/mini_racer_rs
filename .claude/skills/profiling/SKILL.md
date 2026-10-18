@@ -41,6 +41,7 @@ Each run starts the reference, then the candidate, as separate `bundle exec` pro
 | Context creation, dispose, snapshots, isolate teardown | startup p50, Babel snapshot startup and size | `bundle exec ruby -Ilib test/stress/churn.rb multi 8 60` (contexts churned, bytes per context) |
 | What a context keeps allocated: buffers, isolate setup, what V8 or malloc holds after a load | the memory rows (each scenario in its own process; per-context rows leave out a first context) | the same rows with `--runs 3` or more, since resident memory moves with the allocator |
 | Anything on the hot path | the round trips above | the workloads: they spend most of their time inside V8, so they confirm real use does not regress rather than show small wins |
+| Fast calls (`fast_calls`, `runner::fast_call`) | the React workload, which renders through ExecJS's `call`, and `test/stress/large_arguments.rb` | the same build under `MINI_RACER_RS_FAST_CALLS=off`, which sends every eval down the normal path |
 
 p99 and p99.9 rows are often `noisy`. The serde rows below 1x in `BENCHMARKS.md` are arrays of 10,000 numbers. The stress scripts load whatever extension `-Ilib` finds and print one gem's figures with no reference, so use them for before and after on the same build profile only.
 
