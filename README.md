@@ -17,7 +17,7 @@ A drop-in replacement for mini_racer, implemented in Rust on V8 15.2.
 
 mini_racer_rs implements the `MiniRacer` Ruby API from mini_racer 0.22.1, with faster Ruby and JavaScript round trips, V8 15.2, prebuilt native gems, fiber scheduler support, and safer handling of difficult values. It defines the `MiniRacer` namespace and ships `lib/mini_racer.rb`, so `require "mini_racer"` and ExecJS continue to work.
 
-> **Pre-release:** Nothing is published to RubyGems.org yet, and the release workflow is held. Install from the repository until the first release. mini_racer_rs is an independent project and is not affiliated with the Discourse staff who maintain mini_racer.
+> mini_racer_rs is an independent project and is not affiliated with the Discourse staff who maintain mini_racer.
 
 ## Highlights
 
@@ -46,7 +46,7 @@ The package switch is one Gemfile line:
 
 Run `bundle install`. Bundler is required because RubyGems may otherwise activate the original `mini_racer` first. Loading both gems raises a `LoadError` that names the conflict. Reverse the Gemfile change to switch back.
 
-Until the first release publishes native gems, build from a checkout as described in [CONTRIBUTING.md](CONTRIBUTING.md). Run `bin/setup`. Source builds require Rust 1.91 or newer and libclang. Once published, installing a native gem will compile nothing.
+On x86_64-linux-gnu, aarch64-linux-gnu, arm64-darwin, and x86_64-darwin, `bundle install` installs a native gem and compiles nothing. Elsewhere, the source gem builds the extension and requires Rust 1.91 or newer and libclang. To build from a checkout, follow [CONTRIBUTING.md](CONTRIBUTING.md) and run `bin/setup`.
 
 ## Quick start
 
@@ -142,8 +142,6 @@ See [COMPATIBILITY.md](COMPATIBILITY.md) for every difference.
 ### Stay on mini_racer if
 
 - You deploy on musl-based Linux such as Alpine. mini_racer supports it through libv8-node's musl gems, while mini_racer_rs does not install there. Neither gem supports Windows.
-
-- You need a gem from RubyGems.org today. mini_racer_rs is pre-release, while mini_racer is the established gem maintained by Discourse staff.
 
 - Download size matters more than compile time. The largest mini_racer_rs native gem is 65.6 MB because it includes extensions for three Ruby versions. The mini_racer download on x86_64 Linux is 47.1 MB, followed by compilation.
 
