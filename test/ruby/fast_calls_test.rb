@@ -243,8 +243,9 @@ class FastCallsContextTest < Minitest::Test
 end
 
 # Code around a render's call can run it other than once at the wrapper's top
-# level. Each source here would be a context's first fast call, and renders
-# as mini_racer renders it.
+# level. Each test renders its code with two props: the first render compiles
+# the template, or finds it refused, and the second hits that template. Both
+# render as mini_racer renders them.
 class FastCallsWrapperTest < Minitest::Test
   include FastCallsFixtures
 
@@ -290,10 +291,12 @@ class FastCallsWrapperTest < Minitest::Test
 
   def test_a_call_a_promise_makes_after_a_nested_render_keeps_its_arguments
     before = "var result; Promise.resolve().then(function () { globalThis.got = (function () {"
-    source = wrapped(before, "return result; })(); });", { "n" => 1 })
+    [1, 2].each do |n|
+      source = wrapped(before, "return result; })(); });", { "n" => n })
 
-    assert_equal 0, @context.eval("rubyEval(#{source.to_json}); 0")
-    assert_equal ["renderToString", "A", { "n" => 1 }], @context.eval("got")
+      assert_equal 0, @context.eval("rubyEval(#{source.to_json}); 0")
+      assert_equal ["renderToString", "A", { "n" => n }], @context.eval("got")
+    end
   end
 
   def test_a_tagged_template_is_new_for_each_source
@@ -312,6 +315,19 @@ class FastCallsWrapperTest < Minitest::Test
         assert_equal expected, @context.eval(wrapped(before, "", { "n" => n }))
         assert_equal expected, @context.eval("again()")
       end
+    end
+  end
+
+  # A `.` that ends a line comment or a number reads as no property access
+  # past the line's end, so the `arguments` after it is the wrapper's own.
+  def test_arguments_after_a_dot_on_the_line_before_renders_again_with_new_props
+    @context.eval("ReactRailsUJS.serverRender = function (fn, name, props) { return ++props.n };")
+    ["// render once more.", "var x = 1."].each do |line|
+      before = "if (!globalThis.again) {\n  globalThis.again = true;\n  #{line}\n  " \
+               "arguments.callee.call(this);\n  globalThis.again = false;\n}"
+      results = 1.upto(2).map { |n| @context.eval(wrapped(before, "", { "n" => n })) }
+
+      assert_equal [2, 3], results, line
     end
   end
 end

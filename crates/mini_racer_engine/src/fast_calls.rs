@@ -561,6 +561,9 @@ mod tests {
             "\\u0061rguments;",
             "ev\\u0061l('1');",
             "\u{a0}arguments;",
+            "// x.\narguments.callee();",
+            "x = 1.\narguments;",
+            "x.\r\narguments;",
         ] {
             assert!(!leaves_the_call_alone(code.as_bytes()), "{code}");
         }
@@ -573,6 +576,7 @@ mod tests {
             AFTER,
             "msg.arguments;",
             "msg . arguments;",
+            "msg.\targuments;",
             "myarguments;",
             "arguments_;",
             "$eval();",
