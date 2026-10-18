@@ -8,7 +8,7 @@
 # frees. On x86_64 Ubuntu 24.04, over 20,000 evals, such a child grew about
 # 19 MiB against its parent's 1 to 2 MiB; a child running its own worker
 # threads grew within 3 MiB of its parent. Fails when the child grows more
-# than the margin past the parent.
+# than the margin past the parent, or past nothing when the parent shrinks.
 #   ruby -Ilib test/stress/fork_child_memory.rb [evals] [margin_mib]
 
 require "mini_racer"
@@ -59,5 +59,7 @@ abort "child failed: #{status.inspect}" unless status.success?
 child = Float(child)
 parent = growth_mib(evals)
 puts format("%<evals>d evals: child grew %<child>+.1f MiB, parent %<parent>+.1f MiB", evals:, child:, parent:)
-excess = child - parent
+# A parent can shrink past its warm-up as it hands freed pages back, by about
+# 40 MiB on CI's Ubuntu runners, which is no baseline for the child's growth.
+excess = child - [parent, 0.0].max
 abort "the child grew #{format("%.1f", excess)} MiB more than the parent, over #{margin_mib}" if excess > margin_mib
