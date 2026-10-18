@@ -201,27 +201,6 @@ class FastCallsContextTest < Minitest::Test
   ensure
     context&.dispose
   end
-
-  # Each source compiled to a script V8 kept until a full collection: 40,000
-  # of these calls grew the heap by 30 MB, and as many renders by 97 MB.
-  def test_calls_and_renders_keep_no_compiled_script_each
-    context = MiniRacer::Context.new
-    context.eval(SOURCE)
-    calls = heap_growth(context) { |i| context.eval("(add.apply(this, [#{i},2]))") }
-    renders = heap_growth(context) { |i| context.eval("(#{render("Hello", { "n" => i }.to_json)})") }
-
-    assert_operator calls, :<, 8_000_000, "the heap grew #{calls} bytes over 40,000 calls"
-    assert_operator renders, :<, 8_000_000, "the heap grew #{renders} bytes over 40,000 renders"
-  ensure
-    context&.dispose
-  end
-
-  def heap_growth(context, &)
-    context.low_memory_notification
-    before = context.heap_stats[:used_heap_size]
-    40_000.times(&)
-    context.heap_stats[:used_heap_size] - before
-  end
 end
 
 class FastCallsProcessTest < Minitest::Test
@@ -249,6 +228,31 @@ class FastCallsProcessTest < Minitest::Test
       inner.heap_stats[:used_heap_size] - before < 8_000_000,
     ])
   RUBY
+
+  # Each source compiled to a script V8 kept until a full collection: 40,000
+  # of these calls grew the heap by 30 MB, and as many renders by 97 MB.
+  def test_calls_and_renders_keep_no_compiled_script_each
+    head, tail = "(#{render("Hello", "PROPS")})".split("PROPS")
+    out, err, status = run_ruby(<<~RUBY, env: { "MINI_RACER_RS_FAST_CALLS" => nil })
+      require "mini_racer"
+      context = MiniRacer::Context.new
+      context.eval(#{SOURCE.dump})
+      grown = lambda do |&step|
+        context.low_memory_notification
+        before = context.heap_stats[:used_heap_size]
+        40_000.times(&step)
+        context.heap_stats[:used_heap_size] - before
+      end
+      calls = grown.call { |i| context.eval("(add.apply(this, [" + i.to_s + ",2]))") }
+      renders = grown.call { |i| context.eval(#{head.dump} + '{"n":' + i.to_s + "}" + #{tail.dump}) }
+      puts calls, renders
+    RUBY
+    calls, renders = out.split.map { Integer(_1) }
+
+    assert_predicate status, :success?, err
+    assert_operator calls, :<, 8_000_000, "the heap grew #{calls} bytes over 40,000 calls"
+    assert_operator renders, :<, 8_000_000, "the heap grew #{renders} bytes over 40,000 renders"
+  end
 
   def test_the_off_switch_gives_the_same_outcomes_through_the_normal_path
     { nil => true, "off" => false }.each do |switch, flat|
