@@ -72,11 +72,13 @@ struct Uncached {
 }
 
 // A context's fast calls: the binding their templates read values through,
-// and the templates compiled so far, most recently used last.
+// the templates compiled so far, most recently used last, and the last source
+// a fast call took, up to `LARGE_SOURCE`.
 #[derive(Default)]
 struct Hoisting {
     binding: Binding,
     templates: Vec<Template>,
+    last: Vec<u8>,
 }
 
 struct Template {
@@ -806,12 +808,16 @@ fn fast_call<'s>(
     let (JsText::Utf8(name), JsText::Utf8(source)) = (filename, source) else {
         return Ok(None);
     };
-    let Some(shape) = (name == b"<eval>")
-        .then(|| fast_calls::recognize(source))
-        .flatten()
-    else {
+    // A source sent again goes the normal way: from its second run there,
+    // V8's compilation cache runs it faster than a fast call parses its values
+    // again, and keeps no script per run.
+    if name != b"<eval>" || lock(&runtime.hoisting).last == *source {
+        return Ok(None);
+    }
+    let Some(shape) = fast_calls::recognize(source) else {
         return Ok(None);
     };
+    remember(&mut lock(&runtime.hoisting).last, source);
     if matches!(lock(&runtime.hoisting).binding, Binding::Unmade) {
         bind_reader(tc, runtime);
     }
@@ -845,6 +851,15 @@ fn fast_call<'s>(
     value
         .map(Some)
         .ok_or_else(|| failure(tc, JsErrorKind::Runtime))
+}
+
+fn remember(last: &mut Vec<u8>, source: &[u8]) {
+    if source.len() > LARGE_SOURCE {
+        *last = Vec::new();
+    } else {
+        last.clear();
+        last.extend_from_slice(source);
+    }
 }
 
 // Declining leaves nothing it threw for the normal path, though a termination
