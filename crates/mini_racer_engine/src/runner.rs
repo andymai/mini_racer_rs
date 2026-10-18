@@ -830,11 +830,11 @@ fn fast_call<'s>(
     };
     let mut values = Vec::with_capacity(shape.values.len());
     for value in &shape.values {
-        let (Hoisted::Json(text) | Hoisted::Text(text)) = *value;
-        let text = v8::String::new_from_utf8(tc, text, v8::NewStringType::Normal);
+        let (Hoisted::Json(literal) | Hoisted::Text(literal)) = *value;
+        let string = v8::String::new_from_utf8(tc, literal, v8::NewStringType::Normal);
         let parsed = match value {
-            Hoisted::Json(_) => text.and_then(|text| v8::json::parse(tc, text)),
-            Hoisted::Text(_) => text.map(Into::into),
+            Hoisted::Json(_) => string.and_then(|string| v8::json::parse(tc, string)),
+            Hoisted::Text(_) => string.map(Into::into),
         };
         let Some(parsed) = parsed else {
             return declined(tc);
