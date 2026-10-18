@@ -22,10 +22,16 @@ pub struct Writer<'a> {
 impl<'a> Writer<'a> {
     /// Starts a frame: clears `out` and writes the header.
     pub fn new(out: &'a mut Vec<u8>) -> Self {
+        Self::versioned(out, WRITE_VERSION)
+    }
+
+    /// Starts a frame under another format version, such as the one V8's own
+    /// serializer writes, for bytes that must match its output.
+    pub fn versioned(out: &'a mut Vec<u8>, version: u32) -> Self {
         out.clear();
         out.push(tag::HEADER);
         let mut writer = Self { out, next_id: 0 };
-        writer.varint(WRITE_VERSION.into());
+        writer.varint(version.into());
         writer
     }
 
@@ -129,6 +135,32 @@ impl<'a> Writer<'a> {
         self.out.push(tag::TWO_BYTE_STRING);
         self.len(bytes.len());
         self.out.extend_from_slice(bytes);
+    }
+
+    /// A two-byte string as V8's serializer writes one: after a padding byte
+    /// wherever its characters would otherwise start at an odd offset.
+    pub fn utf16_aligned(&mut self, units: &[u16]) {
+        let bytes = units.len().saturating_mul(2);
+        let mut length_bytes = 1usize;
+        let mut rest = bytes >> 7;
+        while rest > 0 {
+            length_bytes = length_bytes.saturating_add(1);
+            rest >>= 7;
+        }
+        let start = self
+            .out
+            .len()
+            .saturating_add(1)
+            .saturating_add(length_bytes);
+        if !start.is_multiple_of(2) {
+            self.out.push(tag::PADDING);
+        }
+        self.out.push(tag::TWO_BYTE_STRING);
+        self.len(bytes);
+        self.out.reserve(bytes);
+        for unit in units {
+            self.out.extend_from_slice(&unit.to_le_bytes());
+        }
     }
 
     /// Milliseconds since the Unix epoch; non-finite times become NaN.

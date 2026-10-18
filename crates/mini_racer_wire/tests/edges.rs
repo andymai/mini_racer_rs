@@ -539,3 +539,48 @@ fn writer_matches_mini_racers_encoder() {
     let mut out = Vec::new();
     assert!(Writer::new(&mut out).bigint(false, &[1; 3]).is_err());
 }
+
+#[test]
+fn a_versioned_frame_carries_its_version() {
+    let mut bytes = Vec::new();
+    Writer::versioned(&mut bytes, 16).null();
+    assert_eq!(bytes, [0xFF, 0x10, b'0']);
+    assert_eq!(render(&bytes, Limits::default()), "null");
+}
+
+// V8 pads before a two-byte string whose characters would start at an odd
+// offset, which turns on where the string begins and how long its length is.
+#[test]
+fn aligned_two_byte_strings_pad_where_v8_pads_and_decode_through_it() {
+    for (units, padded) in [
+        (1, false),
+        (63, false),
+        (64, true),
+        (8191, true),
+        (8192, false),
+    ] {
+        let text: Vec<u16> = std::iter::repeat_n(0x0100, units).collect();
+        let mut bytes = Vec::new();
+        Writer::new(&mut bytes).utf16_aligned(&text);
+        assert_eq!(bytes.get(2) == Some(&0x00), padded, "{units} units");
+        let start = bytes
+            .iter()
+            .position(|&byte| byte == b'c')
+            .expect("a two-byte tag");
+        let length_bytes = bytes.len() - start - 1 - 2 * units;
+        assert!(
+            (start + 1 + length_bytes).is_multiple_of(2),
+            "{units} units"
+        );
+        assert_eq!(
+            render(&bytes, Limits::default()),
+            format!("{:?}", "\u{100}".repeat(units))
+        );
+    }
+    let mut bytes = Vec::new();
+    let mut writer = Writer::new(&mut bytes);
+    writer.begin_array(1);
+    writer.utf16_aligned(&[0x0100]);
+    writer.end_array(1);
+    assert_eq!(render(&bytes, Limits::default()), "[\"\u{100}\"]");
+}
