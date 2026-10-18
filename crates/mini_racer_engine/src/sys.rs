@@ -51,9 +51,12 @@ pub fn startup_data(blob: &crate::SnapshotBlob) -> v8::StartupData {
 }
 
 /// A string V8 reads from `units` in place. It holds a reference to them,
-/// which V8 hands back through `release_one_byte` or `release_two_byte` when
-/// the string dies: in a collection or its isolate's teardown, on whatever
-/// thread V8 runs either on. `None` past V8's length limit.
+/// which V8 hands back through `release_one_byte` or `release_two_byte` once,
+/// on whatever thread it runs that on: when the string dies in a collection
+/// or its isolate's teardown, or when V8 internalizes it while it lives and
+/// gives the units to the internalized string, to release when that one dies,
+/// or releases them at once if that string has its own (`MigrateExternalString`
+/// in V8's `string.cc`). `None` past V8's length limit.
 pub fn external_string<'s>(
     scope: &v8::PinScope<'s, '_>,
     units: &Units,
