@@ -3,13 +3,58 @@
 [cases."curated-bigint-objects"]
 status = "accepted:bigint-object"
 
+[cases."curated-call-argument-arrays-made-holey"]
+status = "same"
+
+[cases."curated-call-binaries-and-two-byte-strings-in-arrays"]
+status = "same"
+
+[cases."curated-call-empty-containers"]
+status = "same"
+
+[cases."curated-call-floats"]
+status = "same"
+
+[cases."curated-call-hashes-past-the-built-size"]
+status = "same"
+
+[cases."curated-call-integer-boundaries"]
+status = "same"
+
+[cases."curated-call-integer-keyed-hashes"]
+status = "same"
+
 [cases."curated-call-missing-function"]
+status = "same"
+
+[cases."curated-call-nested-arrays"]
 status = "same"
 
 [cases."curated-call-nested-path"]
 status = "same"
 
 [cases."curated-call-number-runs"]
+status = "same"
+
+[cases."curated-call-primitive-results"]
+status = "same"
+
+[cases."curated-call-repeated-keys"]
+status = "same"
+
+[cases."curated-call-returned-argument-arrays"]
+status = "same"
+
+[cases."curated-call-shared-and-cyclic-containers"]
+status = "same"
+
+[cases."curated-call-strings-in-each-encoding"]
+status = "same"
+
+[cases."curated-call-symbols"]
+status = "same"
+
+[cases."curated-call-times"]
 status = "same"
 
 [cases."curated-cyclic"]
