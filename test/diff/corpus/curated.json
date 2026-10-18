@@ -6211,6 +6211,16 @@
     ]
   },
   {
+    "id": "curated-map-keyed-by-an-object-past-the-inline-pairs",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "(() => { const o = Object.fromEntries(Array.from({length: 70}, (_, i) => ['k' + i, i])); o.m = new Map([[o, 1], [{}, 2]]); o.z = 1; return o })()"
+      }
+    ]
+  },
+  {
     "id": "curated-strings-measured-first",
     "kind": "program",
     "steps": [

@@ -117,6 +117,9 @@ status = "same"
 [cases."curated-map-equal-keys-many"]
 status = "same"
 
+[cases."curated-map-keyed-by-an-object-past-the-inline-pairs"]
+status = "same"
+
 [cases."curated-map-keyed-by-itself-in-an-array"]
 status = "same"
 

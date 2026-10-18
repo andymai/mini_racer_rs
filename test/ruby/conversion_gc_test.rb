@@ -105,22 +105,6 @@ class ConversionGcTest < Minitest::Test
     assert value["texts"].keys.all?(&:frozen?)
   end
 
-  # Keys of objects in arrays are interned once and kept for the rest of the
-  # decode, so every later row takes its keys from what the decoder holds.
-  def test_keys_held_across_rows_survive_collections_and_moves
-    rows = stressed do
-      @context.eval(<<~JS)
-        Array.from({length: 40}, (_, i) => Object.fromEntries(
-          Array.from({length: 70}, (_, j) => ["key" + j, i]).concat([["caf\\u00e9", i], ["\\u6771", i]])
-        ))
-      JS
-    end
-    names = Array.new(70) { |j| "key#{j}" } + %w[café 東]
-
-    rows.each_with_index { |row, i| assert_equal names.to_h { |name| [name, i] }, row }
-    assert(rows.flat_map(&:keys).all? { |key| key.frozen? && key.equal?(-key) })
-  end
-
   # Catches an unpinned value only in an optimized build, since a debug build's
   # stale stack copies pin values too; CI builds release. Skipped on macOS,
   # where Ruby 3.4's verification raises a malloc overflow after a few heap
@@ -188,5 +172,47 @@ class ConversionGcImmediatesTest < Minitest::Test
       [1, "two", "three", 4.5, nil, true, Time.at(0), "after", [5]],
       "last",
     ], result
+  end
+end
+
+# Keys and pairs the decoder keeps while it builds each hash.
+class ConversionGcPairsTest < Minitest::Test
+  include ConversionGc
+
+  # Keys of objects in arrays are interned once and kept for the rest of the
+  # decode, so every later row takes its keys from what the decoder holds.
+  def test_keys_held_across_rows_survive_collections_and_moves
+    rows = stressed do
+      @context.eval(<<~JS)
+        Array.from({length: 40}, (_, i) => Object.fromEntries(
+          Array.from({length: 70}, (_, j) => ["key" + j, i]).concat([["caf\\u00e9", i], ["\\u6771", i]])
+        ))
+      JS
+    end
+    names = Array.new(70) { |j| "key#{j}" } + %w[café 東]
+
+    rows.each_with_index { |row, i| assert_equal names.to_h { |name| [name, i] }, row }
+    assert(rows.flat_map(&:keys).all? { |key| key.frozen? && key.equal?(-key) })
+  end
+
+  # The object's pairs have moved off the native stack by the time the Map
+  # takes the object as a key, so they go in from the holder that pins them.
+  def test_pairs_held_off_the_stack_go_in_before_a_key_reaches_them
+    value = stressed do
+      @context.eval(<<~JS)
+        (() => {
+          const o = Object.fromEntries(Array.from({length: 70}, (_, i) => ['k' + i, i]))
+          o.m = new Map([[o, 1], [{}, 2]])
+          o.z = 1
+          return o
+        })()
+      JS
+    end
+    map = value["m"]
+
+    assert_equal Array.new(70) { |i| "k#{i}" } + %w[m z], value.keys
+    assert_equal Array.new(70) { |i| i }, value.values.first(70)
+    assert_same value, map.keys.first
+    assert_equal [{}, [1, 2], 1], [map.keys.last, map.values, value["z"]]
   end
 end
