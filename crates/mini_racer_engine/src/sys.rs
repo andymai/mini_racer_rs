@@ -58,6 +58,22 @@ pub fn isolate_key(isolate: &v8::Isolate) -> usize {
     pointer.addr()
 }
 
+// V8 tags a small integer's word with a clear low bit and a heap object's with
+// a set one.
+const SMI_TAG_MASK: usize = 1;
+
+/// Whether `value` is a small integer, which V8's serializer writes as an
+/// int32; a heap number it writes as a double, even one holding an int32.
+#[must_use]
+pub const fn is_smi(value: &v8::Value) -> bool {
+    let slot: *const v8::Value = value;
+    // SAFETY: rusty_v8 builds V8 without direct handles, so a reference to a
+    // value is the address of its handle slot, one aligned tagged word that
+    // lives as long as the reference.
+    let tagged = unsafe { slot.cast::<usize>().read() };
+    tagged & SMI_TAG_MASK == 0
+}
+
 /// Has V8 report each garbage collection on `isolate`, so its runner can
 /// check the heap against `max_memory`.
 pub fn watch_heap(isolate: &mut v8::Isolate) {
