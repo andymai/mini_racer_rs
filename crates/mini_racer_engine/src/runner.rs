@@ -16,7 +16,7 @@ use crate::control::{
     CallRequest, CallbackReply, ControlBlock, Depth, IsolateTerminator, JsText, Request,
 };
 use crate::fast_calls::{self, Hoisted, Shape};
-use crate::process::code_cache::{Building, Plan};
+use crate::process::code_cache::{Building, Key, Plan};
 use crate::process::fork::Generation;
 use crate::process::platform::{self, Mode};
 use crate::process::watchdog;
@@ -775,10 +775,12 @@ fn evaluate(
             .code_cache()
             .plan(filename, source, runtime.snapshot)
     } else {
-        Plan::Compile
+        Plan::Compile(None)
     };
     let too_large = || EngineError::Internal("source too large".to_owned());
-    let source = string(tc, source).ok_or_else(too_large)?;
+    let source = shared_source(tc, runtime, plan.key(), source)
+        .or_else(|| string(tc, source))
+        .ok_or_else(too_large)?;
     let name = string(tc, filename).ok_or_else(too_large)?;
     let origin = serialize::origin(tc, name.into());
     let (script, make) = compile(tc, runtime, source, &origin, plan);
@@ -792,6 +794,25 @@ fn evaluate(
         lock(&runtime.uncached).push(Uncached { script, building });
     }
     Ok(reply)
+}
+
+// A large script the process has seen before reads its source from the copy
+// every context compiling it shares, outside the V8 heap. `max_memory:`
+// measures the heap, where mini_racer keeps the source, so a context with it
+// keeps its own copy.
+fn shared_source<'s>(
+    scope: &v8::PinScope<'s, '_>,
+    runtime: &Runtime,
+    key: Option<&Key>,
+    source: &JsText,
+) -> Option<v8::Local<'s, v8::String>> {
+    if runtime.block.config.max_memory.is_some() {
+        return None;
+    }
+    let sources = runtime.generation.sources();
+    let string = sys::external_string(scope, &sources.units(key?, source)?)?;
+    sources.read();
+    Some(string)
 }
 
 fn settle<'s>(
@@ -1045,7 +1066,7 @@ fn compile<'s>(
     plan: Plan,
 ) -> (Option<v8::Local<'s, v8::Script>>, Option<Building>) {
     let (entry, key) = match plan {
-        Plan::Compile => return (v8::Script::compile(scope, source, Some(origin)), None),
+        Plan::Compile(_) => return (v8::Script::compile(scope, source, Some(origin)), None),
         Plan::Make(building) => {
             return (
                 v8::Script::compile(scope, source, Some(origin)),

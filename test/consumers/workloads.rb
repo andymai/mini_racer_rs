@@ -58,6 +58,20 @@ module DiffConsumers
       { "op" => "call", "path" => "renderApp",
         "args" => [["hash", [[text("name"), text("world")], [text("items"), ["array", [text("a")]]]]]], },
     ],
+    # The 8 MB bundle is two bytes a unit in V8. Loaded once per workload, it
+    # is read from one shared copy from the second on.
+    "mui-dashboard" => [
+      load_bundle("mui"),
+      evaluate("renderDashboard(2)"),
+    ],
+    "mui-dashboard-source" => [
+      load_bundle("mui"),
+      evaluate("renderDashboard.toString()"),
+    ],
+    "mui-dashboard-stack" => [
+      load_bundle("mui"),
+      evaluate("(() => { try { renderDashboard(Symbol()) } catch (e) { return [e.name, e.stack] } })()"),
+    ],
   }.freeze
 
   module_function

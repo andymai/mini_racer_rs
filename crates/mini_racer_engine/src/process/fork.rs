@@ -7,6 +7,7 @@ use mini_racer_sync::{ForkGate, Phase, lock};
 
 use crate::control::ControlBlock;
 use crate::process::code_cache::CodeCache;
+use crate::process::sources::Sources;
 use crate::process::tasks::TaskRegistry;
 use crate::process::watchdog::Watchdog;
 use crate::process::workers::Workers;
@@ -51,13 +52,14 @@ pub struct Generation {
     watchdog: Mutex<Option<Arc<Watchdog>>>,
     workers: Workers,
     code_cache: CodeCache,
+    sources: Sources,
     next: OnceLock<Box<Self>>,
 }
 
 static ROOT: OnceLock<Generation> = OnceLock::new();
 
 impl Generation {
-    fn new(epoch: u64, quiesced: bool, code_cache: CodeCache) -> Self {
+    fn new(epoch: u64, quiesced: bool, code_cache: CodeCache, sources: Sources) -> Self {
         Self {
             epoch,
             quiesced,
@@ -69,6 +71,7 @@ impl Generation {
             watchdog: Mutex::new(None),
             workers: Workers::default(),
             code_cache,
+            sources,
             next: OnceLock::new(),
         }
     }
@@ -94,6 +97,11 @@ impl Generation {
         &self.code_cache
     }
 
+    #[must_use]
+    pub const fn sources(&self) -> &Sources {
+        &self.sources
+    }
+
     pub fn register(&self, block: &Arc<ControlBlock>) {
         let mut blocks = lock(&self.blocks);
         blocks.retain(|block| block.strong_count() > 0);
@@ -115,7 +123,8 @@ impl Generation {
 
 pub fn current() -> &'static Generation {
     let epoch = epoch();
-    let mut generation = ROOT.get_or_init(|| Generation::new(epoch, true, CodeCache::default()));
+    let mut generation =
+        ROOT.get_or_init(|| Generation::new(epoch, true, CodeCache::default(), Sources::default()));
     while generation.epoch != epoch {
         let quiesced = generation.quiesced && generation.prepared.load(Ordering::SeqCst);
         let next = generation.epoch.saturating_add(1);
@@ -125,6 +134,7 @@ pub fn current() -> &'static Generation {
                 next,
                 quiesced,
                 parent.code_cache.inherited(),
+                parent.sources.inherited(),
             ))
         });
     }

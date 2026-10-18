@@ -102,7 +102,8 @@ fn the_code_cache() {
     assert_eq!(cache().hits(), 2);
 }
 
-// The documented switch, in a run of this test alone with it set.
+// The documented switch, in a run of this test alone with it set. Sources
+// are shared under the cache's key, so it turns sharing off too.
 #[test]
 fn turned_off() {
     if std::env::var_os("MINI_RACER_RS_CODE_CACHE").is_some() {
@@ -112,6 +113,7 @@ fn turned_off() {
         }
         assert_eq!(cache().stored(), 0);
         assert_eq!(cache().hits(), 0);
+        assert_eq!(fork::current().sources().reads(), 0);
         return;
     }
     let status = std::process::Command::new(std::env::current_exe().expect("test binary"))

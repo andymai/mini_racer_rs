@@ -12,6 +12,15 @@ status = "same"
 [cases."consumer-handlebars-render"]
 status = "same"
 
+[cases."consumer-mui-dashboard"]
+status = "same"
+
+[cases."consumer-mui-dashboard-source"]
+status = "same"
+
+[cases."consumer-mui-dashboard-stack"]
+status = "same"
+
 [cases."consumer-react-ssr"]
 status = "same"
 

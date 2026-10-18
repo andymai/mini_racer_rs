@@ -165,6 +165,60 @@ status = "accepted:reference-to-a-numbered-object"
 [cases."curated-shared-across-keys"]
 status = "same"
 
+[cases."curated-shared-source-ascii-1"]
+status = "same"
+
+[cases."curated-shared-source-ascii-2"]
+status = "same"
+
+[cases."curated-shared-source-ascii-3"]
+status = "same"
+
+[cases."curated-shared-source-astral-in-utf8-1"]
+status = "same"
+
+[cases."curated-shared-source-astral-in-utf8-2"]
+status = "same"
+
+[cases."curated-shared-source-astral-in-utf8-3"]
+status = "same"
+
+[cases."curated-shared-source-latin1-1"]
+status = "same"
+
+[cases."curated-shared-source-latin1-2"]
+status = "same"
+
+[cases."curated-shared-source-latin1-3"]
+status = "same"
+
+[cases."curated-shared-source-latin1-in-utf16-1"]
+status = "same"
+
+[cases."curated-shared-source-latin1-in-utf16-2"]
+status = "same"
+
+[cases."curated-shared-source-latin1-in-utf16-3"]
+status = "same"
+
+[cases."curated-shared-source-latin1-in-utf8-1"]
+status = "same"
+
+[cases."curated-shared-source-latin1-in-utf8-2"]
+status = "same"
+
+[cases."curated-shared-source-latin1-in-utf8-3"]
+status = "same"
+
+[cases."curated-shared-source-utf16-1"]
+status = "same"
+
+[cases."curated-shared-source-utf16-2"]
+status = "same"
+
+[cases."curated-shared-source-utf16-3"]
+status = "same"
+
 [cases."curated-sparse-large-indexes"]
 status = "same"
 

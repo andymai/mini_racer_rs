@@ -29,7 +29,7 @@ The three cases that fork through Fiddle need `fiddle`. Ruby 4.0 ships without i
 { "id": "curated-<name>", "kind": "program", "steps": [{ "op": "eval", "source": "new Date(NaN)" }] }
 ```
 
-Steps (`test/diff/worker.rb`): `eval` with `source`; `call` with `path` and `args` in the canonical form of `test/diff/canonical.rb`; `attach` with `name` and `callable` (`echo` or `values`); `execjs`. A step with `"setup": true` is compared only on whether it raised. After adding a case, `bundle exec ruby test/diff/run.rb --write-ledger` records every case's class in `test/diff/candidate.status.toml` (`same`, `accepted:<divergence>`, a new divergence as `xfail:M1`, a candidate crash as `crash:M1`); review that diff, then run with `--twin --strict`. `--shrink` writes minimized divergences as `test/diff/corpus/min-<id>.json`. Every run needs the real gem: `cd tools/reference && BUNDLE_PATH=vendor/bundle bundle install`.
+Steps (`test/diff/worker.rb`): `eval` with `source`; `call` with `path` and `args` in the canonical form of `test/diff/canonical.rb`; `attach` with `name` and `callable` (`echo` or `values`); `execjs`. An `eval` or `execjs` step may name a `file` in place of its `source` or give a `repeat` count for it, either followed by an `append` line, and an `eval` step may send its source in an `encoding` (`ISO-8859-1`, `UTF-16LE`). A step with `"setup": true` is compared only on whether it raised. Each worker runs every case in one process, so cases that load one script of a megabyte or more one after another reach the code cache and the shared sources from the second on (`test/diff/corpus/shared-sources.json`). After adding a case, `bundle exec ruby test/diff/run.rb --write-ledger` records every case's class in `test/diff/candidate.status.toml` (`same`, `accepted:<divergence>`, a new divergence as `xfail:M1`, a candidate crash as `crash:M1`); review that diff, then run with `--twin --strict`. `--shrink` writes minimized divergences as `test/diff/corpus/min-<id>.json`. Every run needs the real gem: `cd tools/reference && BUNDLE_PATH=vendor/bundle bundle install`.
 
 ## Consumer workloads
 
@@ -48,6 +48,7 @@ Each script runs alone with `bundle exec ruby -Ilib test/stress/<script>.rb`, ta
 | `test/stress/fork_child_memory.rb [evals] [margin_mib]` | a child of a multi-threaded parent grows more than the margin (8 MiB) past its parent over the same allocating loop in a new context | every CI Ruby leg on Linux: 20,000 evals each |
 | `test/stress/spawn_churn.rb single\|multi [spawns]` | a spawn hangs or takes over a second | every CI Ruby leg, both modes |
 | `test/stress/large_load.rb single\|multi [contexts] [max_mib]` | a context loaded with a generated 3 MiB script costs over 16 MiB of RSS | every CI Ruby leg on Linux, both modes |
+| `test/stress/shared_load.rb single\|multi [contexts] [max_mib]` | a context loading the same generated 3 MiB two-byte script as the others costs over 14 MiB of RSS | every CI Ruby leg on Linux, both modes |
 | `test/stress/large_arguments.rb [calls] [max_ratio]` (also `-Ivendor/execjs/lib`) | the last tenth of ExecJS calls with equal-length 24 KB arguments take over 3 times as long as the first tenth | every CI Ruby leg |
 | `test/stress/madvise_fixture.rb clean\|crash` | the child's outcome is not the expected one | `scripts/madvise-fixture.sh`, CI's ubuntu-24.04 Ruby 3.4 leg |
 
