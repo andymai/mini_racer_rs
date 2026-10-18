@@ -1,6 +1,6 @@
-use mini_racer_wire::marker;
+use mini_racer_wire::{Writer, marker};
 
-use crate::snapshot;
+use crate::{snapshot, sys};
 use v8::ValueSerializerHelper;
 
 // mini_racer's filter (mini_racer_v8.cc, MIT, Copyright (c) 2016-2019 the
@@ -59,6 +59,9 @@ pub type Tc<'a, 'b, 'c, 'i> = v8::PinnedRef<'a, v8::TryCatch<'b, 'c, v8::HandleS
 pub struct Filter {
     pub context: v8::Global<v8::Context>,
     function: v8::Global<v8::Function>,
+    // The format version V8's serializer writes, which a reply written
+    // without it carries too.
+    version: u32,
 }
 
 pub fn origin<'s>(
@@ -85,7 +88,7 @@ pub fn contexts(
         .flatten()
         .unwrap_or_else(|| v8::Context::new(scope, v8::ContextOptions::default()));
     let user = v8::Context::new(scope, v8::ContextOptions::default());
-    let function = {
+    let (function, version) = {
         let scope = &mut v8::ContextScope::new(scope, safe);
         let source = v8::String::new(scope, FILTER_SOURCE)?;
         let name = v8::String::new(scope, "safe_context_script.js")?;
@@ -97,15 +100,30 @@ pub fn contexts(
         let global = user.global(scope).into();
         let filter = setup.call(scope, receiver, &[global]);
         safe.use_default_security_token();
-        v8::Local::<v8::Function>::try_from(filter?).ok()?
+        let filter = v8::Local::<v8::Function>::try_from(filter?).ok()?;
+        (filter, wire_version(scope)?)
     };
     Some((
         v8::Global::new(scope, user),
         Filter {
             context: v8::Global::new(scope, safe),
             function: v8::Global::new(scope, function),
+            version,
         },
     ))
+}
+
+fn wire_version(scope: &v8::PinScope<'_, '_>) -> Option<u32> {
+    let bytes = write(scope, v8::undefined(scope).into())?;
+    let (_, header) = bytes.split_first()?;
+    let mut version = 0u32;
+    for (shift, byte) in (0..32).step_by(7).zip(header) {
+        version |= u32::from(byte & 0x7f).checked_shl(shift)?;
+        if byte & 0x80 == 0 {
+            return Some(version);
+        }
+    }
+    None
 }
 
 /// What `mini_racer` does to a result before serializing it: proxies give way
@@ -189,6 +207,46 @@ impl v8::ValueSerializerImpl for Delegate {
     }
 }
 
+// The bytes V8's serializer writes for a primitive, written without it: for
+// these values it checks for no termination and runs no script, and the
+// microtasks it would run as it returns ran as the script returned. `None` for
+// anything else, and for a NaN, whose bits V8 copies unchanged.
+fn primitive(
+    isolate: &mut v8::Isolate,
+    version: u32,
+    value: v8::Local<'_, v8::Value>,
+) -> Option<Vec<u8>> {
+    let mut out = Vec::new();
+    let mut writer = Writer::versioned(&mut out, version);
+    if sys::is_smi(&value) {
+        let small = v8::Local::<v8::Int32>::try_from(value).ok()?;
+        writer.integer(small.value().into());
+    } else if let Ok(number) = v8::Local::<v8::Number>::try_from(value) {
+        let number = number.value();
+        if number.is_nan() {
+            return None;
+        }
+        writer.number(number);
+    } else if let Ok(string) = v8::Local::<v8::String>::try_from(value) {
+        let view = v8::ValueView::new(isolate, string);
+        match view.data() {
+            v8::ValueViewData::OneByte(bytes) => writer.latin1(bytes),
+            v8::ValueViewData::TwoByte(units) => writer.utf16_aligned(units),
+        }
+    } else if value.is_undefined() {
+        writer.undefined();
+    } else if value.is_null() {
+        writer.null();
+    } else if value.is_true() {
+        writer.bool(true);
+    } else if value.is_false() {
+        writer.bool(false);
+    } else {
+        return None;
+    }
+    Some(out)
+}
+
 /// Serializes `value` with no filter retry; `None` leaves an exception pending.
 pub fn write(scope: &v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<Vec<u8>> {
     let context = scope.get_current_context();
@@ -213,6 +271,9 @@ pub fn reply(
     // mini_racer serializes in a TryCatch of its own, which is not verbose, and
     // rethrows from it; V8 never reports a rethrown exception.
     tc.set_verbose(false);
+    if let Some(bytes) = primitive(tc, filter.version, value) {
+        return Some(bytes);
+    }
     if let Some(bytes) = write(tc, value) {
         return Some(bytes);
     }

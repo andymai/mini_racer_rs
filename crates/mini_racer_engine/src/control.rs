@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -66,6 +67,17 @@ impl From<&str> for JsText {
     }
 }
 
+/// A call in the wire form `mini_racer` sends: one array holding the
+/// function's dotted path, then its arguments.
+///
+/// `objects` and `properties` count the objects the arguments hold and their
+/// properties in all, which decide whether the runner builds the arguments.
+pub struct CallRequest {
+    pub bytes: Vec<u8>,
+    pub objects: usize,
+    pub properties: usize,
+}
+
 pub enum Request {
     Init {
         depth: Depth,
@@ -78,7 +90,7 @@ pub enum Request {
         awaited: bool,
     },
     Call {
-        request: Vec<u8>,
+        request: CallRequest,
         depth: Depth,
         awaited: bool,
     },
@@ -117,13 +129,15 @@ pub enum Request {
 pub struct IsolateTerminator {
     handle: v8::IsolateHandle,
     tasks: Arc<Tasks>,
+    requested: Arc<AtomicBool>,
 }
 
 impl IsolateTerminator {
-    pub fn new(handle: v8::IsolateHandle, tasks: &Arc<Tasks>) -> Self {
+    pub fn new(block: &ControlBlock, handle: v8::IsolateHandle) -> Self {
         Self {
             handle,
-            tasks: Arc::clone(tasks),
+            tasks: Arc::clone(&block.tasks),
+            requested: Arc::clone(&block.termination_requested),
         }
     }
 }
@@ -132,12 +146,14 @@ impl Terminator for IsolateTerminator {
     // A runner awaiting a promise sleeps until a task is due; the ring wakes
     // it to find the termination.
     fn terminate(&self) {
+        self.requested.store(true, Ordering::Release);
         self.handle.terminate_execution();
         self.tasks.ring();
     }
 
     fn cancel(&self) {
         self.handle.cancel_terminate_execution();
+        self.requested.store(false, Ordering::Release);
     }
 }
 
@@ -178,6 +194,10 @@ pub struct ControlBlock {
     // V8's foreground tasks for this context's isolate, which the runner runs
     // while awaiting a promise or pumping.
     pub tasks: Arc<Tasks>,
+    /// Set before anything asks V8 to terminate this context's script, and
+    /// cleared only once V8 has cancelled every such request, so a runner
+    /// building values itself knows when V8's own reader would stop instead.
+    pub termination_requested: Arc<AtomicBool>,
     pub phase: RunnerPhase,
     pub isolate: OnceLock<v8::IsolateHandle>,
     // The isolate a snapshot is being built in on this runner, if any.
@@ -230,6 +250,7 @@ impl ControlBlock {
             timer: Mutex::default(),
             notify: NotifyFd::default(),
             tasks: Arc::new(tasks),
+            termination_requested: Arc::default(),
             phase: RunnerPhase::default(),
             isolate: OnceLock::new(),
             building: Mutex::new(None),

@@ -87,10 +87,11 @@ struct Pending {
 }
 
 // The visitor and its frames live on the native stack for the whole decode,
-// where Ruby's GC finds them (I3); `refs` holds every value V8 gave an id.
+// where Ruby's GC finds them (I3); `refs` holds every value V8 gave an id,
+// made at the first, so a result without one allocates none.
 struct RubyVisitor<'r> {
     ruby: &'r Ruby,
-    refs: RArray,
+    refs: Option<RArray>,
     pending: Pending,
 }
 
@@ -359,12 +360,18 @@ impl Visitor for RubyVisitor<'_> {
     }
 
     fn register(&mut self, id: u32, value: Value) -> Result<(), Error> {
+        let ruby = self.ruby;
         self.refs
+            .get_or_insert_with(|| ruby.ary_new())
             .store(isize::try_from(id).unwrap_or(isize::MAX), value)
     }
 
+    // The decoder refers back only to an id it saw registered.
     fn back_ref(&mut self, id: u32) -> Result<Value, Error> {
-        self.refs.entry(isize::try_from(id).unwrap_or(isize::MAX))
+        self.refs.map_or_else(
+            || self.bad_state(),
+            |refs| refs.entry(isize::try_from(id).unwrap_or(isize::MAX)),
+        )
     }
 
     fn push_int32s(&mut self, frame: &mut Frame, values: &[i32]) -> Result<(), Error> {
@@ -416,7 +423,7 @@ const RESULT_LIMITS: Limits = Limits {
 pub fn value(ruby: &Ruby, bytes: &[u8]) -> Result<Value, Error> {
     let mut visitor = RubyVisitor {
         ruby,
-        refs: ruby.ary_new(),
+        refs: None,
         pending: Pending {
             target: None,
             values: [ruby.qnil().as_value(); BATCH],

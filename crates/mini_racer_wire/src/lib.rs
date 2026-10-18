@@ -20,7 +20,7 @@ pub use write::{WriteError, Writer};
 pub const READ_VERSIONS: RangeInclusive<u32> = 13..=16;
 pub const WRITE_VERSION: u32 = 15;
 
-mod tag {
+pub mod tag {
     pub const HEADER: u8 = 0xFF;
     pub const PADDING: u8 = 0x00;
     pub const VERIFY_OBJECT_COUNT: u8 = b'?';

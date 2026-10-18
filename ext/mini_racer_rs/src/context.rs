@@ -298,11 +298,13 @@ impl Context {
 
     fn invoke(ruby: &Ruby, rb_self: &Self, args: &[Value], awaited: bool) -> Result<Value, Error> {
         let handle = rb_self.handle(ruby)?;
-        let args = scan_args::<(Value,), (), RArray, (), (), ()>(args)?;
-        let name = rb_raw::expect_string(ruby, args.required.0)?;
-        let request = args.splat;
-        request.unshift(name)?;
-        let request = encode::encode(ruby, request.as_value(), |message| {
+        let Some((&name, args)) = args.split_first() else {
+            // The arity error mini_racer's rb_scan_args raises.
+            scan_args::<(Value,), (), RArray, (), (), ()>(args)?;
+            return Err(errors::internal(ruby, "no function name"));
+        };
+        let name = rb_raw::expect_string(ruby, name)?;
+        let request = encode::call(ruby, name, args, |message| {
             errors::runtime(ruby, [b"Context.call: ".as_slice(), &message].concat())
         })?;
         let bytes = rb_self.dispatch(ruby, |host| {

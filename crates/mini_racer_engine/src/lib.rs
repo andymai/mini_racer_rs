@@ -4,6 +4,7 @@ mod error;
 mod fast_calls;
 mod notify;
 pub mod process;
+mod request;
 mod runner;
 mod serialize;
 mod snapshot;
@@ -15,6 +16,6 @@ mod spin;
 mod sys;
 
 pub use context::{ContextHandle, Host, Unparker, WaitHandle, WaitOutcome};
-pub use control::{CallbackReply, ContextConfig, JsText};
+pub use control::{CallRequest, CallbackReply, ContextConfig, JsText};
 pub use error::{EngineError, FlagError, InvalidSnapshot, JsError, JsErrorKind, TerminationCause};
 pub use snapshot::{SnapshotBlob, WeakSnapshotBlob};
