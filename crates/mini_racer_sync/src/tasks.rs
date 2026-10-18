@@ -19,7 +19,7 @@ struct Delayed<T> {
     entry: Entry<T>,
 }
 
-struct Queue<T> {
+pub struct Queue<T> {
     ready: VecDeque<Entry<T>>,
     // In posting order, which breaks ties between equal deadlines.
     delayed: Vec<Delayed<T>>,
@@ -37,6 +37,23 @@ impl<T> Default for Queue<T> {
 }
 
 impl<T> Queue<T> {
+    pub fn push(&mut self, task: T, nestable: bool, delay: Duration) {
+        let entry = Entry { task, nestable };
+        if delay.is_zero() {
+            self.ready.push_back(entry);
+        } else {
+            let now = Instant::now();
+            let due = now.checked_add(delay.min(LONGEST_DELAY)).unwrap_or(now);
+            self.delayed.push(Delayed { due, entry });
+        }
+    }
+
+    pub fn pop(&mut self, now: Instant, nested: bool) -> Option<T> {
+        self.promote(now);
+        let index = self.position(nested)?;
+        self.ready.remove(index).map(|entry| entry.task)
+    }
+
     // Delayed tasks that have come due join the ready ones, earliest first.
     fn promote(&mut self, now: Instant) {
         if !self.delayed.iter().any(|delayed| delayed.due <= now) {
@@ -57,7 +74,7 @@ impl<T> Queue<T> {
             .position(|entry| !nested || entry.nestable)
     }
 
-    fn next_due(&self) -> Option<Instant> {
+    pub fn next_due(&self) -> Option<Instant> {
         self.delayed.iter().map(|delayed| delayed.due).min()
     }
 
@@ -97,19 +114,12 @@ impl<T> TaskQueue<T> {
     /// Queues `task` to run once `delay` has passed. A closed queue refuses
     /// it, and the caller drops it.
     pub fn post(&self, task: T, nestable: bool, delay: Duration) -> Result<(), T> {
-        let entry = Entry { task, nestable };
         let mut queue = lock(&self.queue);
         if queue.closed {
             drop(queue);
-            return Err(entry.task);
+            return Err(task);
         }
-        if delay.is_zero() {
-            queue.ready.push_back(entry);
-        } else {
-            let now = Instant::now();
-            let due = now.checked_add(delay.min(LONGEST_DELAY)).unwrap_or(now);
-            queue.delayed.push(Delayed { due, entry });
-        }
+        queue.push(task, nestable, delay);
         drop(queue);
         self.doorbell.unpark();
         Ok(())
@@ -119,11 +129,9 @@ impl<T> TaskQueue<T> {
     /// task, passes over non-nestable ones.
     pub fn pop(&self, nested: bool) -> Option<T> {
         let mut queue = lock(&self.queue);
-        queue.promote(Instant::now());
-        let index = queue.position(nested)?;
-        let entry = queue.ready.remove(index);
+        let task = queue.pop(Instant::now(), nested);
         drop(queue);
-        entry.map(|entry| entry.task)
+        task
     }
 
     /// Sleeps until a task is due, a task is posted, or `ring` is called;
