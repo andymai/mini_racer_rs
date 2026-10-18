@@ -59,7 +59,9 @@ Termination rings the queue, waking a runner sleeping in an await without postin
 
 ## Snapshots
 
-`MiniRacer::Snapshot` builds a V8 startup blob in an isolate created for that purpose. The implementation is in `crates/mini_racer_engine/src/snapshot.rs`, and a context can start from the resulting blob.
+`MiniRacer::Snapshot` builds and warms up a V8 startup blob in a purpose-built isolate in `crates/mini_racer_engine/src/snapshot.rs`. Contexts made from one snapshot share one read-only `SnapshotBlob`, and `sys::startup_data` gives V8 those bytes directly. A context's control block retains the blob until its runner drops the isolate because V8 reads it throughout the isolate's lifetime, including when creating contexts and checking code caches. Snapshot builds retain the snapshot they warm up the same way. The shared copy is created by `Context.new` and reused while a context made from it lives and the String returned by `dump` retains the same bytes. The snapshot holds that copy weakly, so after its contexts are gone it holds only the String. Each `Context.new` starts from the String's current contents.
+
+`SnapshotBlob::check` in `crates/mini_racer_engine/src/snapshot.rs` follows V8 15.2's `SnapshotImpl` layout in snapshot.cc. It checks the header, the version through V8's `StartupData::is_valid`, the context count and rehash flag, and each section's magic number and recorded payload length. The magic number's top half is V8's `0xC0DE`. Empty blobs, bytes after the last section, and damaged payload bytes that V8 can read are accepted. The check has no checksum and leaves payload contents to V8, but rejects damage to a section's 8-byte header. See compatibility deviation `behavior:invalid-snapshot@ruby`.
 
 ## Code cache
 

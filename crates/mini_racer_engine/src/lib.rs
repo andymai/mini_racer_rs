@@ -16,4 +16,5 @@ mod sys;
 
 pub use context::{ContextHandle, Host, Unparker, WaitHandle, WaitOutcome};
 pub use control::{CallbackReply, ContextConfig, JsText};
-pub use error::{EngineError, FlagError, JsError, JsErrorKind, TerminationCause};
+pub use error::{EngineError, FlagError, InvalidSnapshot, JsError, JsErrorKind, TerminationCause};
+pub use snapshot::{SnapshotBlob, WeakSnapshotBlob};

@@ -3,9 +3,9 @@ use std::time::{Duration, Instant};
 
 use mini_racer_sync::{Channel, DispatchId, Protocol, RunnerPhase, TermCell, Terminator, lock};
 
-use crate::EngineError;
 use crate::notify::NotifyFd;
 use crate::process::tasks::Tasks;
+use crate::{EngineError, SnapshotBlob};
 
 pub struct Wire;
 
@@ -108,7 +108,7 @@ pub enum Request {
     // on a throwaway context: from `code` alone, or by warming `base` up.
     Snapshot {
         code: JsText,
-        base: Option<Vec<u8>>,
+        base: Option<SnapshotBlob>,
         depth: Depth,
     },
     Dispose,
@@ -144,9 +144,10 @@ impl Terminator for IsolateTerminator {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ContextConfig {
     pub timeout: Option<Duration>,
-    /// A blob from `ContextHandle::create_snapshot` the isolate starts from;
-    /// the runner takes it, so V8 holds the only copy.
-    pub snapshot: Option<Vec<u8>>,
+    /// The blob the isolate starts from, shared with every other context made
+    /// from it. V8 reads it for as long as the isolate lives, so it stays here,
+    /// in the block the runner holds until it has dropped the isolate.
+    pub snapshot: Option<SnapshotBlob>,
     /// The used heap size, in bytes, past which a garbage collection ends the
     /// running script out of memory, as `mini_racer`'s `max_memory:` does.
     pub max_memory: Option<u64>,
@@ -197,6 +198,8 @@ impl Drop for ControlBlock {
                 reason = "leaked rather than disposed off its runner"
             )]
             std::mem::forget(isolate);
+            #[expect(clippy::mem_forget, reason = "the leaked isolate may still read it")]
+            std::mem::forget(self.config.snapshot.take());
         }
     }
 }

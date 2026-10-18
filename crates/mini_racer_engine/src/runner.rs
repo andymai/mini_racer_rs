@@ -153,10 +153,12 @@ impl Drop for Running<'_> {
     }
 }
 
-/// How a runner gets its isolate: made fresh, optionally from a snapshot, or
-/// taken over in a forked child from an idle runner of the parent.
+/// How a runner gets its isolate: made fresh, from the control block's
+/// snapshot if it has one, or taken over in a forked child from an idle runner
+/// of the parent.
+#[derive(Clone, Copy)]
 pub enum Start {
-    Fresh(Option<Vec<u8>>),
+    Fresh,
     /// The isolate waits in the new control block's custody.
     Adopted,
 }
@@ -164,7 +166,7 @@ pub enum Start {
 pub fn run(block: &Arc<ControlBlock>, generation: &'static Generation, start: Start) {
     let closing = Closing(block);
     let disposed = catch_unwind(AssertUnwindSafe(|| match start {
-        Start::Fresh(snapshot) => serve(block, generation, snapshot),
+        Start::Fresh => serve(block, generation),
         Start::Adopted => {
             let isolate = lock(&block.custody).take();
             isolate.map_or_else(
@@ -223,20 +225,15 @@ fn refuse(block: &ControlBlock, message: &str) -> bool {
 }
 
 // Returns whether it stopped for an explicit dispose.
-fn serve(
-    block: &Arc<ControlBlock>,
-    generation: &'static Generation,
-    snapshot: Option<Vec<u8>>,
-) -> bool {
+fn serve(block: &Arc<ControlBlock>, generation: &'static Generation) -> bool {
     // No isolate is made while a fork waits for every runner to be idle.
     generation.resume(block);
+    let snapshot = block.config.snapshot.as_ref();
     let from_snapshot = snapshot.is_some();
-    let snapshot_id = snapshot
-        .as_deref()
-        .map(|blob| generation.code_cache().snapshot_id(blob));
+    let snapshot_id = snapshot.map(|blob| generation.code_cache().snapshot_id(blob.as_bytes()));
     let params = v8::CreateParams::default();
     let params = match snapshot {
-        Some(blob) => params.snapshot_blob(v8::StartupData::from(blob)),
+        Some(blob) => params.snapshot_blob(sys::startup_data(blob)),
         None => params,
     };
     let mut isolate = v8::Isolate::new(params);
@@ -429,7 +426,7 @@ fn serve_one(
                     let built = if block.term.check(DispatchKind::Script).is_some() {
                         Err(EngineError::Internal("halted without a cause".to_owned()))
                     } else {
-                        let built = snapshot::create(&code, base, |isolate| {
+                        let built = snapshot::create(&code, base.as_ref(), |isolate| {
                             isolate.set_slot(Arc::clone(runtime));
                             *lock(&block.building) = Some(isolate.thread_safe_handle());
                         });

@@ -10,6 +10,20 @@ pub enum FlagError {
     AlreadyInitialized,
 }
 
+/// Why a startup snapshot's blob is refused before V8 reads it, where V8
+/// itself would abort the process.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum InvalidSnapshot {
+    /// Shorter than its own header, or its sections do not fit in it.
+    #[error("invalid snapshot: truncated or corrupt")]
+    Corrupt,
+    #[error("invalid snapshot: not made by V8 {}", crate::process::v8_version())]
+    Version,
+    /// Empty, where a warmup needs a snapshot to start from.
+    #[error("invalid snapshot: empty")]
+    Empty,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JsErrorKind {
     Parse,
@@ -59,6 +73,8 @@ pub enum EngineError {
     /// `mini_racer`'s text for a snapshot that could not be built.
     #[error("{0}")]
     Snapshot(String),
+    #[error(transparent)]
+    InvalidSnapshot(#[from] InvalidSnapshot),
     #[error("internal error: {0}")]
     Internal(String),
 }

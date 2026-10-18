@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use mini_racer_engine::{
     CallbackReply, ContextConfig, ContextHandle, EngineError, Host, JsErrorKind, JsText,
-    TerminationCause, WaitHandle, WaitOutcome,
+    SnapshotBlob, TerminationCause, WaitHandle, WaitOutcome,
 };
 use mini_racer_wire::{Begun, Container, Limits, Scalar, Visitor, Writer, decode_value};
 
@@ -369,7 +369,7 @@ fn a_timeout_while_a_nested_result_serializes_leaves_the_result() {
     let context = ContextHandle::spawn(
         ContextConfig {
             timeout: Some(Duration::from_millis(50)),
-            snapshot: Some(blob),
+            snapshot: Some(SnapshotBlob::new(&blob).expect("a blob V8 wrote")),
             ..ContextConfig::default()
         },
         &mut adding(),
@@ -421,7 +421,7 @@ fn a_dispose_while_a_nested_result_serializes_fails_it() {
     .expect("snapshot");
     let context = ContextHandle::spawn(
         ContextConfig {
-            snapshot: Some(blob),
+            snapshot: Some(SnapshotBlob::new(&blob).expect("a blob V8 wrote")),
             ..ContextConfig::default()
         },
         &mut adding(),

@@ -58,6 +58,7 @@ MEMORY = {
   "one_context" => ["RSS of a process with one idle context (MB)", 1e6],
   "idle_contexts" => ["RSS per idle context, 100 live (MB)", 1e6],
   "babel_contexts" => ["RSS per context with Babel loaded, 20 live (MB)", 1e6],
+  "babel_snapshot_contexts" => ["RSS per context from one Babel snapshot, 20 live (MB)", 1e6],
   "mui_contexts" => ["RSS per context with the MUI bundle loaded, 20 live (MB)", 1e6],
   "dispose_churn" => ["RSS growth per context over 20,000 created and disposed, after 2,000 (bytes)", 1, 64],
   "gc_churn" => ["peak RSS over 20,000 contexts left to the garbage collector (MB)", 1e6],

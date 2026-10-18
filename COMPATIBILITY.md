@@ -4,7 +4,7 @@
 
 | Engine | Done | Planned | Deviation |
 |---|---|---|---|
-| CRuby | 54 | 0 | 24 |
+| CRuby | 54 | 0 | 25 |
 | TruffleRuby | 58 | 0 | 0 |
 
 ## Surface
@@ -143,6 +143,12 @@ Approved 2026-10-16.
 For forks made through Ruby's `fork`, `IO.popen("-")` or `Process.daemon`, mini_racer_rs waits for context runners, pauses its worker pool and waits for running worker tasks in both modes; mini_racer 0.22.1 waits for neither. Idle pool threads wait on a Rust standard library condition variable that keeps no records on their stacks, so a child does not inherit records that refer to discarded stacks. mini_racer 0.22.1 creates its `:single_threaded` platform with `NewSingleThreadedDefaultPlatform`, which has no V8 worker threads. mini_racer_rs creates V8's platform with one worker thread, which never receives a task, and routes worker tasks to a process-owned pool with one thread under `:single_threaded`. On Ubuntu 24.04 with glibc 2.39, 20 of 20 mini_racer children aborted with signal 6 after loading and rendering React, whether or not two parent threads kept rendering. With mini_racer_rs, 20 of 20 children exited cleanly in both cases. On Fedora, mini_racer children hung within the first 50 forks in `test/stress/fork_busy.rb`; mini_racer_rs completed 300 forks per run on Fedora and Ubuntu. On one Fedora machine, with four threads evaluating and 50 forks per run, fork latency was 0.90 to 0.94 ms at the median across three runs, versus 0.73 to 0.78 ms with mini_racer 0.22.1. The waits are best effort: the fork proceeds after the 500 ms runner bound or the following 100 ms worker bound expires.
 
 Approved 2026-10-17.
+
+### `behavior:invalid-snapshot@ruby`
+
+mini_racer_rs raises `MiniRacer::SnapshotError` instead of letting V8 terminate the process. `Snapshot.load` rejects a blob that is too short for its header, was made by another V8 version, or is truncated. `Context.new(snapshot:)` and `#warmup!` reject the same corruption if the String returned by `dump` has since been changed, and `#warmup!` rejects an empty snapshot. The messages are `invalid snapshot: truncated or corrupt`, `invalid snapshot: not made by V8 <version>`, and `invalid snapshot: empty`. Context option errors still raise first. mini_racer 0.22.1 accepts any String, then dies with a V8 fatal error (SIGTRAP), or with SIGSEGV when the blob is cut short in its last section. As in mini_racer, an empty blob starts a context without a snapshot, trailing bytes are accepted, and damaged payload bytes that V8 can read are accepted. Damage to a section's 8-byte header is rejected.
+
+Approved 2026-10-18.
 
 ### `behavior:multi-threaded-fork@ruby`
 

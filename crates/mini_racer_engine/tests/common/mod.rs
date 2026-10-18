@@ -7,7 +7,8 @@
 use std::time::Duration;
 
 use mini_racer_engine::{
-    ContextConfig, ContextHandle, EngineError, Host, JsErrorKind, WaitHandle, WaitOutcome,
+    ContextConfig, ContextHandle, EngineError, Host, JsErrorKind, SnapshotBlob, WaitHandle,
+    WaitOutcome,
 };
 
 pub struct Parking;
@@ -29,13 +30,22 @@ fn terminated(result: Result<Vec<u8>, EngineError>) -> bool {
     matches!(result, Err(EngineError::Js(js)) if matches!(js.kind, JsErrorKind::Terminated(_)))
 }
 
+// Every fourth context starts from one snapshot blob the threads share, so the
+// leak checks cover contexts made from a shared blob.
 pub fn churn() {
+    let built = ContextHandle::create_snapshot("var shared = 1".into(), None, &mut Parking)
+        .expect("snapshot");
+    let blob = SnapshotBlob::new(&built).expect("a blob V8 wrote");
     std::thread::scope(|scope| {
         for _ in 0..4 {
-            scope.spawn(|| {
+            let blob = blob.clone();
+            scope.spawn(move || {
                 for round in 0..25 {
-                    let context = ContextHandle::spawn(ContextConfig::default(), &mut Parking)
-                        .expect("spawn");
+                    let config = ContextConfig {
+                        snapshot: (round % 4 == 0).then(|| blob.clone()),
+                        ..ContextConfig::default()
+                    };
+                    let context = ContextHandle::spawn(config, &mut Parking).expect("spawn");
                     // The delayed task is still queued at the dispose.
                     assert!(
                         context
@@ -78,5 +88,6 @@ pub fn churn() {
                 }
             });
         }
+        drop(blob);
     });
 }
