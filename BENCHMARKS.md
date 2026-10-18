@@ -2,7 +2,7 @@
 
 ## Method
 
-All tables come from one release build of commit `2513a48`, measured over 5 runs on Ruby 3.4.2 and Linux on an AMD Ryzen 9 7950X3D. The CPU governor is set to `performance`, and both gems are pinned to CPUs 0 through 7 with `taskset` (`bench/run.rb --cpus 0-7`).
+All tables except the production bundle section come from one release build of commit `220bfe7`, measured over 5 runs on Ruby 3.4.2 and Linux on an AMD Ryzen 9 7950X3D, with the CPU governor set to `performance` and both gems pinned to CPUs 0 through 7 with `taskset` (`bench/run.rb --cpus 0-7`), while the production bundle section comes from commit `2513a48`, measured the same way.
 
 Each run starts mini_racer 0.22.1 with libv8-node 24.12.0.1, then starts mini_racer_rs as a separate process. Tables report medians across runs. Workload tables report the median of each run's median. The harness checks that both gems produce identical output for every workload.
 
@@ -12,22 +12,22 @@ The ratio is how many times faster mini_racer_rs is, or how many times less memo
 
 | case | mini_racer 0.22.1 | mini_racer_rs | ratio | note |
 |---|---:|---:|---:|---|
-| Babel transform of a 3 KB JSX component, through ExecJS | 10.00 ms | 5.32 ms | 1.88x |  |
-| Terser minify of a 78 KB library, through ExecJS | 51.65 ms | 51.23 ms | 1.01x | noisy |
-| React server render of 1,000 items (17 KB of HTML), through ExecJS | 192.31 µs | 173.63 µs | 1.11x | noisy |
-| React in a new context: load the bundle and render 1,000 items, through ExecJS | 12.00 ms | 12.05 ms | 1.00x | noisy |
-| Handlebars render of 50 rows, through `Context#call` | 47.95 µs | 40.14 µs | 1.19x |  |
-| Autoprefixer on Bootstrap's 280 KB stylesheet, through ExecJS | 27.23 ms | 23.71 ms | 1.15x |  |
-| MUI dashboard server render of 200 rows and 299 icons (469 KB of HTML), through ExecJS | 32.19 ms | 30.55 ms | 1.05x |  |
-| MUI in a new context: load the 8.2 MB bundle and render once, through ExecJS | 166.72 ms | 120.64 ms | 1.38x |  |
+| Babel transform of a 3 KB JSX component, through ExecJS | 10.05 ms | 5.15 ms | 1.95x | noisy |
+| Terser minify of a 78 KB library, through ExecJS | 51.07 ms | 51.97 ms | 0.98x | noisy |
+| React server render of 1,000 items (17 KB of HTML), through ExecJS | 191.28 µs | 173.63 µs | 1.10x | noisy |
+| React in a new context: load the bundle and render 1,000 items, through ExecJS | 11.90 ms | 11.84 ms | 1.01x | noisy |
+| Handlebars render of 50 rows, through `Context#call` | 49.11 µs | 34.86 µs | 1.41x | noisy |
+| Autoprefixer on Bootstrap's 280 KB stylesheet, through ExecJS | 26.31 ms | 23.73 ms | 1.11x | noisy |
+| MUI dashboard server render of 200 rows and 299 icons (469 KB of HTML), through ExecJS | 32.56 ms | 29.75 ms | 1.09x |  |
+| MUI in a new context: load the 8.2 MB bundle and render once, through ExecJS | 166.77 ms | 105.14 ms | 1.59x |  |
 
 Each workload runs in its own process. Babel warms up for 50 transforms before 160 timed transforms because V8 keeps optimizing it that long. Babel, Terser, React, Autoprefixer, and MUI run through ExecJS, as Sprockets and react-rails do. Handlebars runs through `Context#call`. ExecJS deletes `console` before loading a source, so the harness provides Babel with a no-op `console`.
 
-Babel's JavaScript takes 5.3 ms per transform inside V8 15.2 and 10.3 ms inside mini_racer's V8 13.6, so its gain comes from V8 rather than call overhead. Terser and React spend nearly all their time in JavaScript and perform about the same. mini_racer_rs compiles evals of 1 MB or more from a process-wide V8 code cache. The second time a script is seen builds the cache, and later loads compile from it. The 8.2 MB MUI bundle therefore loads and renders once in a new context in 120.64 ms against 166.72 ms, or 1.38x faster. The 217 KB React bundle is below the threshold and loads in the same time in both gems.
+The 8.2 MB MUI bundle loads and renders once in a new context in 105.14 ms against 166.77 ms, or 1.59x faster. The 217 KB React bundle is below the threshold and loads in the same time in both gems. Babel's JavaScript takes 5.3 ms per transform inside V8 15.2 and 10.3 ms inside mini_racer's V8 13.6, so its gain comes from V8 rather than call overhead. Terser and React spend nearly all their time in JavaScript and perform about the same. mini_racer_rs compiles evals of 1 MB or more from a process-wide V8 code cache. The second time a script is seen builds the cache, and later loads compile from it. A context loading the script afterward also reads one source copy shared outside V8's heap.
 
 ## A production server rendering bundle
 
-This benchmark uses a 44 MB production server rendering bundle kept outside the repository. It is loaded through ExecJS in the same way that react-rails loads a bundle.
+This section uses a 44 MB production server rendering bundle kept outside the repository and loaded through ExecJS in the same way that react-rails loads a bundle. Its table comes from commit `2513a48`.
 
 | case | mini_racer 0.22.1 | mini_racer_rs | ratio | note |
 |---|---:|---:|---:|---|
@@ -40,27 +40,27 @@ The bundle loads into a new context in 215.01 ms against 982.80 ms, or 4.57x fas
 
 | case | mini_racer 0.22.1 | mini_racer_rs | ratio | note |
 |---|---:|---:|---:|---|
-| Eval round trip p50 | 6.64 µs | 1.30 µs | 5.10x | noisy |
-| Eval round trip p99 | 10.61 µs | 2.98 µs | 3.57x | noisy |
-| Eval round trip p99.9 | 62.08 µs | 16.94 µs | 3.66x | noisy |
-| Call round trip p50 | 6.51 µs | 1.55 µs | 4.19x |  |
-| Call round trip p99 | 11.02 µs | 2.40 µs | 4.58x | noisy |
-| Call round trip p99.9 | 81.01 µs | 16.04 µs | 5.05x | noisy |
-| Call with timeout p50 | 21.12 µs | 1.61 µs | 13.09x |  |
-| Call with timeout p99 | 43.25 µs | 2.48 µs | 17.48x | noisy |
-| Call with timeout p99.9 | 174.71 µs | 15.94 µs | 10.96x | noisy |
-| Callback round trip p50 | 6.14 µs | 1.27 µs | 4.85x |  |
-| Startup p50 | 1.51 ms | 1.06 ms | 1.42x |  |
-| Startup and load Babel p50 | 44.84 ms | 14.83 ms | 3.02x | noisy |
-| Startup from a Babel snapshot p50 | 11.44 ms | 5.09 ms | 2.25x |  |
+| Eval round trip p50 | 6.91 µs | 1.09 µs | 6.33x |  |
+| Eval round trip p99 | 10.10 µs | 2.72 µs | 3.71x |  |
+| Eval round trip p99.9 | 61.38 µs | 14.04 µs | 4.37x | noisy |
+| Call round trip p50 | 6.51 µs | 0.72 µs | 9.03x |  |
+| Call round trip p99 | 12.81 µs | 1.08 µs | 11.84x | noisy |
+| Call round trip p99.9 | 80.69 µs | 3.33 µs | 24.26x | noisy |
+| Call with timeout p50 | 20.48 µs | 0.76 µs | 26.87x | noisy |
+| Call with timeout p99 | 35.52 µs | 1.16 µs | 30.57x | noisy |
+| Call with timeout p99.9 | 164.01 µs | 3.29 µs | 49.91x | noisy |
+| Callback round trip p50 | 6.12 µs | 1.12 µs | 5.44x | noisy |
+| Startup p50 | 1.56 ms | 1.09 ms | 1.43x |  |
+| Startup and load Babel p50 | 44.41 ms | 13.26 ms | 3.35x |  |
+| Startup from a Babel snapshot p50 | 11.04 ms | 5.04 ms | 2.19x |  |
 | Babel snapshot size | 5.68 MB | 5.76 MB | 0.99x |  |
-| JS to Ruby | 52.17 MB/s | 114.09 MB/s | 2.19x |  |
-| Ruby to JS | 181.11 MB/s | 199.51 MB/s | 1.10x |  |
+| JS to Ruby | 52.68 MB/s | 171.33 MB/s | 3.25x |  |
+| Ruby to JS | 181.74 MB/s | 248.35 MB/s | 1.37x |  |
 | Idle CPU, 50 contexts | 0.00 % of a core | 0.00 % of a core | n/a | under 1.0 |
 
 mini_racer releases the GVL and passes each request and reply through a mutex and condition variable. mini_racer_rs briefly spins its runner and Ruby thread before parking, so quick replies avoid a sleep and wake. Idle contexts use no CPU. For a context with `timeout:`, mini_racer starts a watchdog thread for every eval or call, while mini_racer_rs uses one watchdog thread per process.
 
-Startup plus loading Babel takes 14.83 ms against 44.84 ms, or 3.02x faster. This row is noisy. Babel's 2.3 MB bundle compiles from the code cache.
+Startup plus loading Babel takes 13.26 ms against 44.41 ms, or 3.35x faster. Babel's 2.3 MB bundle compiles from the code cache.
 
 ## Memory
 
@@ -68,14 +68,15 @@ Each memory scenario runs in a fresh process. Resident memory is read after garb
 
 | case | mini_racer 0.22.1 | mini_racer_rs | ratio | note |
 |---|---:|---:|---:|---|
-| RSS of a process with one idle context | 39.68 MB | 38.01 MB | 1.04x |  |
+| RSS of a process with one idle context | 39.69 MB | 37.94 MB | 1.05x |  |
 | RSS per idle context, 100 live | 1.39 MB | 1.58 MB | 0.88x |  |
-| RSS per context with Babel loaded, 20 live | 28.52 MB | 17.21 MB | 1.66x |  |
-| RSS per context with the MUI bundle loaded, 20 live | 110.33 MB | 55.51 MB | 1.99x |  |
-| RSS growth per context over 20,000 created and disposed, after 2,000 | 1,606.86 bytes | 196.61 bytes | 8.17x | noisy |
-| Peak RSS over 20,000 contexts left to the garbage collector | 2,915.84 MB | 101.88 MB | 28.62x |  |
+| RSS per context with Babel loaded, 20 live | 28.50 MB | 15.15 MB | 1.88x |  |
+| RSS per context from one Babel snapshot, 20 live | 17.37 MB | 9.20 MB | 1.89x |  |
+| RSS per context with the MUI bundle loaded, 20 live | 110.34 MB | 44.25 MB | 2.49x |  |
+| RSS growth per context over 20,000 created and disposed, after 2,000 | 1,659.29 bytes | 101.38 bytes | 16.37x | noisy |
+| Peak RSS over 20,000 contexts left to the garbage collector | 2,919.62 MB | 102.05 MB | 28.61x |  |
 
-An idle context costs 1.58 MB against 1.39 MB, or 0.88x. Loaded contexts use less memory: Babel uses 17.21 MB against 28.52 MB, and MUI uses 55.51 MB against 110.33 MB. Creating and disposing 20,000 contexts grows resident memory by 196.61 bytes per context against 1,606.86 bytes, although this row is noisy. When 20,000 contexts are left to Ruby's garbage collector, resident memory peaks at 101.88 MB against 2,915.84 MB. mini_racer_rs tells Ruby's garbage collector that each live context holds 2 MiB outside the Ruby heap with `rb_gc_adjust_memory_usage`, so collections run and finalize abandoned contexts sooner. mini_racer reports only the size of its context struct.
+Loaded contexts use less memory: Babel uses 15.15 MB against 28.50 MB, a context from one Babel snapshot uses 9.20 MB against 17.37 MB, and MUI uses 44.25 MB against 110.34 MB. An idle context costs 1.58 MB against 1.39 MB, or 0.88x. Contexts loading the same script of 1 MB or more read one shared copy of its source, and contexts from one snapshot share its blob. Creating and disposing 20,000 contexts grows resident memory by 101.38 bytes per context against 1,659.29 bytes, although this row is noisy. When 20,000 contexts are left to Ruby's garbage collector, resident memory peaks at 102.05 MB against 2,919.62 MB. mini_racer_rs tells Ruby's garbage collector that each live context holds 2 MiB outside the Ruby heap with `rb_gc_adjust_memory_usage`, so collections run and finalize abandoned contexts sooner. mini_racer reports only the size of its context struct.
 
 ## mini_racer's own benchmark/serde suite
 
@@ -83,33 +84,33 @@ Times are microseconds per iteration. The suite's context has a 120 second timeo
 
 | case | mini_racer 0.22.1 | mini_racer_rs | ratio | note |
 |---|---:|---:|---:|---|
-| `js_to_ruby/return_10k_ints` | 228.60 | 141.72 | 1.61x | noisy |
-| `js_to_ruby/return_10k_floats` | 208.62 | 77.54 | 2.69x | noisy |
-| `js_to_ruby/return_10k_ascii_strings` | 1708.98 | 652.43 | 2.62x |  |
-| `js_to_ruby/return_10k_latin1_strings` | 5796.54 | 687.24 | 8.43x | noisy |
-| `js_to_ruby/return_10k_utf8_bmp_strings` | 5847.54 | 731.20 | 8.00x |  |
-| `js_to_ruby/return_10k_utf8_emoji_strings` | 5987.57 | 766.52 | 7.81x |  |
-| `js_to_ruby/return_object_1k_ints` | 381.68 | 226.46 | 1.69x | noisy |
-| `js_to_ruby/return_array_1k_objects` | 792.20 | 409.43 | 1.93x |  |
-| `ruby_to_js/call_no_args` | 22.31 | 1.56 | 14.33x |  |
-| `ruby_to_js/call_int_arg` | 22.72 | 1.63 | 13.94x |  |
-| `ruby_to_js/call_short_string` | 23.28 | 1.81 | 12.87x |  |
-| `ruby_to_js/call_utf8_string` | 25.19 | 1.82 | 13.80x |  |
-| `ruby_to_js/call_emoji_string` | 25.22 | 1.84 | 13.72x |  |
-| `ruby_to_js/roundtrip_10k_ints` | 562.31 | 558.40 | 1.01x |  |
-| `ruby_to_js/roundtrip_10k_floats` | 612.24 | 590.90 | 1.04x |  |
-| `ruby_to_js/roundtrip_10k_strings` | 2366.30 | 1239.04 | 1.91x |  |
-| `ruby_to_js/roundtrip_10k_utf8_bmp_strings` | 6433.81 | 1385.94 | 4.64x |  |
-| `ruby_to_js/roundtrip_10k_utf8_emoji_strings` | 6536.89 | 1459.54 | 4.48x |  |
-| `ruby_to_js/roundtrip_hash_1k` | 347.90 | 196.05 | 1.77x | noisy |
-| `ruby_to_js/roundtrip_array_1k_hashes` | 1162.93 | 730.33 | 1.59x | noisy |
-| `callback/1000_echo_int` | 6064.60 | 1212.82 | 5.00x | noisy |
-| `callback/1000_echo_short_string` | 6203.71 | 1314.65 | 4.72x | noisy |
-| `callback/1000_echo_utf8_string` | 6405.00 | 1339.60 | 4.78x |  |
-| `callback/1000_echo_emoji_string` | 6494.21 | 1364.03 | 4.76x | noisy |
-| `callback/1000_add_ints` | 6239.86 | 1291.11 | 4.83x |  |
+| `js_to_ruby/return_10k_ints` | 227.20 | 134.82 | 1.69x |  |
+| `js_to_ruby/return_10k_floats` | 203.47 | 71.06 | 2.86x |  |
+| `js_to_ruby/return_10k_ascii_strings` | 1679.34 | 615.89 | 2.73x | noisy |
+| `js_to_ruby/return_10k_latin1_strings` | 5789.52 | 580.29 | 9.98x |  |
+| `js_to_ruby/return_10k_utf8_bmp_strings` | 5882.58 | 627.59 | 9.37x |  |
+| `js_to_ruby/return_10k_utf8_emoji_strings` | 5941.93 | 662.80 | 8.96x | noisy |
+| `js_to_ruby/return_object_1k_ints` | 374.80 | 202.95 | 1.85x | noisy |
+| `js_to_ruby/return_array_1k_objects` | 784.38 | 286.29 | 2.74x | noisy |
+| `ruby_to_js/call_no_args` | 21.66 | 0.73 | 29.78x |  |
+| `ruby_to_js/call_int_arg` | 21.80 | 0.78 | 27.97x |  |
+| `ruby_to_js/call_short_string` | 22.56 | 1.03 | 21.95x | noisy |
+| `ruby_to_js/call_utf8_string` | 24.07 | 1.06 | 22.69x |  |
+| `ruby_to_js/call_emoji_string` | 24.18 | 1.07 | 22.67x |  |
+| `ruby_to_js/roundtrip_10k_ints` | 564.05 | 285.51 | 1.98x | noisy |
+| `ruby_to_js/roundtrip_10k_floats` | 617.37 | 303.25 | 2.04x | noisy |
+| `ruby_to_js/roundtrip_10k_strings` | 2356.94 | 849.73 | 2.77x | noisy |
+| `ruby_to_js/roundtrip_10k_utf8_bmp_strings` | 6469.14 | 1021.49 | 6.33x |  |
+| `ruby_to_js/roundtrip_10k_utf8_emoji_strings` | 6491.21 | 1042.02 | 6.23x |  |
+| `ruby_to_js/roundtrip_hash_1k` | 346.39 | 166.83 | 2.08x |  |
+| `ruby_to_js/roundtrip_array_1k_hashes` | 1172.25 | 526.73 | 2.23x |  |
+| `callback/1000_echo_int` | 6093.58 | 1050.95 | 5.80x |  |
+| `callback/1000_echo_short_string` | 6207.97 | 1157.08 | 5.37x |  |
+| `callback/1000_echo_utf8_string` | 6486.89 | 1176.41 | 5.51x |  |
+| `callback/1000_echo_emoji_string` | 6380.80 | 1182.71 | 5.40x | noisy |
+| `callback/1000_add_ints` | 6239.26 | 1153.16 | 5.41x | noisy |
 
-Every row favors mini_racer_rs, from 1.01x to 14.33x. Arrays of numbers decode from JavaScript to Ruby in runs of up to 64 elements.
+Every row favors mini_racer_rs, from 1.69x to 29.78x. Arrays of numbers decode from JavaScript to Ruby in runs of up to 64 elements, object keys are interned and each Hash is filled with one bulk insert, calls with few properties are built by the runner, and primitive results are written without V8's serializer.
 
 ## Reproducing
 
