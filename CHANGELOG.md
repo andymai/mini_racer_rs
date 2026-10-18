@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.2](https://github.com/andymai/mini_racer_rs/compare/v1.0.1...v1.0.2) (2026-10-18)
+
+
+### Performance
+
+* **engine:** share one copy of a large repeated source across contexts ([#85](https://github.com/andymai/mini_racer_rs/issues/85)) ([9fe050a](https://github.com/andymai/mini_racer_rs/commit/9fe050a7a612314264e255f9bcc40ca146e93571))
+
 ## [1.0.1](https://github.com/andymai/mini_racer_rs/compare/v1.0.0...v1.0.1) (2026-10-18)
 
 
