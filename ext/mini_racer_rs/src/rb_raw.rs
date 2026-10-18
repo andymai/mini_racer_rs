@@ -185,6 +185,23 @@ pub fn ruby_type(_ruby: &Ruby, value: Value) -> RubyType {
     }
 }
 
+/// Whether a Hash stores `key` without running Ruby code or reaching any
+/// other object: Ruby hashes and compares these itself (`any_hash`,
+/// `rb_any_cmp`), a String only while its class is String itself.
+pub fn plain_key(ruby: &Ruby, key: Value) -> bool {
+    match ruby_type(ruby, key) {
+        RubyType::Fixnum
+        | RubyType::Bignum
+        | RubyType::Float
+        | RubyType::Symbol
+        | RubyType::Nil
+        | RubyType::True
+        | RubyType::False => true,
+        RubyType::String => key.class().as_raw() == ruby.class_string().as_raw(),
+        _ => false,
+    }
+}
+
 /// An object's address, the identity `mini_racer`'s encoder keys repeated
 /// containers by; stable only while the object is pinned.
 pub fn identity(value: Value) -> u64 {

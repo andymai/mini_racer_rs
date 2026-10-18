@@ -111,16 +111,37 @@ status = "same"
 [cases."curated-lone-surrogate-key"]
 status = "same"
 
+[cases."curated-map-equal-keys-few"]
+status = "same"
+
+[cases."curated-map-equal-keys-many"]
+status = "same"
+
+[cases."curated-map-keyed-by-itself-in-an-array"]
+status = "same"
+
+[cases."curated-map-keyed-by-open-ancestors"]
+status = "same"
+
+[cases."curated-map-keys-ruby-hashes"]
+status = "same"
+
 [cases."curated-map-string-keys"]
 status = "same"
 
 [cases."curated-map-with-object-keys"]
 status = "same"
 
+[cases."curated-maps-past-the-inline-pairs"]
+status = "same"
+
 [cases."curated-nesting-past-the-limit"]
 status = "same"
 
 [cases."curated-number-runs"]
+status = "same"
+
+[cases."curated-objects-past-the-inline-pairs"]
 status = "same"
 
 [cases."curated-padded-regexp-pattern"]

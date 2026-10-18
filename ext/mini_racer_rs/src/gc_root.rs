@@ -1,4 +1,5 @@
 use std::cell::{Cell, RefCell};
+use std::ops::Range;
 use std::sync::OnceLock;
 
 use magnus::gc::Marker;
@@ -110,8 +111,72 @@ impl Pins {
     }
 }
 
+/// Ruby values a decode keeps in order past what fits on the native stack.
+/// The holder's mark pins every value. Only touched under the GVL; a borrow
+/// that spans a Ruby call is a shared one, which the mark shares, and no
+/// mutable borrow does.
+#[derive(Default, TypedData)]
+#[magnus(class = "MiniRacerRs::Spill", free_immediately, mark)]
+pub struct Spill(RefCell<Vec<Opaque<Value>>>);
+
+impl DataTypeFunctions for Spill {
+    // As for Pins, a mutable borrow at mark time would leave values unmarked.
+    fn mark(&self, marker: &Marker) {
+        let Ok(values) = self.0.try_borrow() else {
+            std::process::abort();
+        };
+        for value in values.iter() {
+            marker.mark(*value);
+        }
+    }
+}
+
+impl Spill {
+    /// Holds `values` first. Keep using the returned `Obj` while the values
+    /// are needed; a reference into its data alone does not keep the holder
+    /// alive.
+    pub fn new(ruby: &Ruby, values: &[Value]) -> Obj<Self> {
+        let held = values.iter().copied().map(Opaque::from).collect();
+        ruby.obj_wrap(Self(RefCell::new(held)))
+    }
+
+    pub fn push(&self, value: Value) {
+        self.0.borrow_mut().push(Opaque::from(value));
+    }
+
+    pub fn truncate(&self, len: usize) {
+        self.0.borrow_mut().truncate(len);
+    }
+
+    pub fn get(&self, ruby: &Ruby, index: usize) -> Option<Value> {
+        self.0
+            .borrow()
+            .get(index)
+            .map(|value| ruby.get_inner(*value))
+    }
+
+    /// Runs `read` over the values in `range`; `read` may call Ruby.
+    pub fn with_values<R>(
+        &self,
+        _ruby: &Ruby,
+        range: Range<usize>,
+        read: impl FnOnce(&[Value]) -> R,
+    ) -> R {
+        let values = self.0.borrow();
+        let held = values.get(range).unwrap_or_default();
+        // SAFETY: Opaque is a transparent wrapper, so a slice of them has the
+        // layout of a slice of the values they wrap, which the `&Ruby`
+        // argument proves this thread may use.
+        let slice =
+            unsafe { std::slice::from_raw_parts(held.as_ptr().cast::<Value>(), held.len()) };
+        read(slice)
+    }
+}
+
 pub fn init(ruby: &Ruby, rs: RModule) -> Result<(), Error> {
-    let class = rs.define_class("Pins", ruby.class_object())?;
-    class.undef_default_alloc_func();
+    for name in ["Pins", "Spill"] {
+        rs.define_class(name, ruby.class_object())?
+            .undef_default_alloc_func();
+    }
     Ok(())
 }

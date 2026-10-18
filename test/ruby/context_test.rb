@@ -58,6 +58,26 @@ class ContextTest < Minitest::Test
     end
   end
 
+  # Each later key equals the one before it only while the objects around the
+  # Map hold just their pairs decoded so far, which mini_racer has stored by
+  # then, so each pair of keys is one key.
+  def test_a_map_keyed_by_containers_holding_open_objects_sees_their_pairs
+    source = <<~JS
+      (() => {
+        const outer = {x: 1, inner: {y: 2}};
+        outer.inner.m = new Map([[[outer, outer.inner], "a"], [[{x: 1}, {y: 2}], "b"], [outer, "c"], [{x: 1}, "d"]]);
+        return outer;
+      })()
+    JS
+    outer = @context.eval(source)
+    map = outer["inner"]["m"]
+
+    assert_equal %w[b d], map.values
+    assert_same outer, map.keys[0][0]
+    assert_same outer["inner"], map.keys[0][1]
+    assert_same outer, map.keys[1]
+  end
+
   def test_only_messages_from_javascript_are_utf8
     keyword = assert_raises(MiniRacer::RuntimeError) { MiniRacer::Context.new(bogus: 1) }
     thrown = assert_raises(MiniRacer::RuntimeError) { @context.eval("throw new Error('boom')") }

@@ -6119,5 +6119,75 @@
         "source": "new Map([['k', 1], [new String('s'), 2], [1, 3], ['\\udc00', 4], [null, 5], ['caf\\u00e9', 6], ['\\u6771', 7]])"
       }
     ]
+  },
+  {
+    "id": "curated-map-keyed-by-open-ancestors",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "(() => { const outer = {x: 1, inner: {y: 2}}; outer.inner.m = new Map([[[outer, outer.inner], 'a'], [[{x: 1}, {y: 2}], 'b'], [outer, 'c'], [{x: 1}, 'd']]); return outer })()"
+      }
+    ]
+  },
+  {
+    "id": "curated-map-keyed-by-itself-in-an-array",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "(() => { const m = new Map([['x', 1]]); m.set([m], 'a'); m.set([new Map([['x', 1]])], 'b'); m.set('y', 2); return [m, {before: 1, m, after: 2}] })()"
+      }
+    ]
+  },
+  {
+    "id": "curated-map-equal-keys-few",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "new Map([[1, 'a'], [1n, 'b'], ['s', 'c'], [new String('s'), 'd'], [2 ** 70, 'e'], [2n ** 70n, 'f']])"
+      }
+    ]
+  },
+  {
+    "id": "curated-map-equal-keys-many",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "new Map([...Array.from({length: 12}, (_, i) => [[i, 'n' + i], [BigInt(i), 'b' + i]]).flat(), [2 ** 70, 'big'], [2n ** 70n, 'bigint'], ['s', 1], [new String('s'), 2], ...Array.from({length: 30}, (_, i) => ['k' + i, i])])"
+      }
+    ]
+  },
+  {
+    "id": "curated-map-keys-ruby-hashes",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "(() => { const o = {x: 1}; const e = new Error('e', {cause: o}); o.m = new Map([[new Date(0), 1], [e, 2], [new Date(0), 3], [o, 4], ['after', 5]]); o.y = 2; return o })()"
+      }
+    ]
+  },
+  {
+    "id": "curated-objects-past-the-inline-pairs",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "(() => { const wide = (n, p, inner) => Object.fromEntries([...Array.from({length: n}, (_, i) => [p + i, i]), ['inner', inner], ...Array.from({length: n}, (_, i) => [p + 'z' + i, -i])]); const o = wide(70, 'a', wide(40, 'b', wide(90, 'c', {leaf: true}))); o.self = o; return [o, o.inner.inner] })()"
+      }
+    ]
+  },
+  {
+    "id": "curated-maps-past-the-inline-pairs",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "(() => { const m = new Map(Array.from({length: 150}, (_, i) => [i % 2 ? 'k' + i : i, {i}])); m.set('nested', new Map(Array.from({length: 80}, (_, i) => [i, m]))); m.set('last', [m]); return m })()"
+      }
+    ]
   }
 ]

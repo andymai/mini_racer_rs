@@ -3,6 +3,10 @@ mod decode;
 mod encode;
 mod errors;
 mod fork;
+#[allow(
+    unsafe_code,
+    reason = "a decode's spilled values are lent in place as the slice Ruby reads"
+)]
 mod gc_root;
 mod guard;
 mod host;
