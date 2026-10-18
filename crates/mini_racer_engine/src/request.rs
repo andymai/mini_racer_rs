@@ -53,15 +53,17 @@ pub const fn worth_building(objects: usize, properties: usize) -> bool {
 /// does or that V8 would refuse (a binary, a key that is not a string or an
 /// int32, a key given twice, an array inside itself, an object of more than
 /// `MAX_KEYS` keys, nesting past `MAX_DEPTH`), decided from the bytes before
-/// any value is made, and for any termination V8 may have pending. V8 acts on
-/// one before each value it reads and as each array or object begins; this
-/// looks at the same points.
+/// any value is made. A termination requested as it reads leaves it `Unbuilt`
+/// too: V8 acts on one before each value it reads, an array or object
+/// beginning as a value does, so this looks before the request and before
+/// each value. One requested before the dispatch refused it
+/// (`TermCell::refuses`).
 pub fn read<'s, 'b>(
     scope: &v8::PinScope<'s, '_>,
     bytes: &'b [u8],
     termination_requested: &AtomicBool,
 ) -> Read<'s, 'b> {
-    if scope.is_execution_terminating() || !buildable(bytes) {
+    if !buildable(bytes) {
         return Read::Unbuilt;
     }
     let mut builder = Builder {
@@ -481,7 +483,6 @@ impl<'s, 'b> Builder<'s, 'b, '_, '_> {
     }
 
     fn array(&mut self, depth: u32) -> Option<v8::Local<'s, v8::Value>> {
-        self.unterminated()?;
         let length = self.bytes.array_length()?;
         let id = self.objects.len();
         self.objects.push(None);
@@ -500,12 +501,10 @@ impl<'s, 'b> Builder<'s, 'b, '_, '_> {
     // Each property is defined as V8's deserializer defines it, never set, so
     // no setter or prototype sees it.
     fn object(&mut self, depth: u32) -> Option<v8::Local<'s, v8::Value>> {
-        self.unterminated()?;
         let object = v8::Object::new(self.scope);
         self.objects.push(Some(object.into()));
         let mut position = 0usize;
         while self.bytes.peek()? != tag::END_OBJECT {
-            self.unterminated()?;
             let key = self.key(position, depth)?;
             let value = self.value(depth)?;
             object

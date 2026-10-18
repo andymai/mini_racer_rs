@@ -584,7 +584,8 @@ fn nesting_at_any_depth_arrives_whole() {
 // V8's deserializer acts on a termination before each value, so a collection
 // past `max_memory` while the arguments are read ends the call before the
 // function runs, even one V8 enters without checking, as `fill`: whether the
-// runner builds the values or V8 reads the whole call.
+// runner builds the values, in an array or in objects, or V8 reads the whole
+// call.
 #[test]
 fn a_heap_past_max_memory_while_arguments_are_read_stops_the_call_before_it_runs() {
     let count = 2_000_000;
@@ -601,6 +602,16 @@ fn a_heap_past_max_memory_while_arguments_are_read_stops_the_call_before_it_runs
         }
         w.end_array(count);
     });
+    let in_objects = request("filled.fill", 1, |w| {
+        w.begin_array(count);
+        for n in 0..count {
+            w.begin_object();
+            w.utf8(b"k");
+            w.utf8(&text(n));
+            w.end_object(1);
+        }
+        w.end_array(count);
+    });
     let in_object = request("filled.fill", 1, |w| {
         w.begin_object();
         for n in 0..count {
@@ -609,7 +620,12 @@ fn a_heap_past_max_memory_while_arguments_are_read_stops_the_call_before_it_runs
         }
         w.end_object(count);
     });
-    for (sent, objects, properties) in [(in_array, 0, 0), (in_object, 1, 2_000_000)] {
+    let many = usize::try_from(count).expect("count");
+    for (sent, objects, properties) in [
+        (in_array, 0, 0),
+        (in_objects, many, many),
+        (in_object, 1, many),
+    ] {
         let context = spawn(ContextConfig {
             max_memory: Some(16_000_000),
             ..ContextConfig::default()
@@ -627,6 +643,37 @@ fn a_heap_past_max_memory_while_arguments_are_read_stops_the_call_before_it_runs
 }
 
 type Arguments<'a> = &'a dyn Fn(&mut Writer<'_>);
+
+// A stop with nothing running refuses the next call before the runner reads
+// it, where mini_racer's read of the call acts on it, so `fill`, which V8
+// enters without checking, never runs, whatever the call holds.
+#[test]
+fn a_stop_pending_before_a_call_ends_it_before_its_function_runs() {
+    let calls: [(u32, Arguments<'_>); 4] = [
+        (0, &|_| {}),
+        (1, &|w| {
+            w.integer(1);
+        }),
+        (1, &|w| {
+            w.begin_array(1);
+            w.integer(1);
+            w.end_array(1);
+        }),
+        (1, &|w| object(w, &[Key::Utf8("k")])),
+    ];
+    for (count, write) in calls {
+        let context = spawn(ContextConfig::default());
+        eval(&context, "globalThis.filled = [0]");
+        context.stop().expect("stop");
+        match call(&context, request("filled.fill", count, write)) {
+            Err(EngineError::Js(js)) => {
+                assert_eq!(js.kind, JsErrorKind::Terminated(TerminationCause::Stop));
+            }
+            other => panic!("expected a stop, got {other:?}"),
+        }
+        assert_eq!(eval(&context, "filled[0]"), eval(&context, "0"));
+    }
+}
 
 // A call the runner refuses must leave nothing V8's read of it then sees:
 // objects built before the refusal moved their shape's field from small
