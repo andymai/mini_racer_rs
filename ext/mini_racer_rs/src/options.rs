@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use mini_racer_engine::ContextConfig;
+use mini_racer_engine::{ContextConfig, InvalidSnapshot, SnapshotBlob};
 
 /// An option value, as far as the rules below need to see it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -8,8 +8,9 @@ pub enum OptionValue {
     Fixnum(i64),
     Nil,
     False,
-    /// A `MiniRacer::Snapshot`, by its blob; given only for `snapshot:`.
-    Snapshot(Vec<u8>),
+    /// A `MiniRacer::Snapshot`, by the blob it shares or why that blob is
+    /// refused; given only for `snapshot:`.
+    Snapshot(Result<SnapshotBlob, InvalidSnapshot>),
     /// Anything else, by the name Ruby's type errors give it.
     Other(String),
 }
@@ -37,6 +38,8 @@ pub enum OptionError {
     Range(&'static str),
     #[error("bad keyword: {0}")]
     Keyword(String),
+    #[error(transparent)]
+    InvalidSnapshot(InvalidSnapshot),
 }
 
 const INT32_MAX: i64 = i32::MAX as i64;
@@ -68,6 +71,7 @@ pub fn configure(
     options: impl DoubleEndedIterator<Item = (String, OptionValue)>,
 ) -> Result<ContextConfig, OptionError> {
     let mut config = ContextConfig::default();
+    let mut refused = None;
     for (key, value) in options.rev() {
         match key.as_str() {
             "timeout" => {
@@ -94,7 +98,11 @@ pub fn configure(
             "snapshot" => match value {
                 OptionValue::Nil => {}
                 // mini_racer treats an empty blob as no snapshot.
-                OptionValue::Snapshot(blob) => config.snapshot = (!blob.is_empty()).then_some(blob),
+                OptionValue::Snapshot(Ok(blob)) => {
+                    config.snapshot = (!blob.is_empty()).then_some(blob);
+                }
+                // mini_racer's V8 reads the blob only once every option passes.
+                OptionValue::Snapshot(Err(invalid)) => refused = Some(invalid),
                 other => return Err(OptionError::SnapshotType(other.type_name())),
             },
             // mini_racer turns it on for any value but nil and false.
@@ -104,7 +112,9 @@ pub fn configure(
             _ => return Err(OptionError::Keyword(key)),
         }
     }
-    Ok(config)
+    refused.map_or(Ok(config), |invalid| {
+        Err(OptionError::InvalidSnapshot(invalid))
+    })
 }
 
 #[cfg(test)]
@@ -218,12 +228,10 @@ mod tests {
 
     #[test]
     fn a_snapshot_must_be_one_and_nil_or_an_empty_one_is_none() {
-        let config = configure_pairs(&[("snapshot", OptionValue::Snapshot(b"blob".to_vec()))]);
-        assert_eq!(
-            config.map(|config| config.snapshot),
-            Ok(Some(b"blob".to_vec()))
-        );
-        let empty = configure_pairs(&[("snapshot", OptionValue::Snapshot(Vec::new()))]);
+        let empty = configure_pairs(&[(
+            "snapshot",
+            OptionValue::Snapshot(Ok(SnapshotBlob::default())),
+        )]);
         assert_eq!(empty.map(|config| config.snapshot), Ok(None));
         let nil = configure_pairs(&[("snapshot", OptionValue::Nil)]);
         assert_eq!(nil.map(|config| config.snapshot), Ok(None));
@@ -239,5 +247,23 @@ mod tests {
             .map(drop),
             Err(OptionError::SnapshotType("mini_racer/context".to_owned()))
         );
+    }
+
+    #[test]
+    fn a_refused_blob_raises_only_once_every_option_passes() {
+        let refused = OptionValue::Snapshot(Err(InvalidSnapshot::Version));
+        assert_eq!(
+            configure_pairs(&[("snapshot", refused.clone())]).err(),
+            Some(OptionError::InvalidSnapshot(InvalidSnapshot::Version))
+        );
+        for pairs in [
+            [("timeout", OptionValue::Nil), ("snapshot", refused.clone())],
+            [("snapshot", refused), ("timeout", OptionValue::Nil)],
+        ] {
+            assert_eq!(
+                message(&pairs),
+                Some("wrong argument type nil (expected Integer)".to_owned())
+            );
+        }
     }
 }

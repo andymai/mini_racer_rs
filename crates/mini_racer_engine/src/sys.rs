@@ -35,6 +35,18 @@ pub fn share(isolate: v8::OwnedIsolate) -> Result<v8::SharedIsolate, v8::OwnedIs
     shared.map_err(v8::IntoSharedError::into_isolate)
 }
 
+/// V8's view of `blob`, its own bytes rather than a copy. Whoever starts an
+/// isolate from it keeps `blob` until that isolate is gone: a runner's control
+/// block holds its context's blob, and a snapshot build holds its base.
+pub fn startup_data(blob: &crate::SnapshotBlob) -> v8::StartupData {
+    let bytes = blob.as_bytes();
+    // SAFETY: a blob's bytes never move or change while it lives, and V8 reads
+    // them only while an isolate started from them lives, which the blob
+    // outlives as the doc comment requires of every caller.
+    let bytes: &'static [u8] = unsafe { std::slice::from_raw_parts(bytes.as_ptr(), bytes.len()) };
+    v8::StartupData::from(bytes)
+}
+
 /// The address V8 names `isolate` by when it posts the isolate a task.
 #[must_use]
 pub fn isolate_key(isolate: &v8::Isolate) -> usize {

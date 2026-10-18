@@ -88,6 +88,7 @@ pub fn engine(ruby: &Ruby, error: EngineError) -> Error {
         EngineError::Busy => raised(ruby, INTERNAL.get(ruby), error.to_string()),
         EngineError::Internal(message) => raised(ruby, INTERNAL.get(ruby), &message),
         EngineError::Snapshot(message) => snapshot(ruby, &message),
+        EngineError::InvalidSnapshot(_) => raised(ruby, SNAPSHOT.get(ruby), error.to_string()),
     }
 }
 

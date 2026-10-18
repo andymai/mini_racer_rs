@@ -160,8 +160,8 @@ fn option_value(ruby: &Ruby, value: Value) -> OptionValue {
 // mini_racer's typed data check names a typed object of the wrong kind by
 // its struct name.
 fn snapshot_value(ruby: &Ruby, value: Value) -> OptionValue {
-    if let Some(blob) = snapshot::blob_of(ruby, value) {
-        return OptionValue::Snapshot(blob);
+    if let Some(shared) = snapshot::shared_of(ruby, value) {
+        return OptionValue::Snapshot(shared);
     }
     match (
         option_value(ruby, value),
@@ -192,6 +192,7 @@ fn config(ruby: &Ruby, keywords: RHash) -> Result<ContextConfig, Error> {
             errors::raised(ruby, ruby.exception_arg_error(), error.to_string())
         }
         OptionError::Keyword(_) => errors::runtime(ruby, error.to_string()),
+        OptionError::InvalidSnapshot(invalid) => errors::engine(ruby, invalid.into()),
     })
 }
 

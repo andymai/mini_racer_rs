@@ -8,8 +8,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use mini_racer_engine::{
-    ContextConfig, ContextHandle, EngineError, Host, JsErrorKind, JsText, TerminationCause,
-    WaitHandle, WaitOutcome,
+    ContextConfig, ContextHandle, EngineError, Host, JsErrorKind, JsText, SnapshotBlob,
+    TerminationCause, WaitHandle, WaitOutcome,
 };
 use mini_racer_wire::{Begun, Container, Limits, Scalar, Visitor, decode_value};
 
@@ -485,7 +485,7 @@ fn a_timeout_while_the_result_serializes_leaves_the_result() {
     let context = ContextHandle::spawn(
         ContextConfig {
             timeout: Some(Duration::from_millis(5)),
-            snapshot: Some(blob),
+            snapshot: Some(SnapshotBlob::new(&blob).expect("a blob V8 wrote")),
             ..ContextConfig::default()
         },
         &mut Parking,
@@ -647,7 +647,7 @@ fn waiting_behind_an_idle_collection_does_not_count_against_a_timeout() {
     let context = ContextHandle::spawn(
         ContextConfig {
             timeout: Some(Duration::from_millis(30)),
-            snapshot: Some(blob),
+            snapshot: Some(SnapshotBlob::new(&blob).expect("a blob V8 wrote")),
             gc_after_idle: Some(Duration::from_millis(1)),
             ..ContextConfig::default()
         },

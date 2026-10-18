@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use magnus::encoding::EncodingCapable;
 use magnus::gc::Marker;
 use magnus::scan_args::scan_args;
@@ -7,7 +9,7 @@ use magnus::{
     Class, DataTypeFunctions, Error, Module, Object, RClass, RModule, RString, Ruby, TryConvert,
     TypedData, Value,
 };
-use mini_racer_engine::ContextHandle;
+use mini_racer_engine::{ContextHandle, InvalidSnapshot, SnapshotBlob};
 
 use crate::gc_root::OwnedRoot;
 use crate::host::RubyHost;
@@ -23,6 +25,10 @@ use crate::{context, errors, export, rb_raw};
 )]
 pub struct Snapshot {
     blob: OwnedRoot<RString>,
+    // What contexts made from this snapshot start from, kept while `blob`
+    // holds the same bytes: `dump` hands `blob` out, and a context of
+    // mini_racer's starts from whatever it holds then.
+    shared: RefCell<Option<SnapshotBlob>>,
 }
 
 impl DataTypeFunctions for Snapshot {
@@ -47,17 +53,23 @@ pub fn init(ruby: &Ruby, racer: RModule) -> Result<(), Error> {
     Ok(())
 }
 
-/// The blob of `value` when it is a `MiniRacer::Snapshot`, for `Context.new`.
-pub fn blob_of(ruby: &Ruby, value: Value) -> Option<Vec<u8>> {
+/// The blob a context made from `value`, when it is a `MiniRacer::Snapshot`,
+/// starts from, for `Context.new`.
+pub fn shared_of(ruby: &Ruby, value: Value) -> Option<Result<SnapshotBlob, InvalidSnapshot>> {
     let snapshot = Obj::<Snapshot>::try_convert(value).ok()?;
-    Some(snapshot.bytes(ruby))
+    Some(snapshot.shared(ruby))
 }
 
 // mini_racer raises every failure of a build as a snapshot error, V8's
-// refusal of an odd-length UTF-16LE string included.
-fn build(ruby: &Ruby, code: RString, base: Option<Vec<u8>>) -> Result<RString, Error> {
+// refusal of an odd-length UTF-16LE string included, which it meets before
+// the base blob.
+fn build(ruby: &Ruby, code: RString, base: Option<&Snapshot>) -> Result<RString, Error> {
     let code = context::js_text(ruby, code)
         .map_err(|_| errors::snapshot(ruby, "Error: Unable to deserialize cloned data."))?;
+    let base = base
+        .map(|base| base.shared(ruby))
+        .transpose()
+        .map_err(|invalid| errors::engine(ruby, invalid.into()))?;
     let mut host = RubyHost::new(ruby);
     let built = ContextHandle::create_snapshot(code, base, &mut host);
     let blob = host.finish(built)?;
@@ -65,8 +77,20 @@ fn build(ruby: &Ruby, code: RString, base: Option<Vec<u8>>) -> Result<RString, E
 }
 
 impl Snapshot {
-    fn bytes(&self, ruby: &Ruby) -> Vec<u8> {
-        rb_raw::string_bytes(ruby, self.blob(ruby))
+    fn shared(&self, ruby: &Ruby) -> Result<SnapshotBlob, InvalidSnapshot> {
+        let blob = self.blob(ruby);
+        let mut shared = self.shared.borrow_mut();
+        let current = rb_raw::with_string_bytes(ruby, blob, |bytes| match shared.take() {
+            Some(kept) if kept.as_bytes() == bytes => Ok(kept),
+            _ => SnapshotBlob::new(bytes),
+        })?;
+        *shared = Some(current.clone());
+        Ok(current)
+    }
+
+    fn replace(&self, ruby: &Ruby, blob: RString) {
+        self.blob.set(ruby, blob);
+        self.shared.borrow_mut().take();
     }
 
     // mini_racer allocates every snapshot with an empty blob it then hands
@@ -85,7 +109,7 @@ impl Snapshot {
             Some(code) if !code.is_nil() => rb_raw::expect_string(ruby, code)?,
             _ => ruby.str_new(""),
         };
-        rb_self.blob.set(ruby, build(ruby, code, None)?);
+        rb_self.replace(ruby, build(ruby, code, None)?);
         Ok(())
     }
 
@@ -101,16 +125,20 @@ impl Snapshot {
     // warmup leaves the snapshot as it was.
     fn warmup(ruby: &Ruby, rb_self: Obj<Self>, code: Value) -> Result<Obj<Self>, Error> {
         let code = rb_raw::expect_string(ruby, code)?;
-        let base = rb_self.bytes(ruby);
-        let warmed = build(ruby, code, Some(base))?;
-        rb_self.blob.set(ruby, warmed);
+        let warmed = build(ruby, code, Some(&rb_self))?;
+        rb_self.replace(ruby, warmed);
         Ok(rb_self)
     }
 
+    // mini_racer keeps whatever it is given and aborts when V8 reads a bad
+    // blob; refused here, a stale blob read back from disk can be rescued
+    // and built again.
     fn load(ruby: &Ruby, class: RClass, blob: Value) -> Result<Obj<Self>, Error> {
         let blob = rb_raw::expect_string(ruby, blob)?;
         let copy = rb_raw::str_dup(ruby, blob);
         copy.enc_associate(ruby.ascii8bit_encindex())?;
+        rb_raw::with_string_bytes(ruby, copy, SnapshotBlob::check)
+            .map_err(|invalid| errors::engine(ruby, invalid.into()))?;
         let snapshot = ruby.obj_wrap_as(Self::default(), class);
         snapshot.blob.set(ruby, copy);
         Ok(snapshot)

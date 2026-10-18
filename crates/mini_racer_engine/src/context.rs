@@ -15,7 +15,7 @@ use crate::process::platform::Mode;
 use crate::process::{self, platform, watchdog};
 use crate::runner::Start;
 use crate::spin::spin_until;
-use crate::{EngineError, runner};
+use crate::{EngineError, InvalidSnapshot, SnapshotBlob, runner};
 
 const MIN_RUNNER_STACK_BYTES: usize = 2 << 20;
 const STACK_HEADROOM_BYTES: usize = 1 << 20;
@@ -225,15 +225,14 @@ impl Drop for Owning<'_> {
 
 impl ContextHandle {
     /// Starts a runner and waits, through `host`, until its isolate exists.
-    pub fn spawn(mut config: ContextConfig, host: &mut impl Host) -> Result<Self, EngineError> {
-        let snapshot = config.snapshot.take();
+    pub fn spawn(config: ContextConfig, host: &mut impl Host) -> Result<Self, EngineError> {
         process::ensure_initialized();
         // Read here, on the caller's thread, not first on a runner's.
         let _ = process::code_cache::enabled();
         let _ = process::fast_calls();
         let generation = fork::current();
         let block = Arc::new(ControlBlock::new(config));
-        start(&block, generation, Start::Fresh(snapshot))?;
+        start(&block, generation, Start::Fresh)?;
         let handle = Self {
             lineage: Lineage {
                 epoch: fork::epoch(),
@@ -386,9 +385,14 @@ impl ContextHandle {
     /// does.
     pub fn create_snapshot(
         code: JsText,
-        base: Option<Vec<u8>>,
+        base: Option<SnapshotBlob>,
         host: &mut impl Host,
     ) -> Result<Vec<u8>, EngineError> {
+        // A warmup from no snapshot would build the read-only heap again, which
+        // V8 aborts on once the process has one.
+        if base.as_ref().is_some_and(SnapshotBlob::is_empty) {
+            return Err(InvalidSnapshot::Empty.into());
+        }
         let context = Self::spawn(ContextConfig::default(), host)?;
         let built = context.dispatch(
             DispatchKind::Script,
