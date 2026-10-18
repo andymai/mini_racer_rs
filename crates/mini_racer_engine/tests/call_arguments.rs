@@ -285,10 +285,10 @@ fn a_key_given_twice_is_refused_as_v8_refuses_it() {
     ));
 }
 
-// A two-byte string and a binary are read by V8's own deserializer from their
-// bytes, inside a request the runner builds.
+// A two-byte string is read by V8's own deserializer from its bytes, inside a
+// request the runner builds.
 #[test]
-fn two_byte_strings_and_binaries_are_read_by_v8_inside_built_requests() {
+fn two_byte_strings_are_read_by_v8_inside_built_requests() {
     let context = spawn(ContextConfig::default());
     let two_byte: Vec<u8> = "\u{6771}\u{4eac}"
         .encode_utf16()
@@ -305,14 +305,32 @@ fn two_byte_strings_and_binaries_are_read_by_v8_inside_built_requests() {
         },
         "['a', '\\u6771\\u4eac', 1]",
     );
-    returns(
-        &context,
-        |w| {
-            w.begin_array(1);
-            w.uint8_array(b"ab");
-            w.end_array(1);
-        },
-        "[new Uint8Array([97, 98])]",
+}
+
+// V8's deserializer reads a call holding a binary whole, so its arrays stay
+// holey and a view sent twice is one view.
+#[test]
+fn a_call_holding_a_binary_is_left_to_v8() {
+    let context = spawn(ContextConfig::default());
+    let in_array = request("id", 1, |w| {
+        w.begin_array(1);
+        w.uint8_array(b"ab");
+        w.end_array(1);
+    });
+    let returned = call(&context, in_array).expect("call");
+    assert_eq!(returned.get(2), Some(&b'a'));
+    assert_eq!(
+        eval(&context, "globalThis.binary = (a) => [...a[0]]; 0"),
+        eval(&context, "0")
+    );
+    let read = request("binary", 1, |w| {
+        w.begin_array(1);
+        w.uint8_array(b"ab");
+        w.end_array(1);
+    });
+    assert_eq!(
+        call(&context, read).expect("call"),
+        eval(&context, "[97, 98]")
     );
     let binary_twice = request("same", 2, |w| {
         let view = w.uint8_array(b"ab");
