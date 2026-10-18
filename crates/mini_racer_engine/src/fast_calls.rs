@@ -16,7 +16,8 @@ pub struct Shape<'a> {
     pub values: Vec<Hoisted<'a>>,
     /// The code a render runs before and after its call. The template reads
     /// its values as the source would only if the call runs once, at the
-    /// wrapper's top level, so each must compile alone as a function body.
+    /// wrapper's top level, so each must leave the call alone
+    /// (`leaves_the_call_alone`) and compile alone as a function body.
     pub code: Vec<&'a [u8]>,
 }
 
@@ -121,12 +122,7 @@ fn render(source: &[u8]) -> Option<Shape<'_>> {
         source.get(component_at + component.len() + 2..props_at)?,
     ];
     let props = source.get(props_at..props_end)?;
-    if between != [b", ", b", "]
-        || find(after, SERVER_RENDER).is_some()
-        || breaks_line(props)
-        || reaches_past_the_call(before)
-        || reaches_past_the_call(after)
-    {
+    if between != [b", ", b", "] || find(after, SERVER_RENDER).is_some() || breaks_line(props) {
         return None;
     }
     Some(Shape {
@@ -140,17 +136,17 @@ fn render(source: &[u8]) -> Option<Shape<'_>> {
     })
 }
 
-// Code that could run the call again away from its values, or share what V8
-// keeps per script between renders: `arguments` other than as a property name
-// (its `callee` is the wrapper), `eval` and `caller` anywhere, an escape that
-// could spell one of them, and a template literal, as V8 keeps a tagged one's
-// strings per script.
-fn reaches_past_the_call(code: &[u8]) -> bool {
-    code.contains(&b'`')
+/// Whether a render's `code` can neither run its call again away from its
+/// values nor share what V8 keeps per script between renders: it holds no
+/// `arguments` other than as a property name (its `callee` is the wrapper),
+/// no `eval` or `caller`, no escape that could spell one of them, and no
+/// template literal, as V8 keeps a tagged one's strings per script.
+pub fn leaves_the_call_alone(code: &[u8]) -> bool {
+    !(code.contains(&b'`')
         || find(code, b"\\u").is_some()
         || names(code, b"eval", false)
         || names(code, b"caller", false)
-        || names(code, b"arguments", true)
+        || names(code, b"arguments", true))
 }
 
 // Whether `code` holds `name` as a whole word, unless `as_property` lets one
@@ -328,7 +324,7 @@ fn plain_run(text: &[u8], mut at: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{Hoisted, MAX_DEPTH, Shape, recognize};
+    use super::{Hoisted, MAX_DEPTH, Shape, leaves_the_call_alone, recognize};
 
     // Code a renderer runs around each render, as react-rails' console
     // replay does.
@@ -552,8 +548,7 @@ mod tests {
     }
 
     #[test]
-    fn code_that_could_reach_past_the_call_takes_the_normal_path() {
-        let call = "this.ReactRailsUJS.serverRender('renderToString', 'A', {})";
+    fn code_that_could_reach_past_the_call_does_not_leave_it_alone() {
         for code in [
             "var s = `x`;",
             "eval('1');",
@@ -567,15 +562,15 @@ mod tests {
             "ev\\u0061l('1');",
             "\u{a0}arguments;",
         ] {
-            assert_eq!(values(&compose_js(code, call, "")), None, "before: {code}");
-            assert_eq!(values(&compose_js("", call, code)), None, "after: {code}");
+            assert!(!leaves_the_call_alone(code.as_bytes()), "{code}");
         }
     }
 
     #[test]
-    fn longer_names_and_properties_called_arguments_are_left_to_v8() {
-        let call = "this.ReactRailsUJS.serverRender('renderToString', 'A', {})";
+    fn longer_names_and_properties_called_arguments_leave_the_call_alone() {
         for code in [
+            BEFORE,
+            AFTER,
             "msg.arguments;",
             "msg . arguments;",
             "myarguments;",
@@ -585,7 +580,7 @@ mod tests {
             "callers;",
             "'\\n';",
         ] {
-            assert!(values(&compose_js(code, call, code)).is_some(), "{code}");
+            assert!(leaves_the_call_alone(code.as_bytes()), "{code}");
         }
     }
 

@@ -940,7 +940,7 @@ fn template<'s>(
     let origin = serialize::origin(scope, name.into());
     let script = code
         .iter()
-        .all(|code| compiles_alone(scope, code))
+        .all(|code| fast_calls::leaves_the_call_alone(code) && compiles_alone(scope, code))
         .then(|| v8::Script::compile(scope, source, Some(&origin)))
         .flatten();
     let mut hoisting = lock(&runtime.hoisting);
