@@ -50,9 +50,9 @@ fn probe(context: &ContextHandle, source: &str) -> String {
     )
 }
 
-// A script of over a megabyte whose astral characters V8 keeps two bytes a
-// unit, with a BOM, a NUL, a line separator and Latin-1 in a comment it
-// returns, and a function that throws from its last line.
+// A script of over a megabyte, two bytes a unit in V8 for its astral
+// characters, with a BOM, a NUL, a line separator and Latin-1 in a function
+// the probes read back, and a function that throws.
 fn script(seed: u32) -> String {
     let mut text = String::from("\u{FEFF}// \u{1F600} caf\u{E9}\n");
     for i in 0..25_000 {
@@ -110,8 +110,8 @@ fn shared_sources() {
         }
     }
 
-    // Evaluated again, the script is V8's own cached one, and the string made
-    // for it is left to the next collection.
+    // Evaluated again, one of the context's two strings is garbage, which the
+    // next collection releases.
     eval(&contexts[1], &text).expect("eval");
     assert_eq!(sources().reads(), 3);
     contexts[1]
@@ -148,7 +148,8 @@ fn shared_sources() {
     }
     assert_eq!((sources().made(), sources().reads()), (2, 5));
 
-    // A parse error and a runtime error read as from a copy of their own.
+    // A parse error and a runtime error read the same from the shared copy as
+    // from a copy of their own.
     for broken in [
         format!("{}\nfunction (", script(2)),
         format!("{}\nthrower3()", script(3)),
@@ -177,9 +178,9 @@ fn shared_sources() {
         for context in &contexts {
             eval(context, &text).expect("eval");
         }
-        let mut sources = probes(seed);
-        sources.push("[typeof lone4, typeof lone4 === 'string' && lone4.charCodeAt(0)]".to_owned());
-        for probe_source in sources {
+        let mut checks = probes(seed);
+        checks.push("[typeof lone4, typeof lone4 === 'string' && lone4.charCodeAt(0)]".to_owned());
+        for probe_source in checks {
             let from_own = probe(&contexts[0], &probe_source);
             for context in &contexts[1..] {
                 assert_eq!(probe(context, &probe_source), from_own, "{probe_source}");
