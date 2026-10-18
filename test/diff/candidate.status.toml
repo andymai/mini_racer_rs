@@ -39,6 +39,9 @@ status = "same"
 [cases."curated-call-primitive-results"]
 status = "same"
 
+[cases."curated-call-refused-after-objects-built"]
+status = "same"
+
 [cases."curated-call-repeated-keys"]
 status = "same"
 

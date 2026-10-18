@@ -5892,5 +5892,192 @@
         ]
       }
     ]
+  },
+  {
+    "id": "curated-call-refused-after-objects-built",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "globalThis.first = (a, b) => a",
+        "setup": true
+      },
+      {
+        "op": "call",
+        "path": "first",
+        "args": [
+          [
+            "array",
+            [
+              [
+                "hash",
+                [
+                  [
+                    [
+                      "string",
+                      "UTF-8",
+                      "text",
+                      "x"
+                    ],
+                    [
+                      "int",
+                      "1"
+                    ]
+                  ]
+                ]
+              ],
+              [
+                "hash",
+                [
+                  [
+                    [
+                      "string",
+                      "UTF-8",
+                      "text",
+                      "x"
+                    ],
+                    [
+                      "float",
+                      "3ff8000000000000"
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ],
+          [
+            "hash",
+            [
+              [
+                [
+                  "int",
+                  "2147483648"
+                ],
+                [
+                  "bool",
+                  true
+                ]
+              ]
+            ]
+          ]
+        ]
+      },
+      {
+        "op": "call",
+        "path": "first",
+        "args": [
+          [
+            "array",
+            [
+              [
+                "hash",
+                [
+                  [
+                    [
+                      "string",
+                      "UTF-8",
+                      "text",
+                      "y"
+                    ],
+                    [
+                      "int",
+                      "1"
+                    ]
+                  ]
+                ]
+              ],
+              [
+                "hash",
+                [
+                  [
+                    [
+                      "string",
+                      "UTF-8",
+                      "text",
+                      "y"
+                    ],
+                    [
+                      "float",
+                      "3ff8000000000000"
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ],
+          [
+            "hash",
+            [
+              [
+                [
+                  "string",
+                  "ISO-8859-1",
+                  "hex",
+                  "e9"
+                ],
+                [
+                  "int",
+                  "1"
+                ]
+              ]
+            ]
+          ]
+        ]
+      },
+      {
+        "op": "call",
+        "path": "first",
+        "args": [
+          [
+            "array",
+            [
+              [
+                "hash",
+                [
+                  [
+                    [
+                      "string",
+                      "UTF-8",
+                      "text",
+                      "z"
+                    ],
+                    [
+                      "int",
+                      "1"
+                    ]
+                  ]
+                ]
+              ],
+              [
+                "hash",
+                [
+                  [
+                    [
+                      "string",
+                      "UTF-8",
+                      "text",
+                      "z"
+                    ],
+                    [
+                      "float",
+                      "4004000000000000"
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ],
+          [
+            "array",
+            [
+              [
+                "ref",
+                0
+              ]
+            ]
+          ]
+        ]
+      }
+    ]
   }
 ]

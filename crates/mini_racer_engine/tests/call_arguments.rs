@@ -607,3 +607,87 @@ fn a_heap_past_max_memory_while_arguments_are_read_stops_the_call_before_it_runs
         assert_eq!(eval(&context, "filled[0]"), eval(&context, "0"));
     }
 }
+
+type Arguments<'a> = &'a dyn Fn(&mut Writer<'_>);
+
+// A call the runner refuses must leave nothing V8's read of it then sees:
+// objects built before the refusal moved their shape's field from small
+// integers to doubles, so V8 wrote back an integer as a double. Each call runs
+// in a context of its own, so no earlier call's shapes hide a difference.
+#[test]
+fn a_call_the_runner_refuses_reads_as_if_nothing_were_built() {
+    let two_byte: Vec<u8> = "h".encode_utf16().flat_map(u16::to_le_bytes).collect();
+    let triggers: [(&str, Arguments<'_>); 8] = [
+        ("an integer key past int32", &|w| {
+            w.begin_object();
+            w.integer(1 << 31);
+            w.bool(true);
+            w.end_object(1);
+        }),
+        ("a one-byte key past ASCII", &|w| {
+            w.begin_object();
+            w.latin1(b"\xe9");
+            w.bool(true);
+            w.end_object(1);
+        }),
+        ("a two-byte key", &|w| {
+            w.begin_object();
+            w.utf16le(&two_byte);
+            w.bool(true);
+            w.end_object(1);
+        }),
+        ("a key of invalid UTF-8", &|w| {
+            w.begin_object();
+            w.utf8(b"\xff");
+            w.bool(true);
+            w.end_object(1);
+        }),
+        ("nesting past 64", &|w| {
+            for _ in 0..66 {
+                w.begin_array(1);
+            }
+            w.integer(1);
+            for _ in 0..66 {
+                w.end_array(1);
+            }
+        }),
+        ("an array inside itself", &|w| {
+            let array = w.begin_array(1);
+            w.object_ref(array);
+            w.end_array(1);
+        }),
+        ("an object of 65 keys", &|w| {
+            w.begin_object();
+            for n in 0..65 {
+                w.integer(n);
+                w.bool(true);
+            }
+            w.end_object(65);
+        }),
+        ("a binary", &|w| {
+            w.uint8_array(b"ab");
+        }),
+    ];
+    let mut differing = Vec::new();
+    for (trigger, write) in triggers {
+        let sent = request("first", 2, |w| {
+            w.begin_array(2);
+            object(w, &[Key::Utf8("x")]);
+            w.begin_object();
+            w.utf8(b"x");
+            w.number(1.5);
+            w.end_object(1);
+            w.end_array(2);
+            write(w);
+        });
+        let returned = |properties: usize| {
+            let context = spawn(ContextConfig::default());
+            eval(&context, "globalThis.first = (a, b) => a");
+            counted(&context, sent.clone(), 3, properties).expect("call")
+        };
+        if returned(3) != returned(1_000) {
+            differing.push(trigger);
+        }
+    }
+    assert!(differing.is_empty(), "read otherwise after {differing:?}");
+}

@@ -69,6 +69,23 @@ class CallTest < Minitest::Test
     assert_match(/Maximum call stack size exceeded/, error.message)
   end
 
+  # mini_racer 0.22.1 reads a call's arguments once, so with a max_memory: they
+  # fit into once, each of these calls returns 0. Values the runner built and
+  # then left to V8 would be held while V8 read them all again.
+  def test_a_call_left_to_v8_holds_its_arguments_once_under_max_memory
+    strings = Array.new(1_000_000) { |i| format("s%06d", i) }
+    cycle = []
+    cycle << cycle
+    [{ (+"\xE9").force_encoding("ISO-8859-1") => 1 }, cycle].each do |trigger|
+      context = MiniRacer::Context.new(max_memory: 48_000_000)
+      context.eval("globalThis.sink = () => 0")
+
+      assert_equal 0, context.call("sink", strings, trigger)
+    ensure
+      context&.dispose
+    end
+  end
+
   def test_symbols_are_sent_by_name_and_datetime_need_not_be_a_class
     out, err, status = run_ruby(<<~RUBY)
       module DateTime; end
