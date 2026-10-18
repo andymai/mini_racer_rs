@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/andymai/mini_racer_rs/compare/v1.0.0...v1.0.1) (2026-10-18)
+
+
+### Performance
+
+* **engine:** build small call arguments in the runner and write primitive results directly ([#83](https://github.com/andymai/mini_racer_rs/issues/83)) ([76afcbd](https://github.com/andymai/mini_racer_rs/commit/76afcbd7bb5df36da6797b95d8dae7049ee80f53))
+
 ## 1.0.0 (2026-10-18)
 
 
