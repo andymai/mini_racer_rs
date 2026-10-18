@@ -210,26 +210,6 @@ class FastCallsContextTest < Minitest::Test
     context&.dispose
   end
 
-  # Fast calls read their values through a const, which code that finds its
-  # name cannot assign, delete or shadow.
-  def test_code_that_finds_the_reader_cannot_break_later_fast_calls
-    context = MiniRacer::Context.new
-    context.eval(REFLECTING)
-    wrapper = context.eval("(#{render("Hello", "{}", before: "", after: "")})").last
-    reader = wrapper[/__mini_racer_rs_\h+/]
-    assigned = assert_raises(MiniRacer::RuntimeError) { context.eval("(0, eval)('#{reader} = null')") }
-    context.eval("delete #{reader}; globalThis['#{reader}'] = null")
-
-    assert_equal "TypeError: Assignment to constant variable.", assigned.message
-    sums = [context.eval("(add.apply(this, [1,2]))"), context.eval("(add.apply(this, [3,4]))")]
-    wrapper = context.eval("(#{render("Hello", '{"n":2}', before: "", after: "")})").last
-
-    assert_equal [3, 7], sums
-    assert_includes wrapper, reader
-  ensure
-    context&.dispose
-  end
-
   def test_calls_to_more_functions_than_a_context_keeps_templates_for_all_return
     context = MiniRacer::Context.new
     context.eval(Array.new(40) { |i| "function f#{i}(a) { return a + #{i} }" }.join("\n"))
@@ -437,6 +417,37 @@ class FastCallsProcessTest < Minitest::Test
                  "--> starting at object with constructor 'Object'\n    " \
                  "--- property 'o' closes the circle\n",
                  out
+  end
+end
+
+class FastCallsReaderTest < Minitest::Test
+  include RubyProcess
+  include FastCallsFixtures
+
+  # Fast calls read their values through a const, which code that finds its
+  # name cannot assign, delete or shadow.
+  def test_code_that_finds_the_reader_cannot_break_later_fast_calls
+    first, second = [1, 2].map { |n| "(#{render("Hello", "{\"n\":#{n}}", before: "", after: "")})" }
+    out, err, status = run_ruby(<<~RUBY, env: { "MINI_RACER_RS_FAST_CALLS" => nil })
+      require "json"
+      require "mini_racer"
+      context = MiniRacer::Context.new
+      context.eval(#{REFLECTING.dump})
+      run = lambda do |source|
+        context.eval(source)
+      rescue MiniRacer::Error => e
+        e.message
+      end
+      reader = run.call(#{first.dump}).last[/__mini_racer_rs_\\h+/]
+      assigned = run.call("(0, eval)('" + reader + " = null')")
+      run.call("delete " + reader + "; globalThis['" + reader + "'] = null")
+      sums = [run.call("(add.apply(this, [1,2]))"), run.call("(add.apply(this, [3,4]))")]
+      rendered = run.call(#{second.dump})
+      puts JSON.generate([assigned, sums, rendered.is_a?(Array) && rendered.last.include?(reader)])
+    RUBY
+
+    assert_predicate status, :success?, err
+    assert_equal ["TypeError: Assignment to constant variable.", [3, 7], true], JSON.parse(out)
   end
 end
 
