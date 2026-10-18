@@ -163,6 +163,17 @@ fn shared_sources() {
     }
     assert_eq!((sources().made(), sources().reads()), (4, 9));
 
+    // Invalid UTF-8 is left to V8's decoder, so each context keeps its own.
+    let mut invalid = script(6).into_bytes();
+    invalid.extend_from_slice(b"\n// \xFF\xC3(\nf6_1(1);");
+    let invalid = JsText::Utf8(invalid);
+    let outcomes: Vec<String> = (0..3)
+        .map(|_| format!("{:?}", eval(&spawn(), &invalid)))
+        .collect();
+    assert!(outcomes[0].starts_with("Ok("), "{}", outcomes[0]);
+    assert!(outcomes.iter().all(|outcome| *outcome == outcomes[0]));
+    assert_eq!((sources().made(), sources().reads()), (4, 9));
+
     // Across encodings: UTF-16 with a lone surrogate in a string, and
     // Latin-1.
     let mut units: Vec<u16> = script(4).encode_utf16().collect();
