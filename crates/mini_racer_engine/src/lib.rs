@@ -1,6 +1,7 @@
 mod context;
 mod control;
 mod error;
+mod fast_calls;
 mod notify;
 pub mod process;
 mod runner;

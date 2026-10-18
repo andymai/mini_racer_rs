@@ -45,6 +45,17 @@ pub fn ensure_initialized() {
     });
 }
 
+/// Whether evals in the shapes `ExecJS` and react-rails send once per call run a
+/// template compiled once per context: `MINI_RACER_RS_FAST_CALLS=off` turns
+/// that off. First read on a Ruby thread, by `ContextHandle::spawn`, where
+/// nothing in Ruby can be changing the environment at the same time.
+pub(crate) fn fast_calls() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var_os("MINI_RACER_RS_FAST_CALLS").is_none_or(|value| value != "off")
+    })
+}
+
 /// Tasks V8 posted for an isolate no runner had registered, dropped unrun.
 /// Snapshot builds post some; a context's isolate should never get one.
 #[must_use]

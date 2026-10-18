@@ -230,6 +230,7 @@ impl ContextHandle {
         process::ensure_initialized();
         // Read here, on the caller's thread, not first on a runner's.
         let _ = process::code_cache::enabled();
+        let _ = process::fast_calls();
         let generation = fork::current();
         let block = Arc::new(ControlBlock::new(config));
         start(&block, generation, Start::Fresh(snapshot))?;

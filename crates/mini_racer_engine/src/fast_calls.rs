@@ -1,0 +1,481 @@
+/// A value an eval source carries as a literal, which a fast call hands its
+/// template instead of compiling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Hoisted<'a> {
+    /// JSON text for an array or object, which V8's JSON parser decides on.
+    Json(&'a [u8]),
+    /// What a single-quoted string literal with no escapes holds.
+    Text(&'a [u8]),
+}
+
+/// A source split around the literals of the values it carries: the source
+/// is `around[0]`, the first value's literal, `around[1]`, and so on.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Shape<'a> {
+    pub around: Vec<&'a [u8]>,
+    pub values: Vec<Hoisted<'a>>,
+}
+
+impl Shape<'_> {
+    /// The source with each value's literal replaced by `<reader>(<index>)`,
+    /// unless the source already names `reader`.
+    pub fn template(&self, reader: &[u8]) -> Option<Vec<u8>> {
+        let mut text = Vec::new();
+        for (index, piece) in self.around.iter().enumerate() {
+            if find(piece, reader).is_some() {
+                return None;
+            }
+            if let Some(value) = index.checked_sub(1) {
+                text.extend_from_slice(reader);
+                text.extend_from_slice(format!("({value})").as_bytes());
+            }
+            text.extend_from_slice(piece);
+        }
+        Some(text)
+    }
+}
+
+/// The shape of `source` if it is, in UTF-8, one of the two evals sent once
+/// per call: `ExecJS` 2.10.2's `call`, `(<path>.apply(this, <JSON array>))`
+/// with `<path>` ASCII identifiers joined by dots, or a react-rails 3.2.1 or
+/// 3.3.1 render, `(` and `compose_js`'s wrapper around its one
+/// `this.ReactRailsUJS.serverRender('<function>', '<component>', <props>)`
+/// call, with JSON props on one line. Anything else is `None`.
+pub fn recognize(source: &[u8]) -> Option<Shape<'_>> {
+    call(source)
+        .or_else(|| render(source))
+        .filter(|_| std::str::from_utf8(source).is_ok())
+}
+
+const APPLY: &[u8] = b".apply(this, ";
+
+fn call(source: &[u8]) -> Option<Shape<'_>> {
+    let inner = source.strip_prefix(b"(")?.strip_suffix(b"))")?;
+    let mut path = 0;
+    let args = loop {
+        path += identifier_len(inner.get(path..)?)?;
+        let rest = inner.get(path..)?;
+        if let Some(args) = rest.strip_prefix(APPLY) {
+            break args;
+        }
+        if rest.first() != Some(&b'.') {
+            return None;
+        }
+        path += 1;
+    };
+    if args.first() != Some(&b'[') || json_extent(args)? != args.len() {
+        return None;
+    }
+    let args_at = 1 + path + APPLY.len();
+    Some(Shape {
+        around: vec![source.get(..args_at)?, source.get(args_at + args.len()..)?],
+        values: vec![Hoisted::Json(args)],
+    })
+}
+
+fn identifier_len(text: &[u8]) -> Option<usize> {
+    let name = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'$';
+    if text
+        .first()
+        .is_none_or(|first| first.is_ascii_digit() || !name(*first))
+    {
+        return None;
+    }
+    Some(
+        text.iter()
+            .position(|&byte| !name(byte))
+            .unwrap_or(text.len()),
+    )
+}
+
+// react-rails' `compose_js` heredoc, indentation and all, inside ExecJS's
+// parentheses; its `before` and `after` code sits between these.
+const OPEN: &[u8] = b"(          (function () {\n            ";
+const CALL: &[u8] = b"\n            var result = this.ReactRailsUJS.serverRender(";
+const RESULT: &[u8] = b");\n            ";
+const CLOSE: &[u8] = b"\n            return result;\n          })()\n)";
+const SERVER_RENDER: &[u8] = b"ReactRailsUJS.serverRender";
+
+fn render(source: &[u8]) -> Option<Shape<'_>> {
+    let body = source.strip_prefix(OPEN)?.strip_suffix(CLOSE)?;
+    let call = find(body, CALL)?;
+    if find(body.get(..call)?, SERVER_RENDER).is_some() {
+        return None;
+    }
+    let function_at = OPEN.len() + call + CALL.len();
+    let function = literal(source.get(function_at..)?)?;
+    let component_at = function_at + function.len() + 4;
+    let component = literal(source.get(component_at..)?)?;
+    let props_at = component_at + component.len() + 4;
+    let props_end = props_at + json_extent(source.get(props_at..)?)?;
+    let tail = source.get(props_end..)?;
+    let after = tail.strip_prefix(RESULT)?.strip_suffix(CLOSE)?;
+    let between = [
+        source.get(function_at + function.len() + 2..component_at)?,
+        source.get(component_at + component.len() + 2..props_at)?,
+    ];
+    let props = source.get(props_at..props_end)?;
+    if between != [b", ", b", "] || find(after, SERVER_RENDER).is_some() || breaks_line(props) {
+        return None;
+    }
+    Some(Shape {
+        around: vec![source.get(..function_at)?, between[0], between[1], tail],
+        values: vec![
+            Hoisted::Text(function),
+            Hoisted::Text(component),
+            Hoisted::Json(props),
+        ],
+    })
+}
+
+// A string literal that holds its own text: no escapes, and no line
+// terminator, which would move every line after it.
+fn literal(text: &[u8]) -> Option<&[u8]> {
+    let text = text.strip_prefix(b"'")?;
+    let content = text.get(..text.iter().position(|&byte| byte == b'\'')?)?;
+    (!content.contains(&b'\\') && !breaks_line(content)).then_some(content)
+}
+
+// V8 numbers lines at U+2028 and U+2029 as well, inside literals too.
+fn breaks_line(text: &[u8]) -> bool {
+    text.iter().enumerate().any(|(at, &byte)| {
+        byte == b'\n'
+            || byte == b'\r'
+            || (byte == 0xE2 && matches!(text.get(at + 1..at + 3), Some([0x80, 0xA8 | 0xA9])))
+    })
+}
+
+fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
+// V8's JSON parser keeps its own stack where its JavaScript parser recurses,
+// so a value nested deeper than this takes the normal path, which fails on it
+// the way mini_racer does once the nesting overflows the stack.
+const MAX_DEPTH: usize = 128;
+
+// The length of the JSON array or object `text` starts with, if it nests no
+// deeper than `MAX_DEPTH` and cannot name a `__proto__` key, which an object
+// literal makes its prototype and `JSON.parse` an own property. It reads
+// `text` as JSON; V8's parser decides whether it is.
+fn json_extent(text: &[u8]) -> Option<usize> {
+    if !matches!(text.first(), Some(b'[' | b'{')) {
+        return None;
+    }
+    let mut depth = 0_usize;
+    let mut at = 0;
+    while let Some(&byte) = text.get(at) {
+        match byte {
+            b'"' => {
+                at = string_end(text, at + 1)?;
+                continue;
+            }
+            b'[' | b'{' => {
+                depth += 1;
+                if depth > MAX_DEPTH {
+                    return None;
+                }
+            }
+            b']' | b'}' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(at + 1);
+                }
+            }
+            _ => {}
+        }
+        at += 1;
+    }
+    None
+}
+
+// The index after the closing quote of the string whose contents start at
+// `at`, unless it holds `__proto__` or an escaped letter, digit, `_` or `$`,
+// which could spell it.
+fn string_end(text: &[u8], mut at: usize) -> Option<usize> {
+    loop {
+        match *text.get(at)? {
+            b'"' => return Some(at + 1),
+            b'\\' if text.get(at + 1) == Some(&b'u') => {
+                let unit = std::str::from_utf8(text.get(at + 2..at + 6)?).ok()?;
+                let unit = u8::try_from(u32::from_str_radix(unit, 16).ok()?).unwrap_or(0x80);
+                if unit.is_ascii_alphanumeric() || unit == b'_' || unit == b'$' {
+                    return None;
+                }
+                at += 6;
+            }
+            b'\\' => at += 2,
+            b'_' if text
+                .get(at..)
+                .is_some_and(|rest| rest.starts_with(b"__proto__")) =>
+            {
+                return None;
+            }
+            _ => at += 1,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Hoisted, MAX_DEPTH, Shape, recognize};
+
+    const RESET: &str =
+        "if (typeof console !== \"undefined\" && console.history) {\n  console.history = [];\n}\n";
+    const REPLAY: &str = "(function (history) {\n  if (history && history.length > 0) {\n    \
+        result += '\\n<scr'+'ipt class=\"react-rails-console-replay\">';\n    \
+        history.forEach(function (msg) {\n      \
+        result += '\\nconsole.' + msg.level + '.apply(console, ' + JSON.stringify(msg.arguments) + ');';\n    \
+        });\n    result += '\\n</scr'+'ipt>';\n  }\n})(console.history);\n";
+
+    // What react-rails 3.2.1 and 3.3.1 hand ExecJS's eval, which wraps it in
+    // parentheses.
+    fn compose_js(before: &str, main: &str, after: &str) -> String {
+        format!(
+            "(          (function () {{\n            {before}\n            var result = {main};\n            \
+             {after}\n            return result;\n          }})()\n)"
+        )
+    }
+
+    fn render(function: &str, component: &str, props: &str) -> String {
+        compose_js(
+            RESET,
+            &format!("this.ReactRailsUJS.serverRender('{function}', '{component}', {props})"),
+            REPLAY,
+        )
+    }
+
+    fn values(source: &str) -> Option<Vec<Hoisted<'_>>> {
+        recognize(source.as_bytes()).map(|shape| shape.values)
+    }
+
+    fn json(text: &str) -> Hoisted<'_> {
+        Hoisted::Json(text.as_bytes())
+    }
+
+    fn text(text: &str) -> Hoisted<'_> {
+        Hoisted::Text(text.as_bytes())
+    }
+
+    fn nested(depth: usize) -> String {
+        format!("{}{}", "[".repeat(depth), "]".repeat(depth))
+    }
+
+    #[test]
+    fn an_execjs_call_hoists_its_arguments() {
+        let source = "(add.apply(this, [1,\"two\",{\"3\":null}]))";
+        assert_eq!(
+            recognize(source.as_bytes()),
+            Some(Shape {
+                around: vec![b"(add.apply(this, ", b"))"],
+                values: vec![json("[1,\"two\",{\"3\":null}]")],
+            })
+        );
+    }
+
+    #[test]
+    fn a_call_names_its_function_by_a_dotted_path() {
+        for path in [
+            "a.b.c",
+            "$_.x9",
+            "_",
+            "$",
+            "foo.apply",
+            "this.add",
+            "arguments",
+        ] {
+            let source = format!("({path}.apply(this, []))");
+            let shape = recognize(source.as_bytes());
+            assert_eq!(
+                shape.map(|shape| shape.around[0].to_vec()),
+                Some(format!("({path}.apply(this, ").into_bytes()),
+                "{path}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_call_template_reads_its_arguments_back() {
+        let shape = recognize(b"(add.apply(this, [1]))");
+        assert_eq!(
+            shape.and_then(|shape| shape.template(b"read")),
+            Some(b"(add.apply(this, read(0)))".to_vec())
+        );
+    }
+
+    #[test]
+    fn a_source_that_names_the_reader_has_no_template() {
+        for source in ["(read.apply(this, [1]))", "(a.read.apply(this, [1]))"] {
+            let shape = recognize(source.as_bytes());
+            assert!(shape.is_some(), "{source}");
+            assert_eq!(shape.and_then(|shape| shape.template(b"read")), None);
+        }
+    }
+
+    #[test]
+    fn near_misses_of_a_call_are_not_recognized() {
+        for source in [
+            " (add.apply(this, [1]))",
+            "( add.apply(this, [1]))",
+            "(add .apply(this, [1]))",
+            "(add.apply( this, [1]))",
+            "(add.apply(this,  [1]))",
+            "(add.apply(this,[1]))",
+            "(add.apply(this, [1]) )",
+            "(add.apply(this, [1]));",
+            "add.apply(this, [1])",
+            "(add.call(this, [1]))",
+            "(add.apply(globalThis, [1]))",
+            "(a[0].apply(this, [1]))",
+            "(a['b'].apply(this, [1]))",
+            "(a..b.apply(this, [1]))",
+            "(.a.apply(this, [1]))",
+            "(9a.apply(this, [1]))",
+            "(\u{e4}.apply(this, [1]))",
+            "(f().apply(this, [1]))",
+            "(add.apply(this, \"[1]\"))",
+            "(add.apply(this, {\"a\":1}))",
+            "(add.apply(this, [1]) + add.apply(this, [2]))",
+            "(add.apply(this, [1] ))",
+            "(add.apply(this, [1]\n))",
+            "(add.apply(this, [1))",
+            "(add.apply(this, [\"1]))",
+        ] {
+            assert_eq!(values(source), None, "{source:?}");
+        }
+    }
+
+    #[test]
+    fn brackets_and_parentheses_in_strings_do_not_end_the_arguments() {
+        let source = "(f.apply(this, [\"])\\\"[\",\"))\"]))";
+        assert_eq!(values(source), Some(vec![json("[\"])\\\"[\",\"))\"]")]));
+    }
+
+    #[test]
+    fn a_proto_key_in_any_spelling_takes_the_normal_path() {
+        for args in [
+            "[{\"__proto__\":{}}]",
+            "[\"__proto__\"]",
+            "[{\"\\u005f_proto__\":1}]",
+            "[{\"_\\u005Fproto__\":1}]",
+            "[{\"__\\u0070roto__\":1}]",
+            "[{\"__pr\\u006Fto__\":1}]",
+        ] {
+            assert_eq!(values(&format!("(f.apply(this, {args}))")), None, "{args}");
+        }
+        let escaped = "[\"\\u003c\\u2028\\\\u005f\\\"\"]";
+        assert_eq!(
+            values(&format!("(f.apply(this, {escaped}))")),
+            Some(vec![json(escaped)])
+        );
+    }
+
+    #[test]
+    fn nesting_past_the_limit_takes_the_normal_path() {
+        let deepest = nested(MAX_DEPTH);
+        let source = format!("(f.apply(this, {deepest}))");
+        assert_eq!(values(&source), Some(vec![json(&deepest)]));
+        assert_eq!(
+            values(&format!("(f.apply(this, {}))", nested(MAX_DEPTH + 1))),
+            None
+        );
+    }
+
+    #[test]
+    fn a_source_that_is_not_utf8_is_not_recognized() {
+        assert_eq!(recognize(b"(f.apply(this, [\"\xff\"]))"), None);
+    }
+
+    #[test]
+    fn a_react_rails_render_hoists_its_function_component_and_props() {
+        let source = render(
+            "renderToString",
+            "Components.Hello",
+            "{\"name\":\"W\u{e9}\"}",
+        );
+        let shape = recognize(source.as_bytes());
+        assert_eq!(
+            shape.as_ref().map(|shape| shape.values.clone()),
+            Some(vec![
+                text("renderToString"),
+                text("Components.Hello"),
+                json("{\"name\":\"W\u{e9}\"}"),
+            ])
+        );
+        let expected = compose_js(
+            RESET,
+            "this.ReactRailsUJS.serverRender(read(0), read(1), read(2))",
+            REPLAY,
+        );
+        assert_eq!(
+            shape.and_then(|shape| shape.template(b"read")),
+            Some(expected.into_bytes())
+        );
+    }
+
+    #[test]
+    fn a_render_without_console_replay_is_recognized() {
+        let source = compose_js(
+            "",
+            "this.ReactRailsUJS.serverRender('renderToStaticMarkup', 'A', [])",
+            "",
+        );
+        assert_eq!(
+            values(&source),
+            Some(vec![text("renderToStaticMarkup"), text("A"), json("[]")])
+        );
+    }
+
+    #[test]
+    fn near_misses_of_a_render_are_not_recognized() {
+        let call = "this.ReactRailsUJS.serverRender('renderToString', 'A', {})";
+        let second = "this.ReactRailsUJS.serverRender('renderToString', 'B', {});";
+        let sources = [
+            compose_js(RESET, call, REPLAY).replacen("(          (", "(         (", 1),
+            compose_js(RESET, call, REPLAY).replacen("var result = ", "var result  = ", 1),
+            compose_js(RESET, call, REPLAY).replacen("return result;\n", "return result; \n", 1),
+            compose_js(RESET, call, REPLAY).replacen("{});", "{} );", 1),
+            compose_js(RESET, call, REPLAY).replacen("'A', {}", "'A',{}", 1),
+            compose_js(RESET, call, REPLAY)
+                .trim_end_matches(')')
+                .to_owned(),
+            compose_js(second, call, REPLAY),
+            compose_js(RESET, call, second),
+            compose_js(RESET, &format!("{call} + {call}"), REPLAY),
+            compose_js(
+                RESET,
+                "ReactRailsUJS.serverRender('renderToString', 'A', {})",
+                REPLAY,
+            ),
+            render("renderToString", "He'llo", "{}"),
+            render("renderToString", "A\\u0041", "{}"),
+            render("renderToString", "A\u{2028}", "{}"),
+            render("render\nToString", "A", "{}"),
+            render("renderToString", "A", "{name: 'js'} || {}"),
+            render("renderToString", "A", "null"),
+            render("renderToString", "A", "\"{}\""),
+            render("renderToString", "A", "{\n  \"n\": 4\n}"),
+            render("renderToString", "A", "{\"n\":\"\u{2029}\"}"),
+            render("renderToString", "A", "{\"__proto__\":{}}"),
+        ];
+        for source in &sources {
+            assert_eq!(values(source), None, "{source:?}");
+        }
+    }
+
+    // Whether props are JSON at all is V8's to decide.
+    #[test]
+    fn javascript_props_shaped_like_json_are_left_to_the_json_parser() {
+        let source = render("renderToString", "A", "{name: 'js'}");
+        assert_eq!(
+            values(&source),
+            Some(vec![
+                text("renderToString"),
+                text("A"),
+                json("{name: 'js'}")
+            ])
+        );
+    }
+}

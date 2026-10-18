@@ -1,3 +1,5 @@
+use std::collections::hash_map::RandomState;
+use std::hash::BuildHasher;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -10,6 +12,7 @@ use mini_racer_wire::Writer;
 use v8::ValueDeserializerHelper;
 
 use crate::control::{CallbackReply, ControlBlock, Depth, IsolateTerminator, JsText, Request};
+use crate::fast_calls::{self, Hoisted};
 use crate::process::code_cache::{Building, Plan};
 use crate::process::fork::Generation;
 use crate::process::platform::{self, Mode};
@@ -58,12 +61,39 @@ struct Runtime {
     // Large scripts to cache once their dispatch is over, so making a cache
     // never counts against a timeout.
     uncached: Mutex<Vec<Uncached>>,
+    hoisting: Mutex<Hoisting>,
+    // The values of each fast call running, innermost last, for `hoisted`.
+    frames: Mutex<Vec<v8::Global<v8::Array>>>,
 }
 
 struct Uncached {
     script: v8::Global<v8::UnboundScript>,
     building: Building,
 }
+
+// A context's fast calls: the binding their templates read values through,
+// and the templates compiled so far, most recently used last.
+#[derive(Default)]
+struct Hoisting {
+    binding: Binding,
+    templates: Vec<Template>,
+}
+
+struct Template {
+    text: Box<[u8]>,
+    // `None` for one that does not compile.
+    script: Option<v8::Global<v8::Script>>,
+}
+
+#[derive(Default)]
+enum Binding {
+    #[default]
+    Unmade,
+    Made(String),
+    Failed,
+}
+
+const TEMPLATES: usize = 32;
 
 impl Runtime {
     fn new(
@@ -84,6 +114,8 @@ impl Runtime {
             freed: AtomicBool::new(false),
             snapshot,
             uncached: Mutex::default(),
+            hoisting: Mutex::default(),
+            frames: Mutex::default(),
         }
     }
 }
@@ -709,6 +741,9 @@ fn evaluate(
     (filename, source): (&JsText, &JsText),
     (depth, awaited): (Depth, bool),
 ) -> Result<Vec<u8>, EngineError> {
+    if let Some(value) = fast_call(tc, runtime, filename, source)? {
+        return settle(tc, runtime, value, (depth, awaited));
+    }
     let plan = if large(source) {
         runtime.freed.store(true, Ordering::Relaxed);
         runtime
@@ -727,6 +762,20 @@ fn evaluate(
     let value = script
         .run(tc)
         .ok_or_else(|| failure(tc, JsErrorKind::Runtime))?;
+    let reply = settle(tc, runtime, value, (depth, awaited))?;
+    if let Some(building) = make {
+        let script = v8::Global::new(tc, script.get_unbound_script(tc));
+        lock(&runtime.uncached).push(Uncached { script, building });
+    }
+    Ok(reply)
+}
+
+fn settle<'s>(
+    tc: &mut Tc<'s, '_, '_, '_>,
+    runtime: &Runtime,
+    value: v8::Local<'s, v8::Value>,
+    (depth, awaited): (Depth, bool),
+) -> Result<Vec<u8>, EngineError> {
     let value = if awaited {
         await_promise(tc, runtime, value)?
     } else {
@@ -734,13 +783,174 @@ fn evaluate(
     };
     let value = serialize::sanitize(tc, value);
     verdict(runtime, depth)?;
-    let reply = serialize::reply(tc, &runtime.filter, value)
-        .ok_or_else(|| failure(tc, JsErrorKind::Runtime))?;
-    if let Some(building) = make {
-        let script = v8::Global::new(tc, script.get_unbound_script(tc));
-        lock(&runtime.uncached).push(Uncached { script, building });
+    serialize::reply(tc, &runtime.filter, value).ok_or_else(|| failure(tc, JsErrorKind::Runtime))
+}
+
+// The evals ExecJS and react-rails send once per call run a template compiled
+// once per context, a script like the source, so its frames and `this` are the
+// source's. It reads the values the source carries, parsed as JSON instead of
+// compiled, through a binding to `hoisted`. `None` leaves the eval to the
+// normal path: another shape, values that are not JSON, or a template that
+// does not compile.
+fn fast_call<'s>(
+    tc: &mut Tc<'s, '_, '_, '_>,
+    runtime: &Runtime,
+    filename: &JsText,
+    source: &JsText,
+) -> Result<Option<v8::Local<'s, v8::Value>>, EngineError> {
+    // mini_racer's verbose `TryCatch` prints where an exception happened as
+    // its offset in the script, which a template moves.
+    if !crate::process::fast_calls() || runtime.block.config.verbose_exceptions {
+        return Ok(None);
     }
-    Ok(reply)
+    let (JsText::Utf8(name), JsText::Utf8(source)) = (filename, source) else {
+        return Ok(None);
+    };
+    let Some(shape) = (name == b"<eval>")
+        .then(|| fast_calls::recognize(source))
+        .flatten()
+    else {
+        return Ok(None);
+    };
+    if matches!(lock(&runtime.hoisting).binding, Binding::Unmade) {
+        bind_reader(tc, runtime);
+    }
+    let text = match &lock(&runtime.hoisting).binding {
+        Binding::Made(reader) => shape.template(reader.as_bytes()),
+        Binding::Unmade | Binding::Failed => None,
+    };
+    let Some(text) = text else {
+        return declined(tc);
+    };
+    let mut values = Vec::with_capacity(shape.values.len());
+    for value in &shape.values {
+        let (Hoisted::Json(text) | Hoisted::Text(text)) = *value;
+        let text = v8::String::new_from_utf8(tc, text, v8::NewStringType::Normal);
+        let parsed = match value {
+            Hoisted::Json(_) => text.and_then(|text| v8::json::parse(tc, text)),
+            Hoisted::Text(_) => text.map(Into::into),
+        };
+        let Some(parsed) = parsed else {
+            return declined(tc);
+        };
+        values.push(parsed);
+    }
+    let Some(script) = template(tc, runtime, text, filename) else {
+        return declined(tc);
+    };
+    let frame = v8::Array::new_with_elements(tc, &values);
+    lock(&runtime.frames).push(v8::Global::new(tc, frame));
+    let value = script.run(tc);
+    lock(&runtime.frames).pop();
+    value
+        .map(Some)
+        .ok_or_else(|| failure(tc, JsErrorKind::Runtime))
+}
+
+// Declining leaves nothing it threw for the normal path, though a termination
+// that arrived meanwhile still ends the dispatch.
+fn declined<'s>(
+    tc: &mut Tc<'s, '_, '_, '_>,
+) -> Result<Option<v8::Local<'s, v8::Value>>, EngineError> {
+    if tc.has_terminated() {
+        return Err(failure(tc, JsErrorKind::Runtime));
+    }
+    tc.reset();
+    Ok(None)
+}
+
+// A global lexical binding to the function a template calls for its values:
+// no property lists it, and its random name keeps it from meeting a global of
+// the user's. Made under the explicit microtask policy, so microtasks already
+// queued run after the template's script, as they would after the source's.
+fn bind_reader(tc: &mut Tc<'_, '_, '_, '_>, runtime: &Runtime) {
+    let name = format!(
+        "__mini_racer_rs_{:016x}",
+        RandomState::new().hash_one(runtime.key)
+    );
+    let policy = tc.get_microtasks_policy();
+    tc.set_microtasks_policy(v8::MicrotasksPolicy::Explicit);
+    let made = (|| {
+        let setup = format!("let {name};\n(function (read) {{ {name} = read }})");
+        let setup = v8::String::new(tc, &setup)?;
+        let bind = v8::Script::compile(tc, setup, None)?.run(tc)?;
+        let bind = v8::Local::<v8::Function>::try_from(bind).ok()?;
+        let read = v8::Function::builder(hoisted).build(tc)?;
+        let receiver = v8::undefined(tc).into();
+        bind.call(tc, receiver, &[read.into()])
+    })()
+    .is_some();
+    tc.set_microtasks_policy(policy);
+    // A termination may have cut the setup short; the next call makes another.
+    if made || !tc.has_terminated() {
+        lock(&runtime.hoisting).binding = if made {
+            Binding::Made(name)
+        } else {
+            Binding::Failed
+        };
+    }
+}
+
+fn template<'s>(
+    scope: &v8::PinScope<'s, '_>,
+    runtime: &Runtime,
+    text: Vec<u8>,
+    filename: &JsText,
+) -> Option<v8::Local<'s, v8::Script>> {
+    let mut hoisting = lock(&runtime.hoisting);
+    let kept = hoisting
+        .templates
+        .iter()
+        .position(|template| *template.text == *text);
+    if let Some(at) = kept {
+        let template = hoisting.templates.remove(at);
+        let script = template
+            .script
+            .as_ref()
+            .map(|script| v8::Local::new(scope, script));
+        hoisting.templates.push(template);
+        return script;
+    }
+    drop(hoisting);
+    let source = v8::String::new_from_utf8(scope, &text, v8::NewStringType::Normal)?;
+    let name = string(scope, filename)?;
+    let origin = serialize::origin(scope, name.into());
+    let script = v8::Script::compile(scope, source, Some(&origin));
+    let mut hoisting = lock(&runtime.hoisting);
+    if hoisting.templates.len() >= TEMPLATES {
+        hoisting.templates.remove(0);
+    }
+    hoisting.templates.push(Template {
+        text: text.into_boxed_slice(),
+        script: script.map(|script| v8::Global::new(scope, script)),
+    });
+    script
+}
+
+// What a fast call's template reads in place of the literal at that index.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the signature V8 calls a function callback with"
+)]
+fn hoisted<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: v8::FunctionCallbackArguments<'s>,
+    mut rv: v8::ReturnValue<'s, v8::Value>,
+) {
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let Some(runtime) = scope.get_slot::<Arc<Runtime>>().cloned() else {
+            return;
+        };
+        let frame = lock(&runtime.frames)
+            .last()
+            .map(|frame| v8::Local::new(scope, frame));
+        let index = args.get(0).uint32_value(scope);
+        if let (Some(frame), Some(index)) = (frame, index)
+            && let Some(value) = frame.get_index(scope, index)
+        {
+            rv.set(value);
+        }
+    }));
 }
 
 // From this process's code cache when the plan has an entry. V8 refuses one
