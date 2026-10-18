@@ -88,8 +88,8 @@ struct List {
     // Most recently used last.
     kept: Vec<Kept>,
     // What each source converted and left unkept takes, too much for the room
-    // left or, as invalid UTF-8, unbounded, so it is converted again only
-    // once there is room for it.
+    // left or, as invalid UTF-8, unbounded, so that while it is among the last
+    // `MAX_REFUSED` refused it is not converted again without room for it.
     refused: Vec<(Key, usize)>,
 }
 
@@ -433,8 +433,9 @@ mod tests {
         assert_eq!(sources.conversions(), converted + 1);
     }
 
-    // Under a 5 MiB bound with 2 MiB still read: 2 MiB more of Latin-1 fits,
-    // and 2 MiB of UTF-8 seems to, until one astral character makes it 4.
+    // Under a 5 MiB bound with 2 MiB still read, 4 MiB of Latin-1 cannot fit
+    // and is never converted; 2 MiB of UTF-8 may fit, until converting it
+    // shows one astral character makes it 4.
     #[test]
     fn a_source_is_converted_only_while_it_may_fit() {
         let sources = Sources::bounded(MAX_SOURCES, 5 << 20);
@@ -499,6 +500,28 @@ mod tests {
             copy.upgrade()
                 .is_some_and(|copy| Arc::ptr_eq(&copy, &from_parent))
         );
+    }
+
+    // A child's inherited copies stay read while its parent's strings hold
+    // them, so a child forked with a full list must not convert either.
+    #[test]
+    fn a_child_inheriting_a_full_list_converts_nothing() {
+        let parent = Sources::default();
+        let count = u8::try_from(MAX_SOURCES).unwrap_or(u8::MAX);
+        let read: Vec<Option<Units>> = (60..60 + count)
+            .map(|seed| {
+                let text = script(seed);
+                parent.units(&key(&text), &text)
+            })
+            .collect();
+        let child = parent.inherited();
+        let extra = script(110);
+        let extra_key = key(&extra);
+        for _ in 0..3 {
+            assert!(child.units(&extra_key, &extra).is_none());
+        }
+        assert_eq!(child.conversions(), 0);
+        drop(read);
     }
 
     #[test]
