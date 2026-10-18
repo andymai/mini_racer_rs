@@ -395,7 +395,9 @@ struct Builder<'s, 'b, 'p, 'i> {
     shapes: Vec<Vec<(Key<'b>, v8::Local<'s, v8::String>)>>,
 }
 
-// Reads again what `Check` accepted, so only a termination stops it.
+// Reads again what `Check` accepted, so only a termination stops it, or V8's
+// failed read of a two-byte string (`Read::Failed`), which would have failed
+// V8's read of the whole call too.
 impl<'s, 'b> Builder<'s, 'b, '_, '_> {
     fn unterminated(&self) -> Option<()> {
         (!self.termination_requested.load(Ordering::Acquire)).then_some(())
