@@ -32,12 +32,11 @@ rescue StandardError => e
   exit 1
 end
 
-# Bundles run to megabytes, so a step names the file rather than piping its
-# source through every worker.
+# Bundles run to megabytes, so a step names the file, or repeats its source,
+# rather than piping that much through every worker.
 def source(step)
-  return step.fetch("source") unless step.key?("file")
-
-  [File.read(step.fetch("file")), step["append"]].compact.join("\n")
+  body = step.key?("file") ? File.read(step.fetch("file")) : step.fetch("source") * step.fetch("repeat", 1)
+  [body, step["append"]].compact.join("\n")
 rescue SystemCallError => e
   warn "diff worker: cannot read #{step["file"]}: #{e.message}"
   exit 1
@@ -54,9 +53,11 @@ def execjs(step)
 end
 
 # A setup step's completion value is never compared, and ending it in undefined
-# keeps the step from also testing how a function or object converts.
+# keeps the step from also testing how a function or object converts. A step
+# with an encoding sends its source in that encoding.
 def evaluate(context, step)
-  context.eval(step["setup"] ? "#{source(step)}\n;undefined" : source(step))
+  text = step["setup"] ? "#{source(step)}\n;undefined" : source(step)
+  context.eval(step.key?("encoding") ? text.encode(step.fetch("encoding")) : text)
 end
 
 def attach(context, step)
