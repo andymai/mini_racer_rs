@@ -159,7 +159,8 @@ const MAX_DEPTH: usize = 128;
 // The length of the JSON array or object `text` starts with, if it nests no
 // deeper than `MAX_DEPTH` and cannot name a `__proto__` key, which an object
 // literal makes its prototype and `JSON.parse` an own property. It reads
-// `text` as JSON; V8's parser decides whether it is.
+// `text` as JSON; V8's parser decides whether it is, though a byte JSON never
+// has outside a string ends it here, cheaper than V8's error.
 fn json_extent(text: &[u8]) -> Option<usize> {
     if !matches!(text.first(), Some(b'[' | b'{')) {
         return None;
@@ -167,35 +168,69 @@ fn json_extent(text: &[u8]) -> Option<usize> {
     let mut depth = 0_usize;
     let mut at = 0;
     while let Some(&byte) = text.get(at) {
-        match byte {
-            b'"' => {
+        match CLASSES[usize::from(byte)] {
+            Class::Quote => {
                 at = string_end(text, at + 1)?;
                 continue;
             }
-            b'[' | b'{' => {
+            Class::Open => {
                 depth += 1;
                 if depth > MAX_DEPTH {
                     return None;
                 }
             }
-            b']' | b'}' => {
+            Class::Close => {
                 depth = depth.checked_sub(1)?;
                 if depth == 0 {
                     return Some(at + 1);
                 }
             }
-            _ => {}
+            Class::Plain => {}
+            Class::Other => return None,
         }
         at += 1;
     }
     None
 }
 
+#[derive(Clone, Copy)]
+enum Class {
+    Quote,
+    Open,
+    Close,
+    // Whitespace, `:`, `,`, what numbers are written with, and the letters of
+    // `true`, `false` and `null`.
+    Plain,
+    Other,
+}
+
+const CLASSES: [Class; 256] = {
+    let mut classes = [Class::Other; 256];
+    let plain = b" \t\n\r:,0123456789-+.Eaeflnrstu";
+    let mut at = 0;
+    while at < plain.len() {
+        classes[plain[at] as usize] = Class::Plain;
+        at += 1;
+    }
+    classes[b'"' as usize] = Class::Quote;
+    classes[b'[' as usize] = Class::Open;
+    classes[b'{' as usize] = Class::Open;
+    classes[b']' as usize] = Class::Close;
+    classes[b'}' as usize] = Class::Close;
+    classes
+};
+
 // The index after the closing quote of the string whose contents start at
 // `at`, unless it holds `__proto__` or an escaped letter, digit, `_` or `$`,
 // which could spell it.
 fn string_end(text: &[u8], mut at: usize) -> Option<usize> {
+    let mut plain = 0;
     loop {
+        // Most strings are short keys, which a word at a time only slows.
+        if plain == 16 {
+            at = plain_run(text, at);
+            plain = 0;
+        }
         match *text.get(at)? {
             b'"' => return Some(at + 1),
             b'\\' if text.get(at + 1) == Some(&b'u') => {
@@ -213,9 +248,34 @@ fn string_end(text: &[u8], mut at: usize) -> Option<usize> {
             {
                 return None;
             }
-            _ => at += 1,
+            _ => {
+                at += 1;
+                plain += 1;
+            }
         }
     }
+}
+
+// Past eight bytes at a time that hold no quote, backslash or `_`: most of a
+// long string, read a word at a time.
+fn plain_run(text: &[u8], mut at: usize) -> usize {
+    const ONES: u64 = u64::from_ne_bytes([1; 8]);
+    const HIGHS: u64 = u64::from_ne_bytes([0x80; 8]);
+    let holds = |word: u64, byte: u8| {
+        let matched = word ^ (ONES * u64::from(byte));
+        matched.wrapping_sub(ONES) & !matched & HIGHS != 0
+    };
+    while let Some(word) = text
+        .get(at..at + 8)
+        .and_then(|bytes| <[u8; 8]>::try_from(bytes).ok())
+        .map(u64::from_ne_bytes)
+    {
+        if holds(word, b'"') || holds(word, b'\\') || holds(word, b'_') {
+            break;
+        }
+        at += 8;
+    }
+    at
 }
 
 #[cfg(test)]
@@ -465,17 +525,48 @@ mod tests {
         }
     }
 
+    #[test]
+    fn props_with_a_byte_json_keeps_in_strings_take_the_normal_path() {
+        for props in [
+            "{name: 'js'}",
+            "{\"a\":undefined}",
+            "{\"a\":1}/*x*/",
+            "{\"a\":`b`}",
+        ] {
+            assert_eq!(
+                values(&render("renderToString", "A", props)),
+                None,
+                "{props}"
+            );
+        }
+    }
+
     // Whether props are JSON at all is V8's to decide.
     #[test]
-    fn javascript_props_shaped_like_json_are_left_to_the_json_parser() {
-        let source = render("renderToString", "A", "{name: 'js'}");
+    fn props_of_json_bytes_are_left_to_the_json_parser() {
+        let source = render("renderToString", "A", "{n: true}");
         assert_eq!(
             values(&source),
-            Some(vec![
-                text("renderToString"),
-                text("A"),
-                json("{name: 'js'}")
-            ])
+            Some(vec![text("renderToString"), text("A"), json("{n: true}")])
         );
+    }
+
+    // Past its first 16 bytes a string is read eight bytes at a time, so each
+    // byte that matters is tried before that and at every offset into a word.
+    #[test]
+    fn quotes_escapes_and_proto_are_found_at_any_offset_in_a_string() {
+        for offset in 0..48 {
+            let pad = "x".repeat(offset);
+            let plain = format!("[\"{pad}\",\"{pad}\\\"]\"]");
+            let source = format!("(f.apply(this, {plain}))");
+            assert_eq!(values(&source), Some(vec![json(&plain)]), "{offset}");
+            for args in [
+                format!("[{{\"{pad}__proto__\":1}}]"),
+                format!("[\"{pad}\\u005f\"]"),
+                format!("[\"{pad}]"),
+            ] {
+                assert_eq!(values(&format!("(f.apply(this, {args}))")), None, "{args}");
+            }
+        }
     }
 }
