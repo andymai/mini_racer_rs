@@ -1,4 +1,4 @@
-use std::ffi::{c_int, c_void};
+use std::ffi::{c_int, c_long, c_void};
 
 use magnus::rb_sys::{AsRawId, AsRawValue, FromRawValue, protect};
 use magnus::value::{IntoId, LazyId, ReprValue};
@@ -185,6 +185,23 @@ pub fn ruby_type(_ruby: &Ruby, value: Value) -> RubyType {
     }
 }
 
+/// Whether a Hash stores `key` without running Ruby code or reaching any
+/// other object: Ruby hashes and compares these itself (`any_hash`,
+/// `rb_any_cmp`), a String only while its class is String itself.
+pub fn plain_key(ruby: &Ruby, key: Value) -> bool {
+    match ruby_type(ruby, key) {
+        RubyType::Fixnum
+        | RubyType::Bignum
+        | RubyType::Float
+        | RubyType::Symbol
+        | RubyType::Nil
+        | RubyType::True
+        | RubyType::False => true,
+        RubyType::String => key.class().as_raw() == ruby.class_string().as_raw(),
+        _ => false,
+    }
+}
+
 /// An object's address, the identity `mini_racer`'s encoder keys repeated
 /// containers by; stable only while the object is pinned.
 pub fn identity(value: Value) -> u64 {
@@ -221,8 +238,9 @@ pub fn call_with_array(ruby: &Ruby, receiver: Value, args: RArray) -> Result<Val
 }
 
 /// Stores each key and value as `Hash#[]=` would, under one `rb_protect` for
-/// the whole slice. `pairs` must be where the GC sees them, on the native
-/// stack: storing a key can start a compacting collection.
+/// the whole slice. `pairs` must be where the GC sees and pins them, on the
+/// native stack or in a `gc_root::Spill`: storing a key can start a
+/// compacting collection.
 // rb_hash_bulk_insert would take the slice in one call, but it rehashes the
 // whole table whenever the hash already has entries.
 pub fn hash_aset_pairs(_ruby: &Ruby, hash: RHash, pairs: &[[Value; 2]]) -> Result<(), Error> {
@@ -237,6 +255,24 @@ pub fn hash_aset_pairs(_ruby: &Ruby, hash: RHash, pairs: &[[Value; 2]]) -> Resul
         raw
     })?;
     Ok(())
+}
+
+/// The interned UTF-8 String of `bytes`, the frozen String `Hash#[]=` would
+/// store as the key in place of a new one.
+pub fn interned_utf8(ruby: &Ruby, bytes: &[u8]) -> Result<RString, Error> {
+    let len = c_long::try_from(bytes.len()).unwrap_or(c_long::MAX);
+    // SAFETY: rb_utf8_encoding only reads Ruby's built-in UTF-8 encoding.
+    let utf8 = unsafe { rb_sys::rb_utf8_encoding() };
+    let raw = protect(|| {
+        // SAFETY: the `&Ruby` argument proves this thread holds the GVL,
+        // `bytes` holds `len` bytes and outlives the call, which copies them
+        // when it makes a String, and `protect` catches an allocation failure.
+        unsafe { rb_sys::rb_enc_interned_str(bytes.as_ptr().cast(), len, utf8) }
+    })?;
+    // SAFETY: `raw` is the live String rb_enc_interned_str returned.
+    let value = unsafe { Value::from_raw(raw) };
+    RString::from_value(value)
+        .ok_or_else(|| Error::new(ruby.exception_type_error(), "expected String"))
 }
 
 /// How Ruby's own type errors name `value`: nil, true and false by value,

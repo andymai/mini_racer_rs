@@ -1,3 +1,7 @@
+use std::cmp::Ordering;
+use std::ops::Range;
+
+use magnus::typed_data::Obj;
 use magnus::value::ReprValue;
 use magnus::{
     Class, Error, Fixnum, IntoValue, Module, Object, RArray, RClass, RHash, RModule, RObject,
@@ -7,7 +11,7 @@ use mini_racer_wire::{
     Begun, Container, DecodeError, Limits, Scalar, Text, Visitor, decode_value, marker, text,
 };
 
-use crate::gc_root::StaticRoot;
+use crate::gc_root::{Spill, StaticRoot};
 use crate::{errors, rb_raw};
 
 #[expect(
@@ -69,21 +73,192 @@ struct ErrorParts {
 
 const BATCH: usize = 64;
 
-#[derive(Clone, Copy)]
-enum Target {
-    Array(RArray),
-    Hash(RHash),
-}
-
-// Decoded elements and object pairs wait here so a batch of them costs one
-// rb_protect rather than one per value. Every container's begin and end
-// empties it, so only the innermost open container ever has values waiting,
-// and whatever a child does (a Map hashing an ancestor as its key) sees each
-// container with every value decoded so far, as mini_racer builds them.
+// Decoded elements wait here so a batch of them costs one rb_protect rather
+// than one per value. Every container's begin and end empties it, so only the
+// innermost open array ever has elements waiting, and whatever a child does
+// (a Map hashing an ancestor as its key) sees each array with every element
+// decoded so far, as mini_racer builds them.
 struct Pending {
-    target: Option<Target>,
+    target: Option<RArray>,
     values: [Value; BATCH],
     filled: usize,
+}
+
+const PAIRS: usize = 128;
+
+const SCRATCH: usize = 64 << 10;
+
+// Every open hash's pairs wait here, innermost last, until the hash ends and
+// takes them in one rb_hash_bulk_insert while it is still empty, so Ruby sizes
+// its table once, as json 3.1's parser builds objects. A hash's run starts
+// with the hash and the start of the run around it. Past PAIRS values the
+// runs move to a Spill, whose mark pins them.
+struct Pairs {
+    values: [Value; PAIRS],
+    spill: Option<Obj<Spill>>,
+    len: usize,
+    innermost: Option<usize>,
+    // Every pair below this is in its hash already.
+    inserted: usize,
+}
+
+impl Pairs {
+    // Out of line, as KeyCache::start is, so the values made here never take
+    // room in the decoder's recursive frames, which a deep result repeats.
+    #[inline(never)]
+    fn start<'p>(slot: &'p mut Option<Self>, ruby: &Ruby) -> &'p mut Self {
+        slot.insert(Self {
+            values: [ruby.qnil().as_value(); PAIRS],
+            spill: None,
+            len: 0,
+            innermost: None,
+            inserted: 0,
+        })
+    }
+
+    fn push(&mut self, ruby: &Ruby, value: Value) {
+        if self.spill.is_none() {
+            if let Some(slot) = self.values.get_mut(self.len) {
+                *slot = value;
+                self.len = self.len.saturating_add(1);
+                return;
+            }
+            self.spill = Some(Spill::new(ruby, &self.values));
+        }
+        if let Some(spill) = &self.spill {
+            spill.push(value);
+        }
+        self.len = self.len.saturating_add(1);
+    }
+
+    fn get(&self, ruby: &Ruby, at: usize) -> Option<Value> {
+        self.spill
+            .as_ref()
+            .map_or_else(|| self.values.get(at).copied(), |spill| spill.get(ruby, at))
+    }
+
+    fn open(&mut self, ruby: &Ruby, hash: RHash) {
+        let outer = self
+            .innermost
+            .and_then(|at| i64::try_from(at).ok())
+            .unwrap_or(-1);
+        self.innermost = Some(self.len);
+        self.push(ruby, hash.as_value());
+        self.push(ruby, ruby.integer_from_i64(outer).as_value());
+    }
+
+    fn outer(&self, ruby: &Ruby, at: usize) -> Option<usize> {
+        self.get(ruby, at.saturating_add(1))
+            .and_then(Fixnum::from_value)
+            .and_then(|outer| usize::try_from(outer.to_i64()).ok())
+    }
+
+    // An empty table takes the pairs at once; one that holds pairs already
+    // takes them one by one, since rb_hash_bulk_insert would rehash it whole.
+    fn put(&self, ruby: &Ruby, hash: RHash, range: Range<usize>) -> Result<(), Error> {
+        if range.is_empty() {
+            return Ok(());
+        }
+        let put = |pairs: &[Value]| {
+            if hash.is_empty() {
+                hash.bulk_insert(pairs)
+            } else {
+                rb_raw::hash_aset_pairs(ruby, hash, pairs.as_chunks::<2>().0)
+            }
+        };
+        match &self.spill {
+            Some(spill) => spill.with_values(ruby, range, put),
+            None => put(self.values.get(range).unwrap_or_default()),
+        }
+    }
+
+    fn close(&mut self, ruby: &Ruby, hash: RHash) -> Result<(), Error> {
+        let Some(at) = self.innermost else {
+            return Err(errors::internal(ruby, "decode pairs without a hash"));
+        };
+        self.put(
+            ruby,
+            hash,
+            at.saturating_add(2).max(self.inserted)..self.len,
+        )?;
+        self.innermost = self.outer(ruby, at);
+        self.len = at;
+        self.inserted = self.inserted.min(at);
+        if let Some(spill) = &self.spill {
+            spill.truncate(at);
+        }
+        Ok(())
+    }
+
+    fn put_all(&mut self, ruby: &Ruby) -> Result<(), Error> {
+        let mut end = self.len;
+        let mut run = self.innermost;
+        while let Some(at) = run
+            && end > self.inserted
+        {
+            let hash = self
+                .get(ruby, at)
+                .and_then(RHash::from_value)
+                .ok_or_else(|| errors::internal(ruby, "decode pairs without a hash"))?;
+            self.put(ruby, hash, at.saturating_add(2).max(self.inserted)..end)?;
+            end = at;
+            run = self.outer(ruby, at);
+        }
+        self.inserted = self.len;
+        Ok(())
+    }
+}
+
+// json 3.1's parser keeps the names of objects inside arrays, which repeat,
+// for the rest of a parse: at most this many, each at most CACHED_KEY_BYTES
+// long and starting with a letter.
+const CACHED_KEYS: usize = 63;
+const CACHED_KEY_BYTES: usize = 55;
+
+// Interned keys sorted by length, then bytes, so a repeated key skips Ruby's
+// fstring table.
+struct KeyCache {
+    keys: [Value; CACHED_KEYS],
+    len: usize,
+}
+
+impl KeyCache {
+    #[inline(never)]
+    fn start<'c>(slot: &'c mut Option<Self>, ruby: &Ruby) -> &'c mut Self {
+        slot.insert(Self {
+            keys: [ruby.qnil().as_value(); CACHED_KEYS],
+            len: 0,
+        })
+    }
+
+    fn fetch(&mut self, ruby: &Ruby, bytes: &[u8]) -> Result<Value, Error> {
+        let held = self.keys.get(..self.len).unwrap_or_default();
+        let found = held.binary_search_by(|&key| {
+            RString::from_value(key).map_or(Ordering::Less, |key| {
+                rb_raw::with_string_bytes(ruby, key, |key| {
+                    key.len().cmp(&bytes.len()).then_with(|| key.cmp(bytes))
+                })
+            })
+        });
+        let at = match found {
+            Ok(at) => {
+                return held
+                    .get(at)
+                    .copied()
+                    .ok_or_else(|| errors::internal(ruby, "key cache"));
+            }
+            Err(at) => at,
+        };
+        let key = rb_raw::interned_utf8(ruby, bytes)?.as_value();
+        if self.len < CACHED_KEYS {
+            self.keys.copy_within(at..self.len, at.saturating_add(1));
+            if let Some(slot) = self.keys.get_mut(at) {
+                *slot = key;
+            }
+            self.len = self.len.saturating_add(1);
+        }
+        Ok(key)
+    }
 }
 
 // The visitor and its frames live on the native stack for the whole decode,
@@ -93,10 +268,15 @@ struct RubyVisitor<'r> {
     ruby: &'r Ruby,
     refs: Option<RArray>,
     pending: Pending,
+    pairs: Option<Pairs>,
+    keys: Option<KeyCache>,
+    // Arrays and sets open around the current value.
+    arrays: u32,
+    scratch: Vec<u8>,
 }
 
 impl RubyVisitor<'_> {
-    fn add(&mut self, target: Target, values: &[Value]) -> Result<(), Error> {
+    fn add(&mut self, target: RArray, values: &[Value]) -> Result<(), Error> {
         self.add_with(target, values.len(), |slots| slots.copy_from_slice(values))
     }
 
@@ -104,7 +284,7 @@ impl RubyVisitor<'_> {
     // sees each one as soon as it is made.
     fn add_with(
         &mut self,
-        target: Target,
+        target: RArray,
         count: usize,
         fill: impl FnOnce(&mut [Value]),
     ) -> Result<(), Error> {
@@ -136,7 +316,7 @@ impl RubyVisitor<'_> {
     ) -> Result<(), Error> {
         let ruby = self.ruby;
         for chunk in values.chunks(BATCH) {
-            self.add_with(Target::Array(array), chunk.len(), |slots| {
+            self.add_with(array, chunk.len(), |slots| {
                 for (slot, &n) in slots.iter_mut().zip(chunk) {
                     *slot = convert(ruby, n);
                 }
@@ -164,32 +344,103 @@ impl RubyVisitor<'_> {
         let values = self.pending.values.get(..filled).unwrap_or_default();
         match self.pending.target {
             _ if filled == 0 => Ok(()),
-            Some(Target::Array(array)) => array.cat(values),
-            Some(Target::Hash(hash)) => {
-                rb_raw::hash_aset_pairs(self.ruby, hash, values.as_chunks::<2>().0)
-            }
+            Some(array) => array.cat(values),
             None => Err(errors::internal(self.ruby, "decode batch without a target")),
         }
+    }
+
+    fn pairs(&mut self) -> Result<&mut Pairs, Error> {
+        let ruby = self.ruby;
+        self.pairs
+            .as_mut()
+            .ok_or_else(|| errors::internal(ruby, "decode pairs without a hash"))
+    }
+
+    fn open_hash(&mut self) -> RHash {
+        let ruby = self.ruby;
+        let hash = ruby.hash_new();
+        match &mut self.pairs {
+            Some(pairs) => pairs.open(ruby, hash),
+            None => Pairs::start(&mut self.pairs, ruby).open(ruby, hash),
+        }
+        hash
+    }
+
+    // A key whose hashing Ruby code could run for, or that holds other
+    // values, such as an Array that refers back to an open hash, first sees
+    // every open hash with all its pairs so far, as mini_racer stores each
+    // pair as it decodes it.
+    fn put_pair(&mut self, hash: RHash, key: Value, value: Value) -> Result<(), Error> {
+        let ruby = self.ruby;
+        let pairs = self.pairs()?;
+        if rb_raw::plain_key(ruby, key) {
+            pairs.push(ruby, key);
+            pairs.push(ruby, value);
+            return Ok(());
+        }
+        pairs.put_all(ruby)?;
+        rb_raw::hash_aset_pairs(ruby, hash, &[[key, value]])
     }
 
     fn bad_state<T>(&self) -> Result<T, Error> {
         Err(errors::runtime(self.ruby, "bad state"))
     }
 
-    fn string(&self, text: Text<'_>) -> Result<Value, Error> {
+    // Text is transcoded into one buffer, then copied into its String in one
+    // call: making a String to write into costs more Ruby calls than the copy
+    // saves. Up to SCRATCH bytes it is the decode's own, with room for the
+    // longest UTF-8 the text could be and zeroed only as it grows; longer
+    // text is measured first and gets a buffer its size, freed once copied,
+    // since the longest it could be is up to three times what it takes.
+    fn transcoded(
+        &mut self,
+        most: usize,
+        len: impl FnOnce() -> Option<usize>,
+        write: impl FnOnce(&mut [u8]) -> Option<usize>,
+    ) -> Option<Value> {
+        let ruby = self.ruby;
+        let mut measured;
+        let out = if most <= SCRATCH {
+            if self.scratch.len() < most {
+                self.scratch.resize(most, 0);
+            }
+            self.scratch.get_mut(..most).unwrap_or_default()
+        } else {
+            measured = vec![0; len()?];
+            measured.as_mut_slice()
+        };
+        let written = write(out)?;
+        Some(
+            ruby.enc_str_new(out.get(..written).unwrap_or_default(), ruby.utf8_encoding())
+                .as_value(),
+        )
+    }
+
+    fn string(&mut self, text: Text<'_>) -> Result<Value, Error> {
         let ruby = self.ruby;
         Ok(match text {
             Text::Utf8(bytes) => ruby.enc_str_new(bytes, ruby.utf8_encoding()).as_value(),
             Text::Latin1(bytes) if bytes.is_ascii() => {
                 ruby.enc_str_new(bytes, ruby.utf8_encoding()).as_value()
             }
-            Text::Latin1(bytes) => ruby.str_new(&text::latin1_to_utf8(bytes)).as_value(),
+            Text::Latin1(bytes) => self
+                .transcoded(
+                    bytes.len().saturating_mul(2),
+                    || Some(text::latin1_utf8_len(bytes)),
+                    |out| Some(text::latin1_to_utf8_into(bytes, out)),
+                )
+                .ok_or_else(|| errors::internal(ruby, "Latin-1 text not transcoded"))?,
             Text::Utf16Le(bytes) if marker::is_javascript_function(bytes) => {
                 JAVASCRIPT_FUNCTION.get(ruby).new_instance(())?
             }
             Text::Utf16Le(bytes) => {
-                if let Some(utf8) = text::utf16le_to_utf8(bytes) {
-                    ruby.str_new(&utf8).as_value()
+                let most = bytes.len().saturating_mul(3).div_ceil(2);
+                if let Some(utf8) = self.transcoded(
+                    most,
+                    || text::utf16le_utf8_len(bytes),
+                    |out| text::utf16le_to_utf8_into(bytes, out),
+                ) {
+                    utf8
                 } else {
                     let utf16 = ruby
                         .find_encoding("UTF-16LE")
@@ -198,6 +449,39 @@ impl RubyVisitor<'_> {
                 }
             }
         })
+    }
+
+    // The key `Hash#[]=` would store, made interned in the first place. One
+    // with a lone surrogate stays UTF-16LE, which the hash interns itself,
+    // and the function marker stays a JavaScriptFunction.
+    fn interned(&mut self, text: Text<'_>) -> Result<Value, Error> {
+        let ruby = self.ruby;
+        match text {
+            Text::Utf8(bytes) => self.cached(bytes),
+            Text::Latin1(bytes) if bytes.is_ascii() => self.cached(bytes),
+            Text::Latin1(bytes) => {
+                Ok(rb_raw::interned_utf8(ruby, text::latin1_to_utf8(bytes).as_bytes())?.as_value())
+            }
+            Text::Utf16Le(bytes) if marker::is_javascript_function(bytes) => self.string(text),
+            Text::Utf16Le(bytes) => match text::utf16le_to_utf8(bytes) {
+                Some(utf8) => Ok(rb_raw::interned_utf8(ruby, utf8.as_bytes())?.as_value()),
+                None => self.string(text),
+            },
+        }
+    }
+
+    fn cached(&mut self, bytes: &[u8]) -> Result<Value, Error> {
+        let ruby = self.ruby;
+        if self.arrays == 0
+            || bytes.len() > CACHED_KEY_BYTES
+            || !bytes.first().is_some_and(u8::is_ascii_alphabetic)
+        {
+            return Ok(rb_raw::interned_utf8(ruby, bytes)?.as_value());
+        }
+        match &mut self.keys {
+            Some(keys) => keys.fetch(ruby, bytes),
+            None => KeyCache::start(&mut self.keys, ruby).fetch(ruby, bytes),
+        }
     }
 
     // mini_racer splits a millisecond time into seconds and microseconds,
@@ -286,8 +570,8 @@ impl Visitor for RubyVisitor<'_> {
                 array: ruby.ary_new(),
                 named: false,
             },
-            Container::Object => Frame::Object(ruby.hash_new()),
-            Container::Map => Frame::Map(ruby.hash_new()),
+            Container::Object => Frame::Object(self.open_hash()),
+            Container::Map => Frame::Map(self.open_hash()),
             // Allocated now so a cause can refer back to the error itself.
             Container::Error => Frame::Error(ErrorParts {
                 error: errors::script_error(ruby).obj_alloc()?.as_value(),
@@ -297,7 +581,10 @@ impl Visitor for RubyVisitor<'_> {
             }),
         };
         let value = match &frame {
-            Frame::Array(array) | Frame::Sparse { array, .. } => array.as_value(),
+            Frame::Array(array) | Frame::Sparse { array, .. } => {
+                self.arrays = self.arrays.saturating_add(1);
+                array.as_value()
+            }
             Frame::Object(hash) | Frame::Map(hash) => hash.as_value(),
             Frame::Error(parts) => parts.error,
         };
@@ -309,9 +596,7 @@ impl Visitor for RubyVisitor<'_> {
 
     fn push(&mut self, frame: &mut Frame, value: Value) -> Result<(), Error> {
         match frame {
-            Frame::Array(array) | Frame::Sparse { array, .. } => {
-                self.add(Target::Array(*array), &[value])
-            }
+            Frame::Array(array) | Frame::Sparse { array, .. } => self.add(*array, &[value]),
             Frame::Object(_) | Frame::Map(_) | Frame::Error(_) => self.bad_state(),
         }
     }
@@ -321,7 +606,7 @@ impl Visitor for RubyVisitor<'_> {
             Frame::Array(_) => Ok(()),
             Frame::Sparse { array, named } => {
                 if !*named && is_index(key) {
-                    self.add(Target::Array(*array), &[value])
+                    self.add(*array, &[value])
                 } else {
                     *named = true;
                     Ok(())
@@ -332,9 +617,9 @@ impl Visitor for RubyVisitor<'_> {
                     Some(key) => key.as_value(),
                     None => key.funcall::<_, _, Value>("to_s", ())?,
                 };
-                self.add(Target::Hash(*hash), &[key, value])
+                self.put_pair(*hash, key, value)
             }
-            Frame::Map(hash) => hash.aset(key, value),
+            Frame::Map(hash) => self.put_pair(*hash, key, value),
             Frame::Error(parts) => {
                 let field = RString::from_value(key)
                     .map(|key| rb_raw::string_bytes(self.ruby, key))
@@ -353,9 +638,23 @@ impl Visitor for RubyVisitor<'_> {
     fn end(&mut self, frame: Frame) -> Result<Value, Error> {
         self.flush()?;
         match frame {
-            Frame::Array(array) | Frame::Sparse { array, .. } => Ok(array.as_value()),
-            Frame::Object(hash) | Frame::Map(hash) => Ok(hash.as_value()),
+            Frame::Array(array) | Frame::Sparse { array, .. } => {
+                self.arrays = self.arrays.saturating_sub(1);
+                Ok(array.as_value())
+            }
+            Frame::Object(hash) | Frame::Map(hash) => {
+                let ruby = self.ruby;
+                self.pairs()?.close(ruby, hash)?;
+                Ok(hash.as_value())
+            }
             Frame::Error(parts) => self.script_error(parts),
+        }
+    }
+
+    fn key(&mut self, frame: &Frame, text: Text<'_>) -> Result<Value, Error> {
+        match frame {
+            Frame::Object(_) | Frame::Map(_) => self.interned(text),
+            Frame::Array(_) | Frame::Sparse { .. } | Frame::Error(_) => self.string(text),
         }
     }
 
@@ -429,6 +728,10 @@ pub fn value(ruby: &Ruby, bytes: &[u8]) -> Result<Value, Error> {
             values: [ruby.qnil().as_value(); BATCH],
             filled: 0,
         },
+        pairs: None,
+        keys: None,
+        arrays: 0,
+        scratch: Vec::new(),
     };
     decode_value(bytes, RESULT_LIMITS, &mut visitor).map_err(|e| match e {
         DecodeError::Visitor(error) => error,

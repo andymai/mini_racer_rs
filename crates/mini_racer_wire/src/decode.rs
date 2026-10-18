@@ -85,6 +85,12 @@ pub trait Visitor {
 
     fn end(&mut self, frame: Self::Frame) -> Result<Self::Value, Self::Error>;
 
+    /// A key that is a string, for an entry of `frame` other than an error's
+    /// fields, which would otherwise reach `scalar` as text.
+    fn key(&mut self, _frame: &Self::Frame, text: Text<'_>) -> Result<Self::Value, Self::Error> {
+        self.scalar(Scalar::Text(text))
+    }
+
     /// Remembers `value` as V8's object `id` for later back references. Ids
     /// arrive in increasing order, except that a container whose `begin`
     /// returned no value is registered when it ends.
@@ -650,9 +656,25 @@ impl<'a, 'v, V: Visitor> Decoder<'a, 'v, V> {
     }
 
     fn insert(&mut self, frame: &mut V::Frame, depth: u32) -> Result<(), DecodeError<V::Error>> {
-        let key = self.value(Self::child(depth)?)?;
-        let value = self.value(Self::child(depth)?)?;
+        let depth = Self::child(depth)?;
+        let key = self.entry_key(frame, depth)?;
+        let value = self.value(depth)?;
         Self::visit(self.visitor.insert(frame, key, value))
+    }
+
+    // A key that is not a string is read again as a value: handing `value` its
+    // tag would split `value` in two, and the half with the containers takes
+    // them all inline. Out of line, so `insert` stays inside the container's
+    // frame; a deep result repeats every frame on the way down.
+    #[inline(never)]
+    fn entry_key(&mut self, frame: &V::Frame, depth: u32) -> Decoded<V> {
+        let start = self.reader;
+        let tag = self.tag()?;
+        if let Some(text) = self.text(tag)? {
+            return Self::visit(self.visitor.key(frame, text));
+        }
+        self.reader = start;
+        self.value(depth)
     }
 
     // Reads keyed entries up to `end`, which may follow padding only if a key does.

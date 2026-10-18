@@ -6079,5 +6079,155 @@
         ]
       }
     ]
+  },
+  {
+    "id": "curated-keys-in-each-encoding",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "({'caf\\u00e9': 1, '\\u6771': 2, '\\u{1F600}': 3, '\\ud800x': 4, 5: 6, 2.5: 7, a: 8})"
+      }
+    ]
+  },
+  {
+    "id": "curated-keys-equal-to-values",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "[{id: 'id', name: 'name'}, {id: 'name', name: 'id'}, {['caf\\u00e9']: 'caf\\u00e9'}]"
+      }
+    ]
+  },
+  {
+    "id": "curated-keys-past-the-key-cache",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "Array.from({length: 3}, (_, i) => Object.fromEntries([...Array.from({length: 70}, (_, j) => ['key' + j, i]), ['x'.repeat(55), i], ['y'.repeat(56), i], ['_id', i], ['1a', i], ['', i], ['caf\\u00e9', i], ['\\u6771', i], ['\\udc00', i]]))"
+      }
+    ]
+  },
+  {
+    "id": "curated-map-string-keys",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "new Map([['k', 1], [new String('s'), 2], [1, 3], ['\\udc00', 4], [null, 5], ['caf\\u00e9', 6], ['\\u6771', 7]])"
+      }
+    ]
+  },
+  {
+    "id": "curated-map-keyed-by-open-ancestors",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "(() => { const outer = {x: 1, inner: {y: 2}}; outer.inner.m = new Map([[[outer, outer.inner], 'a'], [[{x: 1}, {y: 2}], 'b'], [outer, 'c'], [{x: 1}, 'd']]); return outer })()"
+      }
+    ]
+  },
+  {
+    "id": "curated-map-keyed-by-itself-in-an-array",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "(() => { const m = new Map([['x', 1]]); m.set([m], 'a'); m.set([new Map([['x', 1]])], 'b'); m.set('y', 2); return [m, {before: 1, m, after: 2}] })()"
+      }
+    ]
+  },
+  {
+    "id": "curated-map-equal-keys-few",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "new Map([[1, 'a'], [1n, 'b'], ['s', 'c'], [new String('s'), 'd'], [2 ** 70, 'e'], [2n ** 70n, 'f']])"
+      }
+    ]
+  },
+  {
+    "id": "curated-map-equal-keys-many",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "new Map([...Array.from({length: 12}, (_, i) => [[i, 'n' + i], [BigInt(i), 'b' + i]]).flat(), [2 ** 70, 'big'], [2n ** 70n, 'bigint'], ['s', 1], [new String('s'), 2], ...Array.from({length: 30}, (_, i) => ['k' + i, i])])"
+      }
+    ]
+  },
+  {
+    "id": "curated-map-keys-ruby-hashes",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "(() => { const o = {x: 1}; const e = new Error('e', {cause: o}); o.m = new Map([[new Date(0), 1], [e, 2], [new Date(0), 3], [o, 4], ['after', 5]]); o.y = 2; return o })()"
+      }
+    ]
+  },
+  {
+    "id": "curated-objects-past-the-inline-pairs",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "(() => { const wide = (n, p, inner) => Object.fromEntries([...Array.from({length: n}, (_, i) => [p + i, i]), ['inner', inner], ...Array.from({length: n}, (_, i) => [p + 'z' + i, -i])]); const o = wide(70, 'a', wide(40, 'b', wide(90, 'c', {leaf: true}))); o.self = o; return [o, o.inner.inner] })()"
+      }
+    ]
+  },
+  {
+    "id": "curated-maps-past-the-inline-pairs",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "(() => { const m = new Map(Array.from({length: 150}, (_, i) => [i % 2 ? 'k' + i : i, {i}])); m.set('nested', new Map(Array.from({length: 80}, (_, i) => [i, m]))); m.set('last', [m]); return m })()"
+      }
+    ]
+  },
+  {
+    "id": "curated-strings-around-the-embedded-size",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "[0, 1, 22, 23, 24, 31, 32, 33, 63, 64, 65, 200, 5000].flatMap((n) => ['\\u00e9'.repeat(n), 'a'.repeat(n) + '\\u00e9', '\\u00e9' + 'b'.repeat(n), '\\u0100'.repeat(n), '\\u{1F600}'.repeat(n), 'x'.repeat(n) + '\\u6771', '\\ud800' + 'y'.repeat(n), 'z'.repeat(n) + '\\udfff'])"
+      }
+    ]
+  },
+  {
+    "id": "curated-strings-inside-containers-and-patterns",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "[{k: 'na\\u00efve \\u{1F600}'}, new String('\\u00e9t\\u00e9'), new RegExp('caf\\u00e9'), new Map([[1, '\\u6771']]), new Set(['\\u00e9', '\\u00e9'])]"
+      }
+    ]
+  },
+  {
+    "id": "curated-map-keyed-by-an-object-past-the-inline-pairs",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "(() => { const o = Object.fromEntries(Array.from({length: 70}, (_, i) => ['k' + i, i])); o.m = new Map([[o, 1], [{}, 2]]); o.z = 1; return o })()"
+      }
+    ]
+  },
+  {
+    "id": "curated-strings-measured-first",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "[32768, 32769, 70000].flatMap((n) => ['\\u00e9'.repeat(n), 'a'.repeat(n) + '\\u00e9']).concat([21845, 21846, 70000].flatMap((n) => ['\\u0100'.repeat(n), 'x'.repeat(n) + '\\u{1F600}', '\\ud800' + 'y'.repeat(n)]))"
+      }
+    ]
   }
 ]

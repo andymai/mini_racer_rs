@@ -58,6 +58,26 @@ class ContextTest < Minitest::Test
     end
   end
 
+  # Each later key equals the one before it only while the objects around the
+  # Map hold just their pairs decoded so far, which mini_racer has stored by
+  # then, so each pair of keys is one key.
+  def test_a_map_keyed_by_containers_holding_open_objects_sees_their_pairs
+    source = <<~JS
+      (() => {
+        const outer = {x: 1, inner: {y: 2}};
+        outer.inner.m = new Map([[[outer, outer.inner], "a"], [[{x: 1}, {y: 2}], "b"], [outer, "c"], [{x: 1}, "d"]]);
+        return outer;
+      })()
+    JS
+    outer = @context.eval(source)
+    map = outer["inner"]["m"]
+
+    assert_equal %w[b d], map.values
+    assert_same outer, map.keys[0][0]
+    assert_same outer["inner"], map.keys[0][1]
+    assert_same outer, map.keys[1]
+  end
+
   def test_only_messages_from_javascript_are_utf8
     keyword = assert_raises(MiniRacer::RuntimeError) { MiniRacer::Context.new(bogus: 1) }
     thrown = assert_raises(MiniRacer::RuntimeError) { @context.eval("throw new Error('boom')") }
@@ -109,5 +129,47 @@ class ContextTest < Minitest::Test
 
     error = assert_raises(MiniRacer::ContextDisposedError) { running.value }
     assert_equal "disposed context", error.message
+  end
+end
+
+# Deep results of each shape, on the smaller stacks of fibers and threads.
+class ContextDeepResultsTest < Minitest::Test
+  def setup
+    @context = MiniRacer::Context.new
+  end
+
+  def teardown
+    @context.dispose
+  end
+
+  NESTED = {
+    "objects" => "v = {a: v}",
+    "maps" => "v = new Map([['a', v]])",
+    "objects in arrays" => "v = i % 2 ? [v] : {k: v}",
+  }.freeze
+
+  def depth(value)
+    levels = 0
+    while value.is_a?(Hash) || value.is_a?(Array)
+      value = value.is_a?(Hash) ? value.values.first : value.first
+      levels += 1
+    end
+    levels
+  end
+
+  # The decoder recurses once per level, so a deep result takes its frames
+  # over and over on a fiber's or a thread's smaller stack. mini_racer 0.22.1
+  # decodes each shape 95 deep in both at Ruby's default stack sizes, and
+  # refuses 96.
+  def test_objects_and_maps_nest_as_deep_inside_a_fiber_and_a_thread
+    NESTED.each do |shape, step|
+      source = ->(n) { "(() => { let v = 1; for (let i = 0; i < #{n}; i++) #{step}; return v })()" }
+      fiber = Fiber.new { @context.eval(source.call(95)) }.resume
+      thread = Thread.new { @context.eval(source.call(95)) }.value
+
+      assert_equal [95, 95], [depth(fiber), depth(thread)], shape
+      error = assert_raises(MiniRacer::RuntimeError) { Fiber.new { @context.eval(source.call(96)) }.resume }
+      assert_equal "too much recursion", error.message
+    end
   end
 end
