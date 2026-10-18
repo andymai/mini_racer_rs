@@ -1,6 +1,9 @@
-use std::ffi::c_void;
+use std::ffi::{c_char, c_void};
 use std::ptr::NonNull;
+use std::sync::Arc;
 use std::time::Duration;
+
+use crate::process::sources::Units;
 
 // The prebuilt V8 archive marks every heap mapping MADV_DONTFORK, so a forked
 // child would lose the isolate's memory. `-Wl,--wrap=madvise` (build.rs) routes
@@ -45,6 +48,74 @@ pub fn startup_data(blob: &crate::SnapshotBlob) -> v8::StartupData {
     // outlives as the doc comment requires of every caller.
     let bytes: &'static [u8] = unsafe { std::slice::from_raw_parts(bytes.as_ptr(), bytes.len()) };
     v8::StartupData::from(bytes)
+}
+
+/// A string V8 reads from `units` in place. It holds a reference to them,
+/// which V8 hands back through `release_one_byte` or `release_two_byte` when
+/// the string dies: in a collection or its isolate's teardown, on whatever
+/// thread V8 runs either on. `None` past V8's length limit.
+pub fn external_string<'s>(
+    scope: &v8::PinScope<'s, '_>,
+    units: &Units,
+) -> Option<v8::Local<'s, v8::String>> {
+    // V8 refuses a resource past its limit without disposing of it, which
+    // would keep the reference for good, so it never gets one.
+    match units {
+        Units::OneByte(bytes) if bytes.len() <= v8::String::MAX_LENGTH => {
+            let data = Arc::into_raw(Arc::clone(bytes));
+            // SAFETY: the bytes stay where they are, unchanged, while the
+            // reference made here lives; V8 only reads them, and hands the
+            // reference back through `release_one_byte`, with this pointer and
+            // length, once the string dies.
+            unsafe {
+                v8::String::new_external_onebyte_raw(
+                    scope,
+                    data.cast::<c_char>().cast_mut(),
+                    bytes.len(),
+                    release_one_byte,
+                )
+            }
+        }
+        Units::TwoByte(units) if units.len() <= v8::String::MAX_LENGTH => {
+            let data = Arc::into_raw(Arc::clone(units));
+            // SAFETY: as for one byte a unit, through `release_two_byte`.
+            unsafe {
+                v8::String::new_external_twobyte_raw(
+                    scope,
+                    data.cast::<u16>().cast_mut(),
+                    units.len(),
+                    release_two_byte,
+                )
+            }
+        }
+        Units::OneByte(_) | Units::TwoByte(_) => None,
+    }
+}
+
+// Each runs once per string `external_string` made, and only releases its
+// reference: the list in `process::sources` holds another for as long as any
+// string reads them, so the units are never freed here.
+unsafe extern "C" fn release_one_byte(data: *mut c_char, length: usize) {
+    let released = std::panic::catch_unwind(|| {
+        let bytes = std::ptr::slice_from_raw_parts(data.cast::<u8>().cast_const(), length);
+        // SAFETY: V8 passes back the pointer and length `external_string`
+        // gave it, once, so this releases the one reference it made.
+        unsafe { Arc::decrement_strong_count(bytes) };
+    });
+    if released.is_err() {
+        std::process::abort();
+    }
+}
+
+unsafe extern "C" fn release_two_byte(data: *mut u16, length: usize) {
+    let released = std::panic::catch_unwind(|| {
+        let units = std::ptr::slice_from_raw_parts(data.cast_const(), length);
+        // SAFETY: as in `release_one_byte`.
+        unsafe { Arc::decrement_strong_count(units) };
+    });
+    if released.is_err() {
+        std::process::abort();
+    }
 }
 
 /// The address V8 names `isolate` by when it posts the isolate a task.

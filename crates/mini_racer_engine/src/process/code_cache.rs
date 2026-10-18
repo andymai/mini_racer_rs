@@ -77,13 +77,24 @@ impl Drop for Building {
 
 /// How the runner compiles a large script.
 pub(crate) enum Plan {
-    /// From source: a first sighting, a key being built elsewhere, a refused
-    /// cache, or the cache is off.
-    Compile,
+    /// From source: a first sighting or the cache is off, or with its key, a
+    /// key being built elsewhere or a refused cache.
+    Compile(Option<Key>),
     /// From source, then a cache made once the dispatch is over.
     Make(Building),
     /// From the entry, falling back to source if V8 refuses it.
     Consume(Arc<Entry>, Key),
+}
+
+impl Plan {
+    /// The key of a script the process has seen before.
+    pub(crate) const fn key(&self) -> Option<&Key> {
+        match self {
+            Self::Compile(key) => key.as_ref(),
+            Self::Make(building) => Some(&building.key),
+            Self::Consume(_, key) => Some(key),
+        }
+    }
 }
 
 impl CodeCache {
@@ -94,7 +105,7 @@ impl CodeCache {
         snapshot: Option<u64>,
     ) -> Plan {
         if !enabled() {
-            return Plan::Compile;
+            return Plan::Compile(None);
         }
         let sighting = self.sighting(filename, source, snapshot);
         let seen = touch(&self.sightings, sighting, MAX_SIGHTINGS);
@@ -103,7 +114,7 @@ impl CodeCache {
             .iter()
             .any(|entry| entry.key.sighting == sighting);
         if !seen && !cached {
-            return Plan::Compile;
+            return Plan::Compile(None);
         }
         let key = Key {
             filename: filename.clone(),
@@ -121,9 +132,10 @@ impl CodeCache {
         }
         drop(entries);
         if lock(&self.refused).contains(&key) {
-            return Plan::Compile;
+            return Plan::Compile(Some(key));
         }
-        self.begin(key).map_or(Plan::Compile, Plan::Make)
+        self.begin(key.clone())
+            .map_or(Plan::Compile(Some(key)), Plan::Make)
     }
 
     /// Claims `key` for this context to build, unless another is building it.
@@ -300,7 +312,7 @@ mod tests {
         let cache = cache();
         assert!(matches!(
             cache.plan(&name(), &source(1), None),
-            Plan::Compile
+            Plan::Compile(None)
         ));
         cached(cache, &source(1), Box::from(&b"compiled"[..]));
         assert!(matches!(
@@ -309,11 +321,11 @@ mod tests {
         ));
         assert!(matches!(
             cache.plan(&name(), &source(1), Some(7)),
-            Plan::Compile
+            Plan::Compile(None)
         ));
         assert!(matches!(
             cache.plan(&JsText::from("other.js"), &source(1), None),
-            Plan::Compile
+            Plan::Compile(None)
         ));
     }
 
@@ -355,10 +367,9 @@ mod tests {
         let _ = cache.plan(&name(), &source(3), None);
         let first = cache.plan(&name(), &source(3), None);
         assert!(matches!(first, Plan::Make(..)));
-        assert!(matches!(
-            cache.plan(&name(), &source(3), None),
-            Plan::Compile
-        ));
+        let elsewhere = cache.plan(&name(), &source(3), None);
+        assert!(matches!(elsewhere, Plan::Compile(Some(_))));
+        assert!(elsewhere.key() == first.key());
         drop(first);
         assert!(matches!(
             cache.plan(&name(), &source(3), None),
@@ -402,7 +413,7 @@ mod tests {
         assert_eq!(cache.stored(), 1);
         assert!(matches!(
             cache.plan(&name(), &source(7), None),
-            Plan::Compile
+            Plan::Compile(Some(_))
         ));
         assert!(matches!(
             cache.plan(&name(), &source(6), None),
