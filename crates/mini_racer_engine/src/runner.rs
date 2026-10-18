@@ -815,8 +815,8 @@ fn settle<'s>(
 // once per context, a script like the source, so its frames and `this` are the
 // source's. It reads the values the source carries, parsed as JSON instead of
 // compiled, through a binding to `hoisted`. `None` leaves the eval to the
-// normal path: another shape, values that are not JSON, or a template that
-// does not compile.
+// normal path: another shape, values that are not JSON, or a template that is
+// refused (`template`).
 fn fast_call<'s>(
     tc: &mut Tc<'s, '_, '_, '_>,
     runtime: &Runtime,
