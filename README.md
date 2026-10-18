@@ -21,20 +21,16 @@ mini_racer_rs implements the `MiniRacer` Ruby API from mini_racer 0.22.1, with f
 
 ## Highlights
 
-- **4 to 5 times faster Ruby round trips.** An eval, call, or callback round trip takes 1.3 to 1.6 µs, against 6.1 to 6.6 µs in mini_racer. A call on a context with `timeout:` takes 1.6 µs instead of 20.7 µs because one watchdog serves the process.
-
-- **1.9 times faster Babel transforms.** A transform through ExecJS takes 5.2 ms instead of 9.9 ms. Babel itself takes 5.3 ms inside V8 15.2, against 10.3 ms inside V8 13.6. Terser and React rendering take about the same time in both gems.
-
+- **4 to 5 times faster Ruby round trips.** An eval, call, or callback round trip takes 1.3 to 1.6 µs, against 6.1 to 6.6 µs in mini_racer. A call on a context with `timeout:` takes 1.6 µs instead of 21.1 µs because one watchdog serves the process.
+- **1.9 times faster Babel transforms.** A transform through ExecJS takes 5.3 ms instead of 10.0 ms. Babel itself takes 5.3 ms inside V8 15.2, against 10.3 ms inside V8 13.6. Terser and React rendering take about the same time in both gems.
+- **4.6 times faster production bundle loads.** Scripts of 1 MB or more compile from a process-wide V8 code cache. A 44 MB production server rendering bundle loads into a new context in 215 ms against 983 ms. The 8.2 MB MUI bundle loads and renders once in 121 ms against 167 ms, and startup plus Babel takes 14.8 ms against 44.8 ms.
+- **Less memory for loaded and abandoned contexts.** A context holding the 44 MB bundle takes 136 MB against 301 MB, and one holding the MUI bundle takes 56 MB against 110 MB. When 20,000 contexts are left to Ruby's garbage collector, resident memory peaks at 102 MB against 2,916 MB.
+- **Forks wait for V8 work.** For forks made through Ruby's `fork`, `IO.popen("-")`, or `Process.daemon`, mini_racer_rs waits for context runners and V8 workers. On Ubuntu 24.04 with glibc 2.39, 20 of 20 mini_racer children aborted with signal 6 after loading and rendering React, while 20 of 20 mini_racer_rs children exited cleanly. On Fedora, mini_racer children hung within the first 50 forks of `test/stress/fork_busy.rb`, while mini_racer_rs completed 300 forks per run on Fedora and Ubuntu.
 - **V8 15.2.124.1.** mini_racer 0.22.1 uses V8 13.6.233.17.
-
 - **No compiler at release install.** Native gems cover glibc Linux on x86_64 and aarch64, plus macOS on arm64 and x86_64. Each carries extensions for Ruby 3.3, 3.4, and 4.0. mini_racer 0.22.1 ships as source and compiles C++ against libv8-node.
-
 - **Fiber scheduler support.** A fiber waiting on JavaScript lets other fibers on its thread run. Three 100 ms busy loops in separate contexts and fibers finish in 100 ms, against 300 ms when mini_racer blocks the thread.
-
 - **171 of 174 upstream tests pass.** The mini_racer suite runs unmodified, with its other 3 tests skipped by mini_racer itself. ExecJS passes 197 of 198 tests on its MiniRacer runtime, with 1 skipped.
-
 - **Difficult values return safely.** A `Map` with a function key returns an error Hash instead of aborting the process with SIGABRT. `Object(1n)` returns `1`, and an offset typed array returns its buffer as a binary String.
-
 - **Four checked layers.** A script enforces crate boundaries, `unsafe` is confined to four fenced modules, loom model-checks the thread handoff, fuzzing covers the wire codec, sanitizers run nightly, and results are differentially tested against mini_racer. The release pipeline runs the full suites for every released extension.
 
 All performance numbers compare mini_racer_rs with mini_racer 0.22.1 on Ruby 3.4.2 and Linux on an AMD Ryzen 9 7950X3D, with both gems pinned to the same eight cores and the `performance` governor.
@@ -166,21 +162,23 @@ The repository tests shim resolution with `path:` sources and rtlcss in `test/co
 
 | Workload | mini_racer 0.22.1 | mini_racer_rs | Ratio |
 |---|---:|---:|---:|
-| Babel transform of a 3 KB JSX component, through ExecJS | 9.9 ms | 5.2 ms | 1.9x |
-| Handlebars render of 50 table rows, through `Context#call` | 49.5 µs | 41.9 µs | 1.2x |
-| React server render of 1,000 list items (17 KB of HTML), through ExecJS | 193 µs | 189 µs | 1.0x |
-| Terser minify of a 78 KB library, through ExecJS | 52.2 ms | 51.5 ms | 1.0x |
-| Load the React bundle into a new context and render 1,000 items, through ExecJS | 11.9 ms | 11.9 ms | 1.0x |
+| Babel transform of a 3 KB JSX component, through ExecJS | 10.0 ms | 5.3 ms | 1.9x |
+| Terser minify of a 78 KB library, through ExecJS | 51.6 ms | 51.2 ms | 1.0x |
+| React server render of 1,000 items (17 KB of HTML), through ExecJS | 192 µs | 174 µs | 1.1x |
+| React in a new context: load the bundle and render 1,000 items, through ExecJS | 12.0 ms | 12.1 ms | 1.0x |
+| Handlebars render of 50 rows, through `Context#call` | 47.9 µs | 40.1 µs | 1.2x |
+| Autoprefixer on Bootstrap's 280 KB stylesheet, through ExecJS | 27.2 ms | 23.7 ms | 1.1x |
+| MUI dashboard server render of 200 rows and 299 icons (469 KB of HTML), through ExecJS | 32.2 ms | 30.5 ms | 1.1x |
+| MUI in a new context: load the 8.2 MB bundle and render once, through ExecJS | 167 ms | 121 ms | 1.4x |
+| Load a 44 MB production server rendering bundle into a new context, through ExecJS | 983 ms | 215 ms | 4.6x |
 
-These are medians of nine runs. Each workload ran in its own process, and every workload produced identical output. Measurements use the release build of commit `bc492d3` on Ruby 3.4.2 and Linux on an AMD Ryzen 9 7950X3D, with both gems pinned to the same eight cores and the `performance` governor.
-
-Reproduce them with:
+The table reports the eight library workloads plus the 44 MB production server rendering bundle load. Results are medians of 5 runs from the release build of commit `2513a48`, with every workload producing identical output in both gems. They were measured on Ruby 3.4.2 and Linux on an AMD Ryzen 9 7950X3D, with the CPU governor set to `performance` and both gems pinned to CPUs 0 through 7.
 
 ```sh
 bundle exec ruby bench/run.rb --cpus 0-7
 ```
 
-Results depend on the machine. [BENCHMARKS.md](BENCHMARKS.md) contains the full method, per-call measurements, and mini_racer's own `benchmark/serde` suite.
+[BENCHMARKS.md](BENCHMARKS.md) describes the method, per-call costs, memory results, and mini_racer's own `benchmark/serde` suite.
 
 <!-- compat-table:start -->
 ## Compatibility
