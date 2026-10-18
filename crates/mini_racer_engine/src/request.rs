@@ -10,10 +10,15 @@ const MAX_DEPTH: u32 = 64;
 const MAX_ELEMENTS: usize = 1 << 24;
 // V8 throws for a BigInt past its limit, which this stays well short of.
 const MAX_BIGINT_WORDS: usize = 1 << 20;
-// Past this many keys V8's deserializer builds an object faster: it gives the
-// object its final shape at once, where defining its properties one at a time
-// looks each key up and moves the object to a new shape for each.
-const MAX_KEYS: usize = 8;
+// V8's deserializer builds objects faster than the runner, which defines each
+// property through the API, unless they hold two properties or fewer each. A
+// call with a few properties in all still gains, as it saves the
+// deserializer's setup.
+const FEW_PROPERTIES: usize = 4;
+const PROPERTIES_PER_OBJECT: usize = 2;
+// Each property grows the object's store a few slots at a time, so an object
+// of many costs the square of their number; V8 reads the call instead.
+const MAX_KEYS: usize = 64;
 
 /// A call as `mini_racer`'s encoder sends it: the function's dotted path and
 /// the arguments.
@@ -31,19 +36,25 @@ pub enum Read<'s, 'b> {
     Failed,
 }
 
+/// Whether the runner builds a call whose arguments hold `objects` objects
+/// with `properties` properties in all, rather than V8's deserializer.
+#[must_use]
+pub const fn worth_building(objects: usize, properties: usize) -> bool {
+    properties <= FEW_PROPERTIES || properties <= objects.saturating_mul(PROPERTIES_PER_OBJECT)
+}
+
 /// Builds a call's arguments as V8's deserializer would, but with each array
 /// packed, as an array built in JavaScript is: V8 serializes a holey array,
 /// which its deserializer makes, element by element as a sparse array, so a
 /// function returning an argument costs far more than it need.
 ///
-/// What this does not build exactly as V8 would, V8 reads: an object with more
-/// than `MAX_KEYS` keys, a two-byte string or a binary is read by V8's own
-/// deserializer from its bytes alone, unless it refers back to another value.
-/// The whole request is `Unbuilt` for anything else this would not build as V8
-/// does or that V8 would refuse (a key that is not a string or an int32, a key
-/// given twice, an array inside itself, nesting past `MAX_DEPTH`), and for any
-/// termination V8 may have pending. V8 acts on one before each value it reads
-/// and as each array or object begins; this looks at the same points.
+/// A two-byte string or a binary is read by V8's own deserializer from its
+/// bytes alone. The whole request is `Unbuilt` for anything else this would
+/// not build as V8 does or that V8 would refuse (a key that is not a string or
+/// an int32, a key given twice, an array inside itself, an object of more than
+/// `MAX_KEYS` keys, nesting past `MAX_DEPTH`), and for any termination V8 may
+/// have pending. V8 acts on one before each value it reads and as each array
+/// or object begins; this looks at the same points.
 pub fn read<'s, 'b>(
     scope: &v8::PinScope<'s, '_>,
     bytes: &'b [u8],
@@ -151,84 +162,17 @@ impl<'b> Cursor<'b> {
         }
         Some((negative, self.take(len)?))
     }
-}
-
-// A value's bytes, read without building it, as far as V8's deserializer
-// would number what it holds; `None` for anything the builder leaves to V8.
-#[derive(Default)]
-struct Scan {
-    ids: usize,
-    refers: bool,
-    keys: usize,
-}
-
-impl Scan {
-    fn value(&mut self, bytes: &mut Cursor<'_>, depth: u32) -> Option<()> {
-        match bytes.byte()? {
-            tag::INT32 => {
-                bytes.varint_u32()?;
-            }
-            tag::DOUBLE => {
-                bytes.double()?;
-            }
-            tag::NULL | tag::UNDEFINED | tag::TRUE | tag::FALSE => {}
-            tag::UTF8_STRING | tag::ONE_BYTE_STRING => {
-                bytes.text()?;
-            }
-            tag::TWO_BYTE_STRING => {
-                bytes.text()?.len().is_multiple_of(2).then_some(())?;
-            }
-            tag::BIGINT => {
-                bytes.bigint_bytes()?;
-            }
-            tag::DATE => {
-                bytes.double()?;
-                self.ids = self.ids.checked_add(1)?;
-            }
-            tag::OBJECT_REFERENCE => {
-                bytes.varint_u32()?;
-                self.refers = true;
-            }
-            tag::ARRAY_BUFFER => self.binary(bytes)?,
-            tag::BEGIN_DENSE_ARRAY => {
-                self.ids = self.ids.checked_add(1)?;
-                let length = bytes.array_length()?;
-                for _ in 0..length {
-                    self.value(bytes, depth.checked_sub(1)?)?;
-                }
-                bytes.array_end(length)?;
-            }
-            tag::BEGIN_OBJECT => {
-                self.ids = self.ids.checked_add(1)?;
-                let mut count = 0u64;
-                while bytes.peek()? != tag::END_OBJECT {
-                    self.value(bytes, depth.checked_sub(1)?)?;
-                    self.value(bytes, depth.checked_sub(1)?)?;
-                    count = count.checked_add(1)?;
-                }
-                bytes.byte()?;
-                (bytes.varint()? == count).then_some(())?;
-                self.keys = usize::try_from(count).ok()?;
-            }
-            _ => return None,
-        }
-        Some(())
-    }
 
     // A buffer and the `Uint8Array` over it, which the encoder always writes
-    // together: each takes an id.
-    fn binary(&mut self, bytes: &mut Cursor<'_>) -> Option<()> {
-        let len = usize::try_from(bytes.varint()?).ok()?;
-        bytes.take(len)?;
-        if bytes.byte()? != tag::ARRAY_BUFFER_VIEW || bytes.byte()? != tag::UINT8_ARRAY {
+    // together, past the buffer's tag.
+    fn binary(&mut self) -> Option<()> {
+        let len = usize::try_from(self.varint()?).ok()?;
+        self.take(len)?;
+        if self.byte()? != tag::ARRAY_BUFFER_VIEW || self.byte()? != tag::UINT8_ARRAY {
             return None;
         }
-        let (offset, length, flags) = (bytes.varint()?, bytes.varint()?, bytes.varint()?);
-        if offset != 0 || length != u64::try_from(len).ok()? || flags != 0 {
-            return None;
-        }
-        self.ids = self.ids.checked_add(2)?;
-        Some(())
+        let (offset, length, flags) = (self.varint()?, self.varint()?, self.varint()?);
+        (offset == 0 && length == u64::try_from(len).ok()? && flags == 0).then_some(())
     }
 }
 
@@ -389,44 +333,31 @@ impl<'s, 'b> Builder<'s, 'b, '_, '_> {
                 (*self.objects.get(id)?)?
             }
             tag::BEGIN_DENSE_ARRAY => self.array(depth.checked_sub(1)?)?,
-            tag::BEGIN_OBJECT => {
-                let mut scan = Scan::default();
-                let mut ahead = at;
-                scan.value(&mut ahead, depth)?;
-                if scan.keys <= MAX_KEYS {
-                    self.object(depth.checked_sub(1)?)?
-                } else {
-                    self.delegate(at, ahead, &scan, Some(0))?
-                }
+            tag::BEGIN_OBJECT => self.object(depth.checked_sub(1)?)?,
+            tag::TWO_BYTE_STRING => {
+                self.bytes.text()?.len().is_multiple_of(2).then_some(())?;
+                self.delegate(at, 0, None)?
             }
-            tag::TWO_BYTE_STRING | tag::ARRAY_BUFFER => {
-                let mut scan = Scan::default();
-                let mut ahead = at;
-                scan.value(&mut ahead, depth)?;
-                let root = (scan.ids > 0).then_some(1);
-                self.delegate(at, ahead, &scan, root)?
+            tag::ARRAY_BUFFER => {
+                self.bytes.binary()?;
+                self.delegate(at, 2, Some(1))?
             }
             _ => return None,
         })
     }
 
-    // Reads the value from `at` to `end` with V8's own deserializer, from its
-    // bytes alone, which holds nothing that refers back. `root` is which of
-    // the ids it takes is the value's own.
+    // Reads the value from `at` up to the cursor with V8's own deserializer,
+    // from its bytes alone. It takes `ids` object ids, of which `own` is the
+    // value's.
     fn delegate(
         &mut self,
         at: Cursor<'b>,
-        end: Cursor<'b>,
-        scan: &Scan,
-        root: Option<usize>,
+        ids: usize,
+        own: Option<usize>,
     ) -> Option<v8::Local<'s, v8::Value>> {
-        if scan.refers {
-            return None;
-        }
-        let len = at.rest.len().checked_sub(end.rest.len())?;
+        let len = at.rest.len().checked_sub(self.bytes.rest.len())?;
         let mut bytes = vec![tag::HEADER, u8::try_from(WRITE_VERSION).ok()?];
         bytes.extend_from_slice(at.rest.get(..len)?);
-        self.bytes = end;
         let context = self.scope.get_current_context();
         let deserializer = v8::ValueDeserializer::new(self.scope, Box::new(Reader), &bytes);
         let value = (deserializer.read_header(context) == Some(true))
@@ -437,12 +368,10 @@ impl<'s, 'b> Builder<'s, 'b, '_, '_> {
             return None;
         };
         let first = self.objects.len();
-        self.objects.resize(
-            first.checked_add(scan.ids)?,
-            None::<v8::Local<'s, v8::Value>>,
-        );
-        if let Some(own) = root.and_then(|root| self.objects.get_mut(first.checked_add(root)?)) {
-            *own = Some(value);
+        self.objects
+            .resize(first.checked_add(ids)?, None::<v8::Local<'s, v8::Value>>);
+        if let Some(slot) = own.and_then(|own| self.objects.get_mut(first.checked_add(own)?)) {
+            *slot = Some(value);
         }
         Some(value)
     }
@@ -479,7 +408,7 @@ impl<'s, 'b> Builder<'s, 'b, '_, '_> {
             object
                 .create_data_property(self.scope, key, value)
                 .filter(|&created| created)?;
-            count = count.checked_add(1)?;
+            count = count.checked_add(1).filter(|&count| count <= MAX_KEYS)?;
         }
         self.bytes.byte()?;
         self.keys.truncate(start);

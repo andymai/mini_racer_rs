@@ -9,6 +9,7 @@ use magnus::{
     Error, Fixnum, Float, Module, Object, RArray, RClass, RHash, RModule, RObject, RString, Ruby,
     Time, Value,
 };
+use mini_racer_engine::CallRequest;
 use mini_racer_wire::Writer;
 
 use crate::gc_root::{OnceRoot, Pins, StaticRoot};
@@ -96,6 +97,10 @@ struct Encoder<'r, 'o> {
     writer: Writer<'o>,
     work: Vec<Item>,
     seen: HashMap<u64, u32, BuildHasherDefault<Address>>,
+    // The hashes written and their pairs in all, which tell the runner
+    // whether to build a call's arguments itself.
+    objects: usize,
+    properties: usize,
 }
 
 /// Writes `value` as `mini_racer`'s `serialize` does, with the object ids V8
@@ -121,9 +126,9 @@ pub fn call(
     name: RString,
     args: &[Value],
     unsupported: impl FnOnce(Vec<u8>) -> Error,
-) -> Result<Vec<u8>, Error> {
-    let mut out = Vec::new();
-    let mut encoder = Encoder::new(ruby, &mut out);
+) -> Result<CallRequest, Error> {
+    let mut bytes = Vec::new();
+    let mut encoder = Encoder::new(ruby, &mut bytes);
     let count = length(args.len().saturating_add(1));
     encoder.writer.begin_array(count);
     encoder.string(name);
@@ -131,7 +136,12 @@ pub fn call(
         .try_for_each(|&arg| encoder.top(arg))
         .map_err(|error| error.raise(unsupported))?;
     encoder.writer.end_array(count);
-    Ok(out)
+    let (objects, properties) = (encoder.objects, encoder.properties);
+    Ok(CallRequest {
+        bytes,
+        objects,
+        properties,
+    })
 }
 
 impl EncodeError {
@@ -169,6 +179,8 @@ impl<'r, 'o> Encoder<'r, 'o> {
             writer: Writer::new(out),
             work: Vec::new(),
             seen: HashMap::default(),
+            objects: 0,
+            properties: 0,
         }
     }
 }
@@ -312,6 +324,8 @@ impl Encoder<'_, '_> {
         }
         self.pin(value);
         let hash = RHash::from_value(value).unwrap_or_else(|| self.ruby.hash_new());
+        self.objects = self.objects.saturating_add(1);
+        self.properties = self.properties.saturating_add(hash.len());
         let id = self.writer.begin_object();
         self.seen.insert(rb_raw::identity(value), id);
         let mut pairs = Vec::new();

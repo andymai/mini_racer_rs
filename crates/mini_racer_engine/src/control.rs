@@ -67,6 +67,17 @@ impl From<&str> for JsText {
     }
 }
 
+/// A call in the wire form `mini_racer` sends: one array holding the
+/// function's dotted path, then its arguments.
+///
+/// `objects` and `properties` count the objects the arguments hold and their
+/// properties in all, which decide whether the runner builds the arguments.
+pub struct CallRequest {
+    pub bytes: Vec<u8>,
+    pub objects: usize,
+    pub properties: usize,
+}
+
 pub enum Request {
     Init {
         depth: Depth,
@@ -79,7 +90,7 @@ pub enum Request {
         awaited: bool,
     },
     Call {
-        request: Vec<u8>,
+        request: CallRequest,
         depth: Depth,
         awaited: bool,
     },

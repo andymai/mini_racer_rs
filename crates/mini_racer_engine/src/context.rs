@@ -8,7 +8,9 @@ use mini_racer_sync::{
     Channel, ChannelError, DispatchKind, Inherited, Interrupt, Phase, Side, TermError, ToRuby, lock,
 };
 
-use crate::control::{CallbackReply, ContextConfig, ControlBlock, Depth, JsText, Request, Wire};
+use crate::control::{
+    CallRequest, CallbackReply, ContextConfig, ControlBlock, Depth, JsText, Request, Wire,
+};
 use crate::notify::NotifyFd;
 use crate::process::fork::{self, Generation};
 use crate::process::platform::Mode;
@@ -287,16 +289,14 @@ impl ContextHandle {
         )
     }
 
-    /// `request` is the wire form `mini_racer` sends: one array holding the
-    /// function's dotted path, then its arguments.
-    pub fn call(&self, request: Vec<u8>, host: &mut impl Host) -> Result<Vec<u8>, EngineError> {
+    pub fn call(&self, request: CallRequest, host: &mut impl Host) -> Result<Vec<u8>, EngineError> {
         self.invoke(request, false, host)
     }
 
     /// `call`, then awaits a promise result, as `eval_await` does.
     pub fn call_await(
         &self,
-        request: Vec<u8>,
+        request: CallRequest,
         host: &mut impl Host,
     ) -> Result<Vec<u8>, EngineError> {
         self.invoke(request, true, host)
@@ -304,7 +304,7 @@ impl ContextHandle {
 
     fn invoke(
         &self,
-        request: Vec<u8>,
+        request: CallRequest,
         awaited: bool,
         host: &mut impl Host,
     ) -> Result<Vec<u8>, EngineError> {

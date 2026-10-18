@@ -9,8 +9,8 @@
 )]
 
 use mini_racer_engine::{
-    ContextConfig, ContextHandle, EngineError, Host, JsErrorKind, TerminationCause, WaitHandle,
-    WaitOutcome,
+    CallRequest, ContextConfig, ContextHandle, EngineError, Host, JsErrorKind, TerminationCause,
+    WaitHandle, WaitOutcome,
 };
 use mini_racer_wire::Writer;
 
@@ -56,7 +56,22 @@ fn request(path: &str, count: u32, arguments: impl FnOnce(&mut Writer<'_>)) -> V
     out
 }
 
-fn call(context: &ContextHandle, request: Vec<u8>) -> Result<Vec<u8>, EngineError> {
+// Sent as holding no objects, so the runner builds whatever it can.
+fn call(context: &ContextHandle, bytes: Vec<u8>) -> Result<Vec<u8>, EngineError> {
+    counted(context, bytes, 0, 0)
+}
+
+fn counted(
+    context: &ContextHandle,
+    bytes: Vec<u8>,
+    objects: usize,
+    properties: usize,
+) -> Result<Vec<u8>, EngineError> {
+    let request = CallRequest {
+        bytes,
+        objects,
+        properties,
+    };
     context.call(request, &mut Parking)
 }
 
@@ -270,21 +285,11 @@ fn a_key_given_twice_is_refused_as_v8_refuses_it() {
     ));
 }
 
-// An object with many keys, a two-byte string and a binary are read by V8's
-// own deserializer from their bytes, inside a request the runner builds.
+// A two-byte string and a binary are read by V8's own deserializer from their
+// bytes, inside a request the runner builds.
 #[test]
-fn values_v8_reads_for_the_runner_keep_their_values_and_identity() {
+fn two_byte_strings_and_binaries_are_read_by_v8_inside_built_requests() {
     let context = spawn(ContextConfig::default());
-    let keys: Vec<Key> = (0..30).map(Key::Int).chain([Key::Utf8("name")]).collect();
-    let literal = (0..30)
-        .map(|n| format!("{n}: 0"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    returns(
-        &context,
-        |w| object(w, &keys),
-        &format!("({{ {literal}, name: 0 }})"),
-    );
     let two_byte: Vec<u8> = "\u{6771}\u{4eac}"
         .encode_utf16()
         .flat_map(u16::to_le_bytes)
@@ -309,59 +314,140 @@ fn values_v8_reads_for_the_runner_keep_their_values_and_identity() {
         },
         "[new Uint8Array([97, 98])]",
     );
+    let binary_twice = request("same", 2, |w| {
+        let view = w.uint8_array(b"ab");
+        w.object_ref(view);
+    });
+    assert_eq!(
+        call(&context, binary_twice).expect("call"),
+        eval(&context, "true")
+    );
+}
+
+// The runner leaves a call holding many properties in objects to V8, except
+// when its objects average two or fewer: V8's deserializer builds the rest
+// faster, and its arrays stay holey.
+#[test]
+fn calls_holding_many_properties_are_left_to_v8() {
+    let context = spawn(ContextConfig::default());
+    for (objects, keys, packed) in [
+        (1, 4, true),
+        (1, 5, false),
+        (8, 2, true),
+        (20, 2, true),
+        (10, 3, false),
+    ] {
+        let sent = request("id", 1, |w| {
+            w.begin_array(objects);
+            for _ in 0..objects {
+                w.begin_object();
+                for n in 0..keys {
+                    w.utf8(format!("k{n}").as_bytes());
+                    w.integer(i64::from(n));
+                }
+                w.end_object(keys);
+            }
+            w.end_array(objects);
+        });
+        let count = |n: u32| usize::try_from(n).expect("small");
+        let returned =
+            counted(&context, sent, count(objects), count(objects * keys)).expect("call");
+        let tag = if packed { b'A' } else { b'a' };
+        assert_eq!(returned.get(2), Some(&tag), "{objects} of {keys}");
+    }
+}
+
+// An object of 30 keys, its own id at `w`'s next, and with `inner` an array
+// under the key `inner` right after it.
+fn thirty_keys(w: &mut Writer<'_>, inner: bool) -> u32 {
+    let object = w.begin_object();
+    for n in 0..30 {
+        w.utf8(format!("k{n}").as_bytes());
+        w.integer(n);
+    }
+    if inner {
+        w.utf8(b"inner");
+        w.begin_array(1);
+        w.integer(1);
+        w.end_array(1);
+    }
+    w.end_object(if inner { 31 } else { 30 });
+    object
+}
+
+// Sent built by the runner and left to V8, the call returns `expected`.
+fn either_way(
+    context: &ContextHandle,
+    (path, count): (&str, u32),
+    arguments: impl Fn(&mut Writer<'_>),
+    expected: &[u8],
+) {
+    for properties in [0, 31] {
+        let sent = request(path, count, &arguments);
+        let returned = counted(context, sent, 1, properties).expect("call");
+        assert_eq!(returned, expected, "{path} counted {properties}");
+    }
+}
+
+#[test]
+fn objects_of_many_keys_keep_their_values_and_identity_either_way() {
+    let context = spawn(ContextConfig::default());
     eval(
         &context,
         "globalThis.inner = (o, i) => o.inner === i; \
          globalThis.shares = (o) => o.k0 === o.k1 && o.k0.length === 1",
     );
     let truth = eval(&context, "true");
-    let big = |w: &mut Writer<'_>, inner: bool| {
-        let object = w.begin_object();
-        for n in 0..30 {
-            w.utf8(format!("k{n}").as_bytes());
-            w.integer(n);
-        }
-        if inner {
-            w.utf8(b"inner");
-            w.begin_array(1);
-            w.integer(1);
-            w.end_array(1);
-        }
-        w.end_object(if inner { 31 } else { 30 });
-        object
-    };
-    let twice = request("same", 2, |w| {
-        let object = big(w, false);
-        w.object_ref(object);
-    });
-    let inside = request("inner", 2, |w| {
-        let object = big(w, true);
-        w.object_ref(object.checked_add(1).expect("inner id"));
-    });
-    let shared = request("shares", 1, |w| {
-        w.begin_object();
-        let array = {
+    let literal = (0..30)
+        .map(|n| format!("k{n}: {n}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let object = eval(&context, &format!("({{ {literal} }})"));
+    either_way(
+        &context,
+        ("id", 1),
+        |w| {
+            thirty_keys(w, false);
+        },
+        &object,
+    );
+    either_way(
+        &context,
+        ("same", 2),
+        |w| {
+            let object = thirty_keys(w, false);
+            w.object_ref(object);
+        },
+        &truth,
+    );
+    either_way(
+        &context,
+        ("inner", 2),
+        |w| {
+            let object = thirty_keys(w, true);
+            w.object_ref(object.checked_add(1).expect("inner id"));
+        },
+        &truth,
+    );
+    either_way(
+        &context,
+        ("shares", 1),
+        |w| {
+            w.begin_object();
             w.utf8(b"k0");
             let array = w.begin_array(1);
             w.integer(1);
             w.end_array(1);
-            array
-        };
-        w.utf8(b"k1");
-        w.object_ref(array);
-        for n in 2..30 {
-            w.utf8(format!("k{n}").as_bytes());
-            w.integer(n);
-        }
-        w.end_object(30);
-    });
-    let binary_twice = request("same", 2, |w| {
-        let view = w.uint8_array(b"ab");
-        w.object_ref(view);
-    });
-    for sent in [twice, inside, shared, binary_twice] {
-        assert_eq!(call(&context, sent).expect("call"), truth);
-    }
+            w.utf8(b"k1");
+            w.object_ref(array);
+            for n in 2..30 {
+                w.utf8(format!("k{n}").as_bytes());
+                w.integer(n);
+            }
+            w.end_object(30);
+        },
+        &truth,
+    );
 }
 
 #[test]
@@ -480,7 +566,7 @@ fn nesting_at_any_depth_arrives_whole() {
 // V8's deserializer acts on a termination before each value, so a collection
 // past `max_memory` while the arguments are read ends the call before the
 // function runs, even one V8 enters without checking, as `fill`: whether the
-// runner builds the values or V8 reads them for it.
+// runner builds the values or V8 reads the whole call.
 #[test]
 fn a_heap_past_max_memory_while_arguments_are_read_stops_the_call_before_it_runs() {
     let count = 2_000_000;
@@ -505,13 +591,13 @@ fn a_heap_past_max_memory_while_arguments_are_read_stops_the_call_before_it_runs
         }
         w.end_object(count);
     });
-    for sent in [in_array, in_object] {
+    for (sent, objects, properties) in [(in_array, 0, 0), (in_object, 1, 2_000_000)] {
         let context = spawn(ContextConfig {
             max_memory: Some(16_000_000),
             ..ContextConfig::default()
         });
         eval(&context, "globalThis.filled = [0]");
-        match call(&context, sent) {
+        match counted(&context, sent, objects, properties) {
             Err(EngineError::Js(js)) => assert_eq!(
                 js.kind,
                 JsErrorKind::Terminated(TerminationCause::MaxMemory)

@@ -12,13 +12,15 @@ use mini_racer_sync::{
 use mini_racer_wire::Writer;
 use v8::ValueDeserializerHelper;
 
-use crate::control::{CallbackReply, ControlBlock, Depth, IsolateTerminator, JsText, Request};
+use crate::control::{
+    CallRequest, CallbackReply, ControlBlock, Depth, IsolateTerminator, JsText, Request,
+};
 use crate::fast_calls::{self, Hoisted, Shape};
 use crate::process::code_cache::{Building, Plan};
 use crate::process::fork::Generation;
 use crate::process::platform::{self, Mode};
 use crate::process::watchdog;
-use crate::request::Read;
+use crate::request::{self, Read};
 use crate::serialize::{self, Filter, Tc};
 use crate::spin::spin_until;
 use crate::{EngineError, JsError, JsErrorKind};
@@ -1277,21 +1279,25 @@ enum Arguments<'s> {
 fn invoke(
     tc: &mut Tc<'_, '_, '_, '_>,
     runtime: &Runtime,
-    request: &[u8],
+    request: &CallRequest,
     (depth, awaited): (Depth, bool),
 ) -> Result<Vec<u8>, EngineError> {
     let context = tc.get_current_context();
     let failed = |tc: &Tc<'_, '_, '_, '_>| failure(tc, JsErrorKind::Runtime);
-    let (path, arguments) =
-        match crate::request::read(tc, request, &runtime.block.termination_requested) {
-            Read::Built(call) => (call.path, Arguments::Built(call.args)),
-            Read::Failed => return Err(failure(tc, JsErrorKind::Internal)),
-            Read::Unbuilt => {
-                let (request, path) =
-                    read_request(tc, request).ok_or_else(|| failure(tc, JsErrorKind::Internal))?;
-                (Cow::Owned(path), Arguments::Read(request))
-            }
-        };
+    let built = if request::worth_building(request.objects, request.properties) {
+        request::read(tc, &request.bytes, &runtime.block.termination_requested)
+    } else {
+        Read::Unbuilt
+    };
+    let (path, arguments) = match built {
+        Read::Built(call) => (call.path, Arguments::Built(call.args)),
+        Read::Failed => return Err(failure(tc, JsErrorKind::Internal)),
+        Read::Unbuilt => {
+            let (request, path) = read_request(tc, &request.bytes)
+                .ok_or_else(|| failure(tc, JsErrorKind::Internal))?;
+            (Cow::Owned(path), Arguments::Read(request))
+        }
+    };
     let mut receiver = context.global(tc);
     let mut keys = path.split('.').peekable();
     let mut function = None;
