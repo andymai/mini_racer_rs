@@ -30,8 +30,8 @@ fn terminated(result: Result<Vec<u8>, EngineError>) -> bool {
     matches!(result, Err(EngineError::Js(js)) if matches!(js.kind, JsErrorKind::Terminated(_)))
 }
 
-// Every fourth context starts from one shared snapshot blob, which the
-// threads' contexts keep alive after the blob's own handle is gone.
+// Every fourth context starts from one snapshot blob the threads share, so the
+// leak checks cover contexts made from a shared blob.
 pub fn churn() {
     let built = ContextHandle::create_snapshot("var shared = 1".into(), None, &mut Parking)
         .expect("snapshot");

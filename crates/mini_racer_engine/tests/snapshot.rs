@@ -4,6 +4,8 @@
     reason = "test helpers fail the test by panicking"
 )]
 
+use std::time::{Duration, Instant};
+
 use mini_racer_engine::{
     ContextConfig, ContextHandle, EngineError, Host, InvalidSnapshot, SnapshotBlob, WaitHandle,
     WaitOutcome,
@@ -233,7 +235,9 @@ fn a_warmup_from_an_empty_blob_is_refused() {
     ));
 }
 
-// Every context reads the one blob, which outlives whoever made it.
+// Every context reads the one blob, which outlives whoever made it and goes
+// with the last context. V8 reads a freed blob without faulting as often as
+// not, so the test counts its holders instead.
 #[test]
 fn contexts_share_their_blob_and_keep_it_alive() {
     let built =
@@ -241,10 +245,12 @@ fn contexts_share_their_blob_and_keep_it_alive() {
     let blob = SnapshotBlob::new(&built).expect("a blob V8 wrote");
     drop(built);
     let contexts: Vec<_> = (0..4).map(|_| spawn_from(&blob)).collect();
+    let weak = blob.downgrade();
     drop(blob);
     for (n, context) in (0..).zip(&contexts) {
         assert_eq!(eval(context, &format!("add({n})")), 40 + n);
     }
+    assert!(weak.upgrade().is_some(), "contexts hold the blob V8 reads");
     std::thread::scope(|scope| {
         for context in contexts {
             scope.spawn(move || {
@@ -254,4 +260,10 @@ fn contexts_share_their_blob_and_keep_it_alive() {
             });
         }
     });
+    // A runner lets go of its control block just after the dispose returns.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while weak.upgrade().is_some() {
+        assert!(Instant::now() < deadline, "the last context frees the blob");
+        std::thread::sleep(Duration::from_millis(5));
+    }
 }

@@ -9,7 +9,7 @@ use magnus::{
     Class, DataTypeFunctions, Error, Module, Object, RClass, RModule, RString, Ruby, TryConvert,
     TypedData, Value,
 };
-use mini_racer_engine::{ContextHandle, InvalidSnapshot, SnapshotBlob};
+use mini_racer_engine::{ContextHandle, InvalidSnapshot, SnapshotBlob, WeakSnapshotBlob};
 
 use crate::gc_root::OwnedRoot;
 use crate::host::RubyHost;
@@ -25,10 +25,12 @@ use crate::{context, errors, export, rb_raw};
 )]
 pub struct Snapshot {
     blob: OwnedRoot<RString>,
-    // What contexts made from this snapshot start from, kept while `blob`
-    // holds the same bytes: `dump` hands `blob` out, and a context of
-    // mini_racer's starts from whatever it holds then.
-    shared: RefCell<Option<SnapshotBlob>>,
+    // What contexts made from this snapshot start from, reused while one of
+    // them lives and `blob` holds the same bytes: `dump` hands `blob` out, and
+    // a context of mini_racer's starts from whatever it holds then. Held
+    // weakly, so once its contexts are gone a snapshot holds only `blob`, as
+    // mini_racer's does.
+    shared: RefCell<Option<WeakSnapshotBlob>>,
 }
 
 impl DataTypeFunctions for Snapshot {
@@ -80,11 +82,12 @@ impl Snapshot {
     fn shared(&self, ruby: &Ruby) -> Result<SnapshotBlob, InvalidSnapshot> {
         let blob = self.blob(ruby);
         let mut shared = self.shared.borrow_mut();
-        let current = rb_raw::with_string_bytes(ruby, blob, |bytes| match shared.take() {
+        let kept = shared.as_ref().and_then(WeakSnapshotBlob::upgrade);
+        let current = rb_raw::with_string_bytes(ruby, blob, |bytes| match kept {
             Some(kept) if kept.as_bytes() == bytes => Ok(kept),
             _ => SnapshotBlob::new(bytes),
         })?;
-        *shared = Some(current.clone());
+        *shared = Some(current.downgrade());
         Ok(current)
     }
 

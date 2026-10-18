@@ -1,5 +1,5 @@
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use crate::control::JsText;
 use crate::serialize::{self, Tc};
@@ -72,6 +72,22 @@ impl SnapshotBlob {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+
+    #[must_use]
+    pub fn downgrade(&self) -> WeakSnapshotBlob {
+        WeakSnapshotBlob(Arc::downgrade(&self.0))
+    }
+}
+
+/// A `SnapshotBlob` that lives only while a context made from it does.
+#[derive(Debug, Clone)]
+pub struct WeakSnapshotBlob(Weak<[u8]>);
+
+impl WeakSnapshotBlob {
+    #[must_use]
+    pub fn upgrade(&self) -> Option<SnapshotBlob> {
+        self.0.upgrade().map(SnapshotBlob)
     }
 }
 
