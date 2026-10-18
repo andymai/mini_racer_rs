@@ -12,7 +12,7 @@ use mini_racer_wire::Writer;
 use v8::ValueDeserializerHelper;
 
 use crate::control::{CallbackReply, ControlBlock, Depth, IsolateTerminator, JsText, Request};
-use crate::fast_calls::{self, Hoisted};
+use crate::fast_calls::{self, Hoisted, Shape};
 use crate::process::code_cache::{Building, Plan};
 use crate::process::fork::Generation;
 use crate::process::platform::{self, Mode};
@@ -83,8 +83,31 @@ struct Hoisting {
 
 struct Template {
     text: Box<[u8]>,
-    // `None` for one that does not compile.
+    // `None` for one refused: its code does not leave the call alone, or it
+    // does not compile.
     script: Option<v8::Global<v8::Script>>,
+    // How much of its text comes before its first value and after its last.
+    ends: (usize, usize),
+}
+
+impl Template {
+    // A source that starts and ends as this refused template does would make
+    // it again, so it takes the normal path without being read.
+    fn refuses(&self, source: &[u8]) -> bool {
+        let (head, tail) = self.ends;
+        self.script.is_none()
+            && source.len() >= head + tail
+            && self
+                .text
+                .get(..head)
+                .is_some_and(|head| source.starts_with(head))
+            && self
+                .text
+                .len()
+                .checked_sub(tail)
+                .and_then(|at| self.text.get(at..))
+                .is_some_and(|tail| source.ends_with(tail))
+    }
 }
 
 #[derive(Default)]
@@ -811,7 +834,14 @@ fn fast_call<'s>(
     // A source sent again goes the normal way: from its second run there,
     // V8's compilation cache runs it faster than a fast call parses its values
     // again, and keeps no script per run.
-    if name != b"<eval>" || lock(&runtime.hoisting).last == *source {
+    if name != b"<eval>" || {
+        let hoisting = lock(&runtime.hoisting);
+        hoisting.last == *source
+            || hoisting
+                .templates
+                .iter()
+                .any(|template| template.refuses(source))
+    } {
         return Ok(None);
     }
     let Some(shape) = fast_calls::recognize(source) else {
@@ -829,6 +859,10 @@ fn fast_call<'s>(
     let Some(text) = text.filter(|text| text.len() <= LARGE_SOURCE) else {
         return declined(tc);
     };
+    // Before parsing anything, so a template refused once costs nothing more.
+    let Some(script) = template(tc, runtime, text, &shape, filename) else {
+        return declined(tc);
+    };
     let mut values = Vec::with_capacity(shape.values.len());
     for value in &shape.values {
         let (Hoisted::Json(literal) | Hoisted::Text(literal)) = *value;
@@ -842,9 +876,6 @@ fn fast_call<'s>(
         };
         values.push(parsed);
     }
-    let Some(script) = template(tc, runtime, text, &shape.code, filename) else {
-        return declined(tc);
-    };
     let frame = v8::Array::new_with_elements(tc, &values);
     lock(&runtime.frames).push(v8::Global::new(tc, frame));
     let value = script.run(tc);
@@ -917,7 +948,7 @@ fn template<'s>(
     scope: &v8::PinScope<'s, '_>,
     runtime: &Runtime,
     text: Vec<u8>,
-    code: &[&[u8]],
+    shape: &Shape<'_>,
     filename: &JsText,
 ) -> Option<v8::Local<'s, v8::Script>> {
     let mut hoisting = lock(&runtime.hoisting);
@@ -938,7 +969,8 @@ fn template<'s>(
     let source = v8::String::new_from_utf8(scope, &text, v8::NewStringType::Normal)?;
     let name = string(scope, filename)?;
     let origin = serialize::origin(scope, name.into());
-    let script = code
+    let script = shape
+        .code
         .iter()
         .all(|code| fast_calls::leaves_the_call_alone(code) && compiles_alone(scope, code))
         .then(|| v8::Script::compile(scope, source, Some(&origin)))
@@ -947,9 +979,14 @@ fn template<'s>(
     if hoisting.templates.len() >= TEMPLATES {
         hoisting.templates.remove(0);
     }
+    let ends = (
+        shape.around.first().map_or(0, |head| head.len()),
+        shape.around.last().map_or(0, |tail| tail.len()),
+    );
     hoisting.templates.push(Template {
         text: text.into_boxed_slice(),
         script: script.map(|script| v8::Global::new(scope, script)),
+        ends,
     });
     script
 }

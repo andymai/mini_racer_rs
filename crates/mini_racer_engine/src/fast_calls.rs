@@ -31,8 +31,9 @@ impl Shape<'_> {
                 return None;
             }
             if let Some(value) = index.checked_sub(1) {
+                let digit = u8::try_from(value).ok().filter(|digit| *digit < 10)?;
                 text.extend_from_slice(reader);
-                text.extend_from_slice(format!("({value})").as_bytes());
+                text.extend_from_slice(&[b'(', b'0' + digit, b')']);
             }
             text.extend_from_slice(piece);
         }
@@ -184,13 +185,15 @@ fn literal(text: &[u8]) -> Option<&[u8]> {
     (!content.contains(&b'\\') && !breaks_line(content)).then_some(content)
 }
 
-// V8 numbers lines at U+2028 and U+2029 as well, inside literals too.
+// V8 numbers lines at U+2028 and U+2029 as well, inside literals too. Each
+// `contains` reads a word at a time, as most text holds none of these bytes.
 fn breaks_line(text: &[u8]) -> bool {
-    text.iter().enumerate().any(|(at, &byte)| {
-        byte == b'\n'
-            || byte == b'\r'
-            || (byte == 0xE2 && matches!(text.get(at + 1..at + 3), Some([0x80, 0xA8 | 0xA9])))
-    })
+    text.contains(&b'\n')
+        || text.contains(&b'\r')
+        || (text.contains(&0xE2)
+            && text
+                .windows(3)
+                .any(|window| matches!(window, [0xE2, 0x80, 0xA8 | 0xA9])))
 }
 
 fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
