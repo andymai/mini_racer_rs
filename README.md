@@ -21,10 +21,10 @@ mini_racer_rs implements the `MiniRacer` Ruby API from mini_racer 0.22.1, with f
 
 ## Highlights
 
-- **4 to 5 times faster Ruby round trips.** An eval, call, or callback round trip takes 1.3 to 1.6 µs, against 6.1 to 6.6 µs in mini_racer. A call on a context with `timeout:` takes 1.6 µs instead of 21.1 µs because one watchdog serves the process.
-- **1.9 times faster Babel transforms.** A transform through ExecJS takes 5.3 ms instead of 10.0 ms. Babel itself takes 5.3 ms inside V8 15.2, against 10.3 ms inside V8 13.6. Terser and React rendering take about the same time in both gems.
-- **4.6 times faster production bundle loads.** Scripts of 1 MB or more compile from a process-wide V8 code cache. A 44 MB production server rendering bundle loads into a new context in 215 ms against 983 ms. The 8.2 MB MUI bundle loads and renders once in 121 ms against 167 ms, and startup plus Babel takes 14.8 ms against 44.8 ms.
-- **Less memory for loaded and abandoned contexts.** A context holding the 44 MB bundle takes 136 MB against 301 MB, and one holding the MUI bundle takes 56 MB against 110 MB. When 20,000 contexts are left to Ruby's garbage collector, resident memory peaks at 102 MB against 2,916 MB.
+- **JavaScript round trips are 5 to 9 times faster.** An eval takes 1.09 µs against 6.91 µs, a call takes 0.72 µs against 6.51 µs, and a callback takes 1.12 µs against 6.12 µs. A call on a context with `timeout:` takes 0.76 µs instead of 20.48 µs because one watchdog serves the process.
+- **A Babel transform through ExecJS is 1.95x faster.** It takes 5.15 ms instead of 10.05 ms. Babel itself takes 5.3 ms inside V8 15.2, against 10.3 ms inside V8 13.6, while Terser and React rendering take about the same time in both gems.
+- **A 44 MB production server rendering bundle loads 4.6x faster.** It loads into a new context in 215 ms against 983 ms, measured at commit `2513a48`, and scripts of 1 MB or more compile from a process-wide V8 code cache. At commit `220bfe7`, the 8.2 MB MUI bundle loads and renders once in 105 ms against 167 ms, while startup plus Babel takes 13.3 ms against 44.4 ms.
+- **A context holding the MUI bundle uses 44 MB instead of 110 MB.** At commit `220bfe7`, a context holding Babel uses 15.2 MB against 28.5 MB, and contexts loading the same large script read one shared copy of its source. A context holding the 44 MB production bundle used 136 MB against 301 MB at commit `2513a48`, before sources were shared. When 20,000 contexts are left to Ruby's garbage collector, resident memory peaks at 102 MB against 2,920 MB.
 - **Forks pause worker work, and children use their own threads.** For forks made through Ruby's `fork`, `IO.popen("-")`, or `Process.daemon`, mini_racer_rs waits for context runners, pauses its worker pool, and waits for running tasks; an async `WebAssembly.compile` in a new default-mode child completes on the child's own pool. On Ubuntu 24.04 with glibc 2.39, 20 of 20 mini_racer children aborted with signal 6 after loading and rendering React, while 20 of 20 mini_racer_rs children exited cleanly. On Fedora, mini_racer children hung within the first 50 forks of `test/stress/fork_busy.rb`, while mini_racer_rs completed 300 forks per run on Fedora and Ubuntu.
 - **V8 15.2.124.1.** mini_racer 0.22.1 uses V8 13.6.233.17.
 - **No compiler at release install.** Native gems cover glibc Linux on x86_64 and aarch64, plus macOS on arm64 and x86_64. Each carries extensions for Ruby 3.3, 3.4, and 4.0. mini_racer 0.22.1 ships as source and compiles C++ against libv8-node.
@@ -160,17 +160,17 @@ The repository tests shim resolution with `path:` sources and rtlcss in `test/co
 
 | Workload | mini_racer 0.22.1 | mini_racer_rs | Ratio |
 |---|---:|---:|---:|
-| Babel transform of a 3 KB JSX component, through ExecJS | 10.0 ms | 5.3 ms | 1.9x |
-| Terser minify of a 78 KB library, through ExecJS | 51.6 ms | 51.2 ms | 1.0x |
-| React server render of 1,000 items (17 KB of HTML), through ExecJS | 192 µs | 174 µs | 1.1x |
-| React in a new context: load the bundle and render 1,000 items, through ExecJS | 12.0 ms | 12.1 ms | 1.0x |
-| Handlebars render of 50 rows, through `Context#call` | 47.9 µs | 40.1 µs | 1.2x |
-| Autoprefixer on Bootstrap's 280 KB stylesheet, through ExecJS | 27.2 ms | 23.7 ms | 1.1x |
-| MUI dashboard server render of 200 rows and 299 icons (469 KB of HTML), through ExecJS | 32.2 ms | 30.5 ms | 1.1x |
-| MUI in a new context: load the 8.2 MB bundle and render once, through ExecJS | 167 ms | 121 ms | 1.4x |
+| Babel transform of a 3 KB JSX component, through ExecJS | 10.1 ms | 5.2 ms | 2.0x |
+| Terser minify of a 78 KB library, through ExecJS | 51.1 ms | 52.0 ms | 1.0x |
+| React server render of 1,000 items (17 KB of HTML), through ExecJS | 191 µs | 174 µs | 1.1x |
+| React in a new context: load the bundle and render 1,000 items, through ExecJS | 11.9 ms | 11.8 ms | 1.0x |
+| Handlebars render of 50 rows, through `Context#call` | 49.1 µs | 34.9 µs | 1.4x |
+| Autoprefixer on Bootstrap's 280 KB stylesheet, through ExecJS | 26.3 ms | 23.7 ms | 1.1x |
+| MUI dashboard server render of 200 rows and 299 icons (469 KB of HTML), through ExecJS | 32.6 ms | 29.8 ms | 1.1x |
+| MUI in a new context: load the 8.2 MB bundle and render once, through ExecJS | 167 ms | 105 ms | 1.6x |
 | Load a 44 MB production server rendering bundle into a new context, through ExecJS | 983 ms | 215 ms | 4.6x |
 
-The table reports the eight library workloads plus the 44 MB production server rendering bundle load. Results are medians of 5 runs from the release build of commit `2513a48`, with every workload producing identical output in both gems. They were measured on Ruby 3.4.2 and Linux on an AMD Ryzen 9 7950X3D, with the CPU governor set to `performance` and both gems pinned to CPUs 0 through 7.
+Results are medians of 5 runs, with every workload producing identical output in both gems. The eight library workloads use the release build of commit `220bfe7`, and the 44 MB production server rendering bundle load uses commit `2513a48`. Measurements ran on Ruby 3.4.2 and Linux on an AMD Ryzen 9 7950X3D, with the CPU governor set to `performance` and both gems pinned to CPUs 0 through 7.
 
 ```sh
 bundle exec ruby bench/run.rb --cpus 0-7

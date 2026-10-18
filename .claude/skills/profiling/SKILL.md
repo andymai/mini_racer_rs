@@ -45,7 +45,7 @@ Each run starts the reference, then the candidate, as separate `bundle exec` pro
 | Fast calls (`fast_calls`, `runner::fast_call`) | the React workload, which renders through ExecJS's `call`, and `test/stress/large_arguments.rb` | the same build under `MINI_RACER_RS_FAST_CALLS=off`, which sends every eval down the normal path |
 | A call's arguments (`crates/mini_racer_engine/src/request.rs`), results written without V8's serializer (`serialize::primitive`), the encoder (`ext/mini_racer_rs/src/encode.rs`) | the call round trip and the serde `ruby_to_js` and `callback` rows | Hashes of 1 to 16 keys, alone and in arrays of 200, sent to a sink and returned: `request::worth_building` leaves a call to V8's deserializer where it builds objects faster than the runner, so a change to either moves where they cross |
 
-p99 and p99.9 rows are often `noisy`. The serde rows below 1x in `BENCHMARKS.md` are arrays of 10,000 numbers. The stress scripts load whatever extension `-Ilib` finds and print one gem's figures with no reference, so use them for before and after on the same build profile only.
+p99 and p99.9 rows are often `noisy`. Every serde row in `BENCHMARKS.md` favors mini_racer_rs; the closest is returning 10,000 integers (1.69x), where V8's serializer is most of the time. The stress scripts load whatever extension `-Ilib` finds and print one gem's figures with no reference, so use them for before and after on the same build profile only.
 
 ## Before and after
 
