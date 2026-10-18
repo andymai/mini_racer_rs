@@ -1,10 +1,10 @@
 # Stability
 
-mini_racer_rs is a pre-release Rust implementation of the MiniRacer Ruby API and a drop-in replacement for mini_racer 0.22.1. Nothing is published to RubyGems.org yet.
+mini_racer_rs is published on RubyGems.org as a Rust implementation of the MiniRacer Ruby API and a drop-in replacement for mini_racer 0.22.1.
 
 ## Versions
 
-`MiniRacerRs::VERSION` is the gem's version. It follows semantic versioning and starts below 1.0. Before 1.0, a breaking change increments the minor version. Releases are cut by release-please.
+`MiniRacerRs::VERSION` is the gem's version. It follows semantic versioning, so a breaking change increments the major version. Releases are cut by release-please.
 
 `MiniRacer::VERSION` remains `"0.22.1"`, and `MiniRacer::LIBV8_NODE_VERSION` retains mini_racer's value. These are parity constants, not the mini_racer_rs release version.
 

@@ -1,6 +1,6 @@
 # Contributing
 
-mini_racer_rs is a pre-release Rust implementation of the MiniRacer Ruby API and targets compatibility with mini_racer 0.22.1. It uses V8 15.2 through `v8` 152.2.0 and supports CRuby 3.3, 3.4, and 4.0, plus TruffleRuby. Supported platforms are glibc-based Linux on x86_64 and aarch64, and macOS on arm64 and x86_64.
+mini_racer_rs is a Rust implementation of the MiniRacer Ruby API and targets compatibility with mini_racer 0.22.1. It uses V8 15.2 through `v8` 152.2.0 and supports CRuby 3.3, 3.4, and 4.0, plus TruffleRuby. Supported platforms are glibc-based Linux on x86_64 and aarch64, and macOS on arm64 and x86_64.
 
 ## Setup
 
