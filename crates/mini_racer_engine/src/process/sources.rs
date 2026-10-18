@@ -73,6 +73,7 @@ pub struct Sources {
     kept: Mutex<Vec<Kept>>,
     made: AtomicU64,
     reads: AtomicU64,
+    conversions: AtomicU64,
 }
 
 struct Kept {
@@ -97,6 +98,7 @@ impl Sources {
         if let Some(units) = self.find(key) {
             return Some(units);
         }
+        self.conversions.fetch_add(1, Ordering::Relaxed);
         let units = Units::of(text)?;
         let mut kept = lock(&self.kept);
         if let Some(at) = kept.iter().position(|kept| kept.key == *key) {
@@ -171,6 +173,7 @@ impl Sources {
             kept: Mutex::new(kept),
             made: AtomicU64::new(0),
             reads: AtomicU64::new(0),
+            conversions: AtomicU64::new(0),
         }
     }
 
@@ -184,6 +187,12 @@ impl Sources {
     #[must_use]
     pub fn reads(&self) -> u64 {
         self.reads.load(Ordering::Relaxed)
+    }
+
+    /// Sources this process converted to the units V8 reads, kept or not.
+    #[must_use]
+    pub fn conversions(&self) -> u64 {
+        self.conversions.load(Ordering::Relaxed)
     }
 
     /// Strings alive now that read a kept source.
@@ -323,6 +332,28 @@ mod tests {
             ));
         }
         assert_eq!(sources.made(), made + 1);
+    }
+
+    #[test]
+    fn a_full_list_converts_nothing() {
+        let sources = Sources::default();
+        let count = u8::try_from(MAX_SOURCES).unwrap_or(u8::MAX);
+        let read: Vec<Option<Units>> = (40..40 + count)
+            .map(|seed| {
+                let text = script(seed);
+                sources.units(&key(&text), &text)
+            })
+            .collect();
+        let converted = sources.conversions();
+        let extra = script(100);
+        let extra_key = key(&extra);
+        for _ in 0..3 {
+            assert!(sources.units(&extra_key, &extra).is_none());
+        }
+        assert_eq!(sources.conversions(), converted);
+        drop(read);
+        assert!(sources.units(&extra_key, &extra).is_some());
+        assert_eq!(sources.conversions(), converted + 1);
     }
 
     #[test]
