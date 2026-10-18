@@ -57,6 +57,9 @@ pub enum Container {
 /// Receives decoded values. Containers get elements through `push` and keyed
 /// entries (object properties, map entries, an array's named properties,
 /// an error's fields) through `insert`.
+///
+/// Runs of numbers in an array can come all at once instead, through the
+/// methods whose defaults make those calls.
 pub trait Visitor {
     type Value: Copy;
     type Frame;
@@ -88,6 +91,58 @@ pub trait Visitor {
     fn register(&mut self, id: u32, value: Self::Value) -> Result<(), Self::Error>;
 
     fn back_ref(&mut self, id: u32) -> Result<Self::Value, Self::Error>;
+
+    /// Consecutive int32 elements of a dense array, each of which would
+    /// otherwise reach `scalar` and then `push`.
+    fn push_int32s(&mut self, frame: &mut Self::Frame, values: &[i32]) -> Result<(), Self::Error> {
+        for &n in values {
+            let value = self.scalar(Scalar::Int32(n))?;
+            self.push(frame, value)?;
+        }
+        Ok(())
+    }
+
+    /// Consecutive double elements of a dense array, each of which would
+    /// otherwise reach `scalar` and then `push`.
+    fn push_numbers(&mut self, frame: &mut Self::Frame, values: &[f64]) -> Result<(), Self::Error> {
+        for &n in values {
+            let value = self.scalar(Scalar::Number(n))?;
+            self.push(frame, value)?;
+        }
+        Ok(())
+    }
+
+    /// Consecutive entries of a sparse array with an int32 key and an int32
+    /// value, each of which would otherwise reach `scalar` for its key, then
+    /// for its value, and then `insert`.
+    fn insert_int32s(
+        &mut self,
+        frame: &mut Self::Frame,
+        entries: &[(i32, i32)],
+    ) -> Result<(), Self::Error> {
+        for &(key, n) in entries {
+            let key = self.scalar(Scalar::Int32(key))?;
+            let value = self.scalar(Scalar::Int32(n))?;
+            self.insert(frame, key, value)?;
+        }
+        Ok(())
+    }
+
+    /// Consecutive entries of a sparse array with an int32 key and a double
+    /// value, each of which would otherwise reach `scalar` for its key, then
+    /// for its value, and then `insert`.
+    fn insert_numbers(
+        &mut self,
+        frame: &mut Self::Frame,
+        entries: &[(i32, f64)],
+    ) -> Result<(), Self::Error> {
+        for &(key, n) in entries {
+            let key = self.scalar(Scalar::Int32(key))?;
+            let value = self.scalar(Scalar::Number(n))?;
+            self.insert(frame, key, value)?;
+        }
+        Ok(())
+    }
 }
 
 pub struct Begun<F, V> {
@@ -184,6 +239,7 @@ const REGEXP_UNICODE_SETS: u32 = 1 << 8;
 const VIEW_LENGTH_TRACKING: u64 = 1;
 const VIEW_BACKED_BY_RESIZABLE: u64 = 1 << 1;
 
+#[derive(Clone, Copy)]
 struct Reader<'a> {
     rest: &'a [u8],
 }
@@ -245,7 +301,52 @@ impl<'a> Reader<'a> {
             self.rest = rest;
         }
     }
+
+    // The readers a run takes elements with. Each consumes nothing unless
+    // the whole element reads cleanly, so whatever stops a run is read again,
+    // and reported, by the general path. They are marked inline because the
+    // generic decoder is compiled in the visitor's crate, which cannot inline
+    // them otherwise.
+    #[inline]
+    fn int32_element(&mut self) -> Option<i32> {
+        let mut ahead = *self;
+        if ahead.byte::<()>().ok()? != tag::INT32 {
+            return None;
+        }
+        let n = zigzag(ahead.varint_u32::<()>().ok()?);
+        *self = ahead;
+        Some(n)
+    }
+
+    #[inline]
+    fn number_element(&mut self) -> Option<f64> {
+        let mut ahead = *self;
+        if ahead.byte::<()>().ok()? != tag::DOUBLE {
+            return None;
+        }
+        let n = ahead.double::<()>().ok()?;
+        *self = ahead;
+        Some(n)
+    }
+
+    #[inline]
+    fn int32_entry(&mut self) -> Option<(i32, i32)> {
+        let mut ahead = *self;
+        let entry = (ahead.int32_element()?, ahead.int32_element()?);
+        *self = ahead;
+        Some(entry)
+    }
+
+    #[inline]
+    fn number_entry(&mut self) -> Option<(i32, f64)> {
+        let mut ahead = *self;
+        let entry = (ahead.int32_element()?, ahead.number_element()?);
+        *self = ahead;
+        Some(entry)
+    }
 }
+
+const RUN: usize = 64;
 
 const fn zigzag(raw: u32) -> i32 {
     let magnitude = raw >> 1;
@@ -592,18 +693,22 @@ impl<'a, 'v, V: Visitor> Decoder<'a, 'v, V> {
     fn dense_array(&mut self, depth: u32) -> Decoded<V> {
         let length = self.reader.varint_u32()?;
         // Every element takes at least a byte.
-        if usize::try_from(length).map_or(true, |length| length > self.reader.rest.len()) {
+        let Some(mut left) = usize::try_from(length)
+            .ok()
+            .filter(|&length| length <= self.reader.rest.len())
+        else {
             return Err(DecodeError::Truncated);
-        }
+        };
         let (mut frame, id, registered) = self.begin(Container::DenseArray { length })?;
-        for _ in 0..length {
-            let element = if self.reader.peek()? == tag::THE_HOLE {
-                self.reader.byte()?;
-                Self::visit(self.visitor.scalar(Scalar::Hole))?
-            } else {
-                self.value(Self::child(depth)?)?
+        while left > 0 {
+            let taken = match self.element_run(&mut frame, depth, left)? {
+                0 => {
+                    self.element(&mut frame, depth)?;
+                    1
+                }
+                run => run,
             };
-            Self::visit(self.visitor.push(&mut frame, element))?;
+            left = left.saturating_sub(taken);
         }
         let properties = self.entries(&mut frame, depth, tag::END_DENSE_ARRAY)?;
         self.expect_count(properties.into(), "array property")?;
@@ -611,13 +716,129 @@ impl<'a, 'v, V: Visitor> Decoder<'a, 'v, V> {
         self.end(frame, id, registered)
     }
 
+    fn element(&mut self, frame: &mut V::Frame, depth: u32) -> Result<(), DecodeError<V::Error>> {
+        let element = if self.reader.peek()? == tag::THE_HOLE {
+            self.reader.byte()?;
+            Self::visit(self.visitor.scalar(Scalar::Hole))?
+        } else {
+            self.value(Self::child(depth)?)?
+        };
+        Self::visit(self.visitor.push(frame, element))
+    }
+
+    fn element_run(
+        &mut self,
+        frame: &mut V::Frame,
+        depth: u32,
+        limit: usize,
+    ) -> Result<usize, DecodeError<V::Error>> {
+        match self.reader.rest.first() {
+            Some(&tag::INT32) => {
+                self.run(frame, depth, limit, Reader::int32_element, V::push_int32s)
+            }
+            Some(&tag::DOUBLE) => {
+                self.run(frame, depth, limit, Reader::number_element, V::push_numbers)
+            }
+            _ => Ok(0),
+        }
+    }
+
+    // Hands the visitor up to `limit` elements that `read` takes, at once,
+    // and returns how many it read; 0 leaves the next element to the general
+    // path, which reads it again and reports what stopped `read`. A run
+    // checks the depth as its first element would. A lone element skips the
+    // buffer, which costs more to fill than a run of one saves. Never inlined,
+    // so the buffer is not on the stack in every frame of a deeply nested value.
+    #[inline(never)]
+    fn run<T: Copy>(
+        &mut self,
+        frame: &mut V::Frame,
+        depth: u32,
+        limit: usize,
+        read: impl Fn(&mut Reader<'a>) -> Option<T>,
+        hand: impl FnOnce(&mut V, &mut V::Frame, &[T]) -> Result<(), V::Error>,
+    ) -> Result<usize, DecodeError<V::Error>> {
+        let Some(first) = read(&mut self.reader) else {
+            return Ok(0);
+        };
+        Self::child(depth)?;
+        let mut ahead = self.reader;
+        if limit < 2 || read(&mut ahead).is_none() {
+            Self::visit(hand(self.visitor, frame, &[first]))?;
+            return Ok(1);
+        }
+        let mut buffer = [first; RUN];
+        let mut filled = 1usize;
+        for slot in buffer.iter_mut().take(limit).skip(1) {
+            let Some(value) = read(&mut self.reader) else {
+                break;
+            };
+            *slot = value;
+            filled = filled.saturating_add(1);
+        }
+        let run = buffer.get(..filled).unwrap_or_default();
+        Self::visit(hand(self.visitor, frame, run))?;
+        Ok(run.len())
+    }
+
     fn sparse_array(&mut self, depth: u32) -> Decoded<V> {
         let length = self.reader.varint_u32()?;
         let (mut frame, id, registered) = self.begin(Container::SparseArray { length })?;
-        let properties = self.entries(&mut frame, depth, tag::END_SPARSE_ARRAY)?;
+        let mut properties = 0u32;
+        while self.reader.peek()? != tag::END_SPARSE_ARRAY {
+            // A run stops short of the entry that overflows the count, so the
+            // general path inserts it and then fails.
+            let room = usize::try_from(u32::MAX.saturating_sub(properties)).unwrap_or(usize::MAX);
+            let taken = match self.int32_keyed(&mut frame, depth, room)? {
+                0 => {
+                    self.insert(&mut frame, depth)?;
+                    1
+                }
+                run => u32::try_from(run).map_err(|_| DecodeError::TooManyObjects)?,
+            };
+            properties = properties
+                .checked_add(taken)
+                .ok_or(DecodeError::TooManyObjects)?;
+        }
+        self.reader.byte()?;
         self.expect_count(properties.into(), "element")?;
         self.expect_count(length.into(), "element")?;
         self.end(frame, id, registered)
+    }
+
+    // Reads entries whose key is an int32, the shape V8 writes for a holey
+    // array's elements, and returns how many: a run while their values are
+    // int32s or doubles, and otherwise the one entry, as `insert` reads it but
+    // without reading its key twice. 0 leaves the next entry to `insert`.
+    fn int32_keyed(
+        &mut self,
+        frame: &mut V::Frame,
+        depth: u32,
+        limit: usize,
+    ) -> Result<usize, DecodeError<V::Error>> {
+        if limit == 0 {
+            return Ok(0);
+        }
+        let mut ahead = self.reader;
+        let Some(key) = ahead.int32_element() else {
+            return Ok(0);
+        };
+        match ahead.rest.first() {
+            Some(&tag::INT32) => {
+                self.run(frame, depth, limit, Reader::int32_entry, V::insert_int32s)
+            }
+            Some(&tag::DOUBLE) => {
+                self.run(frame, depth, limit, Reader::number_entry, V::insert_numbers)
+            }
+            _ => {
+                self.reader = ahead;
+                Self::child(depth)?;
+                let key = Self::visit(self.visitor.scalar(Scalar::Int32(key)))?;
+                let value = self.value(Self::child(depth)?)?;
+                Self::visit(self.visitor.insert(frame, key, value))?;
+                Ok(1)
+            }
+        }
     }
 
     fn map(&mut self, depth: u32) -> Decoded<V> {

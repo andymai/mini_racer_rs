@@ -67,7 +67,7 @@ struct ErrorParts {
     cause: Option<Value>,
 }
 
-const BATCH: usize = 32;
+const BATCH: usize = 64;
 
 #[derive(Clone, Copy)]
 enum Target {
@@ -96,21 +96,65 @@ struct RubyVisitor<'r> {
 
 impl RubyVisitor<'_> {
     fn add(&mut self, target: Target, values: &[Value]) -> Result<(), Error> {
-        if self.pending.filled.saturating_add(values.len()) > BATCH {
+        self.add_with(target, values.len(), |slots| slots.copy_from_slice(values))
+    }
+
+    // `fill` writes the `count` values straight into the batch, where the GC
+    // sees each one as soon as it is made.
+    fn add_with(
+        &mut self,
+        target: Target,
+        count: usize,
+        fill: impl FnOnce(&mut [Value]),
+    ) -> Result<(), Error> {
+        if self.pending.filled.saturating_add(count) > BATCH {
             self.flush()?;
         }
         if self.pending.filled == 0 {
             self.pending.target = Some(target);
         }
         let start = self.pending.filled;
-        let end = start.saturating_add(values.len());
+        let end = start.saturating_add(count);
         let slots = self
             .pending
             .values
             .get_mut(start..end)
             .ok_or_else(|| errors::internal(self.ruby, "decode batch overflow"))?;
-        slots.copy_from_slice(values);
+        fill(slots);
         self.pending.filled = end;
+        Ok(())
+    }
+
+    // Converts a run straight into the batch, so a run as long as the batch
+    // is one rb_ary_cat and a short one shares its append with its neighbors.
+    fn extend<T: Copy>(
+        &mut self,
+        array: RArray,
+        values: &[T],
+        convert: impl Fn(&Ruby, T) -> Value,
+    ) -> Result<(), Error> {
+        let ruby = self.ruby;
+        for chunk in values.chunks(BATCH) {
+            self.add_with(Target::Array(array), chunk.len(), |slots| {
+                for (slot, &n) in slots.iter_mut().zip(chunk) {
+                    *slot = convert(ruby, n);
+                }
+            })?;
+        }
+        Ok(())
+    }
+
+    fn insert_each<T: Copy>(
+        &mut self,
+        frame: &mut Frame,
+        entries: &[(i32, T)],
+        convert: impl Fn(&Ruby, T) -> Value,
+    ) -> Result<(), Error> {
+        for &(key, n) in entries {
+            let key = int32(self.ruby, key);
+            let value = convert(self.ruby, n);
+            self.insert(frame, key, value)?;
+        }
         Ok(())
     }
 
@@ -197,6 +241,18 @@ fn is_index(key: Value) -> bool {
     Fixnum::from_value(key).is_some_and(|key| i32::try_from(key.to_i64()).is_ok())
 }
 
+fn int32(ruby: &Ruby, n: i32) -> Value {
+    ruby.integer_from_i64(n.into()).as_value()
+}
+
+fn number(ruby: &Ruby, n: f64) -> Value {
+    match classify(n) {
+        Number::Integer(i) => ruby.integer_from_i64(i).as_value(),
+        Number::BigInteger => rb_raw::dbl2big(ruby, n),
+        Number::Float => ruby.float_from_f64(n).as_value(),
+    }
+}
+
 impl Visitor for RubyVisitor<'_> {
     type Value = Value;
     type Frame = Frame;
@@ -207,13 +263,9 @@ impl Visitor for RubyVisitor<'_> {
         Ok(match scalar {
             Scalar::Undefined | Scalar::Null | Scalar::Hole => ruby.qnil().as_value(),
             Scalar::Bool(b) => b.into_value_with(ruby),
-            Scalar::Int32(n) => ruby.integer_from_i64(n.into()).as_value(),
+            Scalar::Int32(n) => int32(ruby, n),
             Scalar::Uint32(n) => ruby.integer_from_u64(n.into()).as_value(),
-            Scalar::Number(n) => match classify(n) {
-                Number::Integer(i) => ruby.integer_from_i64(i).as_value(),
-                Number::BigInteger => rb_raw::dbl2big(ruby, n),
-                Number::Float => ruby.float_from_f64(n).as_value(),
-            },
+            Scalar::Number(n) => number(ruby, n),
             Scalar::BigInt { negative, digits } => rb_raw::integer_unpack(ruby, digits, negative)?,
             Scalar::Text(text) | Scalar::RegExp { pattern: text, .. } => self.string(text)?,
             Scalar::Date(millis) => self.time(millis)?,
@@ -313,6 +365,44 @@ impl Visitor for RubyVisitor<'_> {
 
     fn back_ref(&mut self, id: u32) -> Result<Value, Error> {
         self.refs.entry(isize::try_from(id).unwrap_or(isize::MAX))
+    }
+
+    fn push_int32s(&mut self, frame: &mut Frame, values: &[i32]) -> Result<(), Error> {
+        match frame {
+            Frame::Array(array) | Frame::Sparse { array, .. } => self.extend(*array, values, int32),
+            Frame::Object(_) | Frame::Map(_) | Frame::Error(_) => self.bad_state(),
+        }
+    }
+
+    fn push_numbers(&mut self, frame: &mut Frame, values: &[f64]) -> Result<(), Error> {
+        match frame {
+            Frame::Array(array) | Frame::Sparse { array, .. } => {
+                self.extend(*array, values, number)
+            }
+            Frame::Object(_) | Frame::Map(_) | Frame::Error(_) => self.bad_state(),
+        }
+    }
+
+    // An int32 key is a Fixnum on every supported (64-bit) platform, so it
+    // passes `is_index` and `insert` would append each value.
+    fn insert_int32s(&mut self, frame: &mut Frame, entries: &[(i32, i32)]) -> Result<(), Error> {
+        match frame {
+            Frame::Sparse {
+                array,
+                named: false,
+            } => self.extend(*array, entries, |ruby, (_, n)| int32(ruby, n)),
+            _ => self.insert_each(frame, entries, int32),
+        }
+    }
+
+    fn insert_numbers(&mut self, frame: &mut Frame, entries: &[(i32, f64)]) -> Result<(), Error> {
+        match frame {
+            Frame::Sparse {
+                array,
+                named: false,
+            } => self.extend(*array, entries, |ruby, (_, n)| number(ruby, n)),
+            _ => self.insert_each(frame, entries, number),
+        }
     }
 }
 

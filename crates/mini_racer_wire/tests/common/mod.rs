@@ -159,6 +159,78 @@ impl Visitor for Tree {
     }
 }
 
+/// A `Tree` that also notes the kind and length of each run the decoder
+/// hands over.
+#[derive(Default)]
+pub struct Runs {
+    pub tree: Tree,
+    pub runs: Vec<(&'static str, usize)>,
+}
+
+impl Visitor for Runs {
+    type Value = usize;
+    type Frame = Frame;
+    type Error = String;
+
+    fn scalar(&mut self, scalar: Scalar<'_>) -> Result<usize, String> {
+        self.tree.scalar(scalar)
+    }
+
+    fn begin(&mut self, container: Container) -> Result<Begun<Frame, usize>, String> {
+        self.tree.begin(container)
+    }
+
+    fn push(&mut self, frame: &mut Frame, value: usize) -> Result<(), String> {
+        self.tree.push(frame, value)
+    }
+
+    fn insert(&mut self, frame: &mut Frame, key: usize, value: usize) -> Result<(), String> {
+        self.tree.insert(frame, key, value)
+    }
+
+    fn end(&mut self, frame: Frame) -> Result<usize, String> {
+        self.tree.end(frame)
+    }
+
+    fn register(&mut self, id: u32, value: usize) -> Result<(), String> {
+        self.tree.register(id, value)
+    }
+
+    fn back_ref(&mut self, id: u32) -> Result<usize, String> {
+        self.tree.back_ref(id)
+    }
+
+    fn push_int32s(&mut self, frame: &mut Frame, values: &[i32]) -> Result<(), String> {
+        self.runs.push(("int32s", values.len()));
+        self.tree.push_int32s(frame, values)
+    }
+
+    fn push_numbers(&mut self, frame: &mut Frame, values: &[f64]) -> Result<(), String> {
+        self.runs.push(("numbers", values.len()));
+        self.tree.push_numbers(frame, values)
+    }
+
+    fn insert_int32s(&mut self, frame: &mut Frame, entries: &[(i32, i32)]) -> Result<(), String> {
+        self.runs.push(("int32 entries", entries.len()));
+        self.tree.insert_int32s(frame, entries)
+    }
+
+    fn insert_numbers(&mut self, frame: &mut Frame, entries: &[(i32, f64)]) -> Result<(), String> {
+        self.runs.push(("number entries", entries.len()));
+        self.tree.insert_numbers(frame, entries)
+    }
+}
+
+/// `render`, and the runs the decoder handed over on the way.
+pub fn render_runs(bytes: &[u8], limits: Limits) -> (String, Vec<(&'static str, usize)>) {
+    let mut runs = Runs::default();
+    let rendered = match decode_value(bytes, limits, &mut runs) {
+        Ok(root) => runs.tree.render(root),
+        Err(error) => format!("error: {error}"),
+    };
+    (rendered, runs.runs)
+}
+
 pub fn number(n: f64) -> String {
     if n == 0.0 && n.is_sign_negative() {
         "-0".to_owned()

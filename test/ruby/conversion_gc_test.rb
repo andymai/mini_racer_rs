@@ -65,16 +65,25 @@ class ConversionGcTest < Minitest::Test
           const texts = Object.fromEntries(strings.map((s) => [s, s + "!"]))
           const holey = new Array(200)
           for (let i = 0; i < 200; i++) holey[i] = "hole " + i
-          return {strings, object, texts, holey, numbers: Array.from({length: 200}, (_, i) => 2 ** 70 + i * 2 ** 20)}
+          const numbers = Array.from({length: 200}, (_, i) => 2 ** 70 + i * 2 ** 20)
+          const tiny = Array.from({length: 200}, (_, i) => (i + 1) * 1e-300)
+          const holeyNumbers = new Array(200)
+          for (let i = 0; i < 200; i++) holeyNumbers[i] = i % 3 ? numbers[i] : tiny[i]
+          return {strings, object, texts, holey, numbers, tiny, holeyNumbers}
         })()
       JS
     end
+    numbers = Array.new(200) { |i| (2**70) + (i * (2**20)) }
+    tiny = Array.new(200) { |i| (i + 1) * 1e-300 }
 
     assert_equal Array.new(200) { |i| "item #{i}" }, value["strings"]
     assert_equal(Array.new(200) { |i| ["item #{i}", [i, "item #{i}"]] }.to_h, value["object"])
     assert_equal(Array.new(200) { |i| ["item #{i}", "item #{i}!"] }.to_h, value["texts"])
     assert_equal Array.new(200) { |i| "hole #{i}" }, value["holey"]
-    assert_equal Array.new(200) { |i| (2**70) + (i * (2**20)) }, value["numbers"]
+    assert_equal numbers, value["numbers"]
+    # Too small to be flonums, so each is allocated while its batch waits.
+    assert_equal tiny, value["tiny"]
+    assert_equal Array.new(200) { |i| (i % 3).zero? ? tiny[i] : numbers[i] }, value["holeyNumbers"]
     assert value["object"].keys.all?(&:frozen?)
     assert value["texts"].keys.all?(&:frozen?)
   end
