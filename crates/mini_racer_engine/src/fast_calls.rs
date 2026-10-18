@@ -14,6 +14,10 @@ pub enum Hoisted<'a> {
 pub struct Shape<'a> {
     pub around: Vec<&'a [u8]>,
     pub values: Vec<Hoisted<'a>>,
+    /// The code a render runs before and after its call. The template reads
+    /// its values as the source would only if the call runs once, at the
+    /// wrapper's top level, so each must compile alone as a function body.
+    pub code: Vec<&'a [u8]>,
 }
 
 impl Shape<'_> {
@@ -70,6 +74,7 @@ fn call(source: &[u8]) -> Option<Shape<'_>> {
     Some(Shape {
         around: vec![source.get(..args_at)?, source.get(args_at + args.len()..)?],
         values: vec![Hoisted::Json(args)],
+        code: Vec::new(),
     })
 }
 
@@ -99,7 +104,8 @@ const SERVER_RENDER: &[u8] = b"ReactRailsUJS.serverRender";
 fn render(source: &[u8]) -> Option<Shape<'_>> {
     let body = source.strip_prefix(OPEN)?.strip_suffix(CLOSE)?;
     let call = find(body, CALL)?;
-    if find(body.get(..call)?, SERVER_RENDER).is_some() {
+    let before = body.get(..call)?;
+    if find(before, SERVER_RENDER).is_some() {
         return None;
     }
     let function_at = OPEN.len() + call + CALL.len();
@@ -115,7 +121,12 @@ fn render(source: &[u8]) -> Option<Shape<'_>> {
         source.get(component_at + component.len() + 2..props_at)?,
     ];
     let props = source.get(props_at..props_end)?;
-    if between != [b", ", b", "] || find(after, SERVER_RENDER).is_some() || breaks_line(props) {
+    if between != [b", ", b", "]
+        || find(after, SERVER_RENDER).is_some()
+        || breaks_line(props)
+        || reaches_past_the_call(before)
+        || reaches_past_the_call(after)
+    {
         return None;
     }
     Some(Shape {
@@ -125,7 +136,44 @@ fn render(source: &[u8]) -> Option<Shape<'_>> {
             Hoisted::Text(component),
             Hoisted::Json(props),
         ],
+        code: vec![before, after],
     })
+}
+
+// Code that could run the call again away from its values, or share what V8
+// keeps per script between renders: `arguments` other than as a property name
+// (its `callee` is the wrapper), `eval` and `caller` anywhere, an escape that
+// could spell one of them, and a template literal, as V8 keeps a tagged one's
+// strings per script.
+fn reaches_past_the_call(code: &[u8]) -> bool {
+    code.contains(&b'`')
+        || find(code, b"\\u").is_some()
+        || names(code, b"eval", false)
+        || names(code, b"caller", false)
+        || names(code, b"arguments", true)
+}
+
+// Whether `code` holds `name` as a whole word, unless `as_property` lets one
+// read as a property after a single `.` pass. A byte past ASCII never joins a
+// word, as V8 takes some of those for spaces.
+fn names(code: &[u8], name: &[u8], as_property: bool) -> bool {
+    let joins = |byte: &u8| byte.is_ascii_alphanumeric() || *byte == b'_' || *byte == b'$';
+    let mut from = 0;
+    while let Some(at) = code.get(from..).and_then(|rest| find(rest, name)) {
+        let at = from + at;
+        from = at + 1;
+        let start = at.checked_sub(1).and_then(|before| code.get(before));
+        if start.is_some_and(joins) || code.get(at + name.len()).is_some_and(joins) {
+            continue;
+        }
+        let mut before = code.get(..at).unwrap_or_default().iter().rev();
+        let property = before.find(|byte| !byte.is_ascii_whitespace()) == Some(&b'.')
+            && before.next() != Some(&b'.');
+        if !(as_property && property) {
+            return true;
+        }
+    }
+    false
 }
 
 // A string literal that holds its own text: no escapes, and no line
@@ -331,6 +379,7 @@ mod tests {
             Some(Shape {
                 around: vec![b"(add.apply(this, ", b"))"],
                 values: vec![json("[1,\"two\",{\"3\":null}]")],
+                code: vec![],
             })
         );
     }
@@ -486,6 +535,58 @@ mod tests {
             values(&source),
             Some(vec![text("renderToStaticMarkup"), text("A"), json("[]")])
         );
+    }
+
+    #[test]
+    fn a_renders_code_is_what_runs_before_and_after_its_call() {
+        let source = render("renderToString", "A", "{}");
+        let shape = recognize(source.as_bytes());
+        assert_eq!(
+            shape.map(|shape| shape.code),
+            Some(vec![BEFORE.as_bytes(), AFTER.as_bytes()])
+        );
+        assert_eq!(
+            recognize(b"(f.apply(this, []))").map(|shape| shape.code),
+            Some(vec![])
+        );
+    }
+
+    #[test]
+    fn code_that_could_reach_past_the_call_takes_the_normal_path() {
+        let call = "this.ReactRailsUJS.serverRender('renderToString', 'A', {})";
+        for code in [
+            "var s = `x`;",
+            "eval('1');",
+            "var f = window.eval;",
+            "f.caller;",
+            "var a = arguments;",
+            "arguments.callee;",
+            "f(...arguments);",
+            "x = (arguments);",
+            "\\u0061rguments;",
+            "ev\\u0061l('1');",
+            "\u{a0}arguments;",
+        ] {
+            assert_eq!(values(&compose_js(code, call, "")), None, "before: {code}");
+            assert_eq!(values(&compose_js("", call, code)), None, "after: {code}");
+        }
+    }
+
+    #[test]
+    fn longer_names_and_properties_called_arguments_are_left_to_v8() {
+        let call = "this.ReactRailsUJS.serverRender('renderToString', 'A', {})";
+        for code in [
+            "msg.arguments;",
+            "msg . arguments;",
+            "myarguments;",
+            "arguments_;",
+            "$eval();",
+            "evaluate();",
+            "callers;",
+            "'\\n';",
+        ] {
+            assert!(values(&compose_js(code, call, code)).is_some(), "{code}");
+        }
     }
 
     #[test]

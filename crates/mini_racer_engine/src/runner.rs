@@ -825,7 +825,8 @@ fn fast_call<'s>(
         Binding::Made(reader) => shape.template(reader.as_bytes()),
         Binding::Unmade | Binding::Failed => None,
     };
-    let Some(text) = text else {
+    // Kept per context, as `last` is, so held to the same size.
+    let Some(text) = text.filter(|text| text.len() <= LARGE_SOURCE) else {
         return declined(tc);
     };
     let mut values = Vec::with_capacity(shape.values.len());
@@ -841,7 +842,7 @@ fn fast_call<'s>(
         };
         values.push(parsed);
     }
-    let Some(script) = template(tc, runtime, text, filename) else {
+    let Some(script) = template(tc, runtime, text, &shape.code, filename) else {
         return declined(tc);
     };
     let frame = v8::Array::new_with_elements(tc, &values);
@@ -874,27 +875,33 @@ fn declined<'s>(
     Ok(None)
 }
 
-// A global lexical binding to the function a template calls for its values:
-// no property lists it, and its random name keeps it from meeting a global of
-// the user's. Made under the explicit microtask policy, so microtasks already
-// queued run after the template's script, as they would after the source's.
+// A global `const` holding the function a template calls for its values: no
+// property lists it, user code cannot reassign it, and its random name keeps
+// it from meeting a global of the user's. The setup script takes the function
+// from a global property of another random name, deleted once it has run.
+// Made under the explicit microtask policy, so microtasks already queued run
+// after the template's script, as they would after the source's.
 fn bind_reader(tc: &mut Tc<'_, '_, '_, '_>, runtime: &Runtime) {
-    let name = format!(
-        "__mini_racer_rs_{:016x}",
-        RandomState::new().hash_one(runtime.key)
-    );
+    let [name, key] = [0, 1].map(|salt| {
+        let random = RandomState::new().hash_one((runtime.key, salt));
+        format!("__mini_racer_rs_{random:016x}")
+    });
     let policy = tc.get_microtasks_policy();
     tc.set_microtasks_policy(v8::MicrotasksPolicy::Explicit);
-    let made = (|| {
-        let setup = format!("let {name};\n(function (read) {{ {name} = read }})");
-        let setup = v8::String::new(tc, &setup)?;
-        let bind = v8::Script::compile(tc, setup, None)?.run(tc)?;
-        let bind = v8::Local::<v8::Function>::try_from(bind).ok()?;
-        let read = v8::Function::builder(hoisted).build(tc)?;
-        let receiver = v8::undefined(tc).into();
-        bind.call(tc, receiver, &[read.into()])
-    })()
-    .is_some();
+    let global = tc.get_current_context().global(tc);
+    let made = v8::String::new(tc, &key).is_some_and(|property| {
+        let made = (|| {
+            let read = v8::Function::builder(hoisted).build(tc)?;
+            global
+                .create_data_property(tc, property.into(), read.into())
+                .filter(|&defined| defined)?;
+            let setup = v8::String::new(tc, &format!("const {name} = this[\"{key}\"];"))?;
+            v8::Script::compile(tc, setup, None)?.run(tc)
+        })()
+        .is_some();
+        global.delete(tc, property.into());
+        made
+    });
     tc.set_microtasks_policy(policy);
     // A termination may have cut the setup short; the next call makes another.
     if made || !tc.has_terminated() {
@@ -910,6 +917,7 @@ fn template<'s>(
     scope: &v8::PinScope<'s, '_>,
     runtime: &Runtime,
     text: Vec<u8>,
+    code: &[&[u8]],
     filename: &JsText,
 ) -> Option<v8::Local<'s, v8::Script>> {
     let mut hoisting = lock(&runtime.hoisting);
@@ -930,7 +938,11 @@ fn template<'s>(
     let source = v8::String::new_from_utf8(scope, &text, v8::NewStringType::Normal)?;
     let name = string(scope, filename)?;
     let origin = serialize::origin(scope, name.into());
-    let script = v8::Script::compile(scope, source, Some(&origin));
+    let script = code
+        .iter()
+        .all(|code| compiles_alone(scope, code))
+        .then(|| v8::Script::compile(scope, source, Some(&origin)))
+        .flatten();
     let mut hoisting = lock(&runtime.hoisting);
     if hoisting.templates.len() >= TEMPLATES {
         hoisting.templates.remove(0);
@@ -940,6 +952,22 @@ fn template<'s>(
         script: script.map(|script| v8::Global::new(scope, script)),
     });
     script
+}
+
+// As a function body of its own, so its statements close before the call.
+fn compiles_alone(scope: &v8::PinScope<'_, '_>, code: &[u8]) -> bool {
+    v8::String::new_from_utf8(scope, code, v8::NewStringType::Normal).is_some_and(|code| {
+        let mut source = v8::script_compiler::Source::new(code, None);
+        v8::script_compiler::compile_function(
+            scope,
+            &mut source,
+            &[],
+            &[],
+            v8::script_compiler::CompileOptions::NoCompileOptions,
+            v8::script_compiler::NoCacheReason::NoReason,
+        )
+        .is_some()
+    })
 }
 
 // What a fast call's template reads in place of the literal at that index.
