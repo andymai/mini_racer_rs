@@ -60,11 +60,15 @@ if [ "$os" = linux ]; then
   fi
   # The engine copies this vtable at a fixed size; a V8 that adds a virtual
   # would leave the copy without the new slot, and calls through it would jump
-  # past the end.
-  vtable=$(nm -C -S "$lib" | awk '/ vtable for CustomPlatform$/ { print $2 }')
-  if [ "$vtable" != 00000000000000c0 ]; then
-    echo "VIOLATION [vtable]: vtable for CustomPlatform is ${vtable:-missing}, not 0xc0 bytes; resize PlatformVtable in crates/mini_racer_engine/src/sys.rs"
-    fail=1
+  # past the end. Release builds strip local symbols, so only a build that
+  # keeps them (CI's) can be checked.
+  symbols=$(nm -C -S "$lib" 2>/dev/null || true)
+  if [ -n "$symbols" ]; then
+    vtable=$(awk '/ vtable for CustomPlatform$/ { print $2 }' <<<"$symbols")
+    if [ "$vtable" != 00000000000000c0 ]; then
+      echo "VIOLATION [vtable]: vtable for CustomPlatform is ${vtable:-missing}, not 0xc0 bytes; resize PlatformVtable in crates/mini_racer_engine/src/sys.rs"
+      fail=1
+    fi
   fi
 fi
 
