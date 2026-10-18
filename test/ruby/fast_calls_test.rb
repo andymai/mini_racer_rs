@@ -49,6 +49,22 @@ module FastCallsFixtures
     }
   JS
 
+  # What reflection shows of the bottom frame: its script's hash and raw
+  # offset, and for a render, the wrapper's source through `caller`.
+  REFLECTING = <<~JS
+    function bottom(read) {
+      var saved = Error.prepareStackTrace;
+      Error.prepareStackTrace = function (e, frames) { return read(frames[frames.length - 1]) };
+      try { return new Error().stack } finally { Error.prepareStackTrace = saved }
+    }
+    function hash() { return bottom(function (frame) { return frame.getScriptHash() }) }
+    function position() { return bottom(function (frame) { return frame.getPosition() }) }
+    function add(a, b) { return a + b }
+    var ReactRailsUJS = {
+      serverRender: function () { return [hash(), position(), String(ReactRailsUJS.serverRender.caller)] },
+    };
+  JS
+
   THROWN = ["Error: boom {\"k\":1}", ["inner (<eval>:2:27)", "outer (<eval>:3:28)", "<eval>:1:8"]].freeze
   RENDER_THROWN = ["TypeError: bad 3", ["Object.serverRender (<eval>:16:34)", "<eval>:5:45", "<eval>:13:13"]].freeze
 
@@ -171,20 +187,45 @@ class FastCallsContextTest < Minitest::Test
   # raw offsets past the values it carries.
   def test_a_source_sent_again_runs_as_mini_racer_runs_it
     context = MiniRacer::Context.new
-    context.eval(<<~JS)
-      function bottom(read) {
-        var saved = Error.prepareStackTrace;
-        Error.prepareStackTrace = function (e, frames) { return read(frames[frames.length - 1]) };
-        try { return new Error().stack } finally { Error.prepareStackTrace = saved }
-      }
-      function hash() { return bottom(function (frame) { return frame.getScriptHash() }) }
-      var ReactRailsUJS = { serverRender: function () { return bottom(function (frame) { return frame.getPosition() }) } };
-    JS
+    context.eval(REFLECTING)
     call = "(hash.apply(this, [1]))"
     rendered = Array.new(3) { context.eval("(#{render("Hello", '{"n":1}', before: "", after: "")})") }
 
-    assert_equal [Digest::SHA256.hexdigest(call)] * 2, Array.new(3) { context.eval(call) }.drop(1)
-    assert_equal [185, 185], rendered.drop(1)
+    hashes = Array.new(3) { context.eval(call) }.drop(1)
+    offsets = rendered.drop(1).map { |(_, offset)| offset }
+
+    assert_equal [Digest::SHA256.hexdigest(call)] * 2, hashes
+    assert_equal [185, 185], offsets
+  ensure
+    context&.dispose
+  end
+
+  def test_a_template_over_1_mib_runs_as_mini_racer_runs_it
+    context = MiniRacer::Context.new
+    context.eval(REFLECTING)
+    source = "(#{render("Hello", '{"n":1}', before: "var pad = 0;\n" * 90_000, after: "")})"
+
+    assert_equal Digest::SHA256.hexdigest(source), context.eval(source).first
+  ensure
+    context&.dispose
+  end
+
+  # Fast calls read their values through a const, which code that finds its
+  # name cannot assign, delete or shadow.
+  def test_code_that_finds_the_reader_cannot_break_later_fast_calls
+    context = MiniRacer::Context.new
+    context.eval(REFLECTING)
+    wrapper = context.eval("(#{render("Hello", "{}", before: "", after: "")})").last
+    reader = wrapper[/__mini_racer_rs_\h+/]
+    assigned = assert_raises(MiniRacer::RuntimeError) { context.eval("(0, eval)('#{reader} = null')") }
+    context.eval("delete #{reader}; globalThis['#{reader}'] = null")
+
+    assert_equal "TypeError: Assignment to constant variable.", assigned.message
+    sums = [context.eval("(add.apply(this, [1,2]))"), context.eval("(add.apply(this, [3,4]))")]
+    wrapper = context.eval("(#{render("Hello", '{"n":2}', before: "", after: "")})").last
+
+    assert_equal [3, 7], sums
+    assert_includes wrapper, reader
   ensure
     context&.dispose
   end
@@ -218,6 +259,80 @@ class FastCallsContextTest < Minitest::Test
     assert_equal "out of memory", error.message
   ensure
     context&.dispose
+  end
+end
+
+# Code around a render's call can run it other than once at the wrapper's top
+# level. Each source here would be a context's first fast call, and renders
+# as mini_racer renders it.
+class FastCallsWrapperTest < Minitest::Test
+  include FastCallsFixtures
+
+  def setup
+    @context = MiniRacer::Context.new
+    @context.attach("rubyEval", proc { |source| @context.eval(source) })
+    @context.eval("var ReactRailsUJS = { serverRender: function (fn, name, props) { return [fn, name, props] } };")
+  end
+
+  def teardown
+    @context&.dispose
+  end
+
+  def wrapped(before, after, props)
+    "(#{compose_js(before, "this.ReactRailsUJS.serverRender('renderToString', 'A', #{props.to_json})", after)})"
+  end
+
+  def test_a_template_literal_around_the_call_holds_its_text
+    [1, 2].each do |n|
+      line = "\n            var result = this.ReactRailsUJS.serverRender('renderToString', 'A', " \
+             "{\"n\":#{n}});\n            "
+
+      assert_equal line, @context.eval(wrapped("var s = `", "`; var result = s;", { "n" => n }))
+    end
+  end
+
+  def test_a_loop_around_the_call_makes_props_on_each_pass
+    before = "var seen = []; for (var i = 0; i < 2; i++) {"
+    after = "seen.push(result); } result = seen[0][2] === seen[1][2];"
+    results = [1, 2].map { |n| @context.eval(wrapped(before, after, { "n" => n })) }
+
+    assert_equal [false, false], results
+  end
+
+  def test_a_call_left_for_a_later_script_keeps_its_arguments
+    [1, 2].each do |n|
+      deferred = wrapped("var result; globalThis.later = function () {", "return result; };", { "n" => n })
+
+      assert_nil @context.eval(deferred)
+      assert_equal ["renderToString", "A", { "n" => n }], @context.eval("later()")
+    end
+  end
+
+  def test_a_call_a_promise_makes_after_a_nested_render_keeps_its_arguments
+    before = "var result; Promise.resolve().then(function () { globalThis.got = (function () {"
+    source = wrapped(before, "return result; })(); });", { "n" => 1 })
+
+    assert_equal 0, @context.eval("rubyEval(#{source.to_json}); 0")
+    assert_equal ["renderToString", "A", { "n" => 1 }], @context.eval("got")
+  end
+
+  def test_a_tagged_template_is_new_for_each_source
+    before = "function tag(strings) { return strings }\nvar strings = tag`x`;"
+    after = "if (!globalThis.kept) globalThis.kept = strings;\nresult = globalThis.kept === strings;"
+    results = [1, 2].map { |n| @context.eval(wrapped(before, after, { "n" => n })) }
+
+    assert_equal [true, false], results
+  end
+
+  def test_the_wrapper_called_again_through_arguments_keeps_its_arguments
+    ["globalThis.again = arguments.callee;", "globalThis.again = eval('argu' + 'ments').callee;"].each do |before|
+      1.upto(2) do |n|
+        expected = ["renderToString", "A", { "n" => n }]
+
+        assert_equal expected, @context.eval(wrapped(before, "", { "n" => n }))
+        assert_equal expected, @context.eval("again()")
+      end
+    end
   end
 end
 
@@ -322,5 +437,32 @@ class FastCallsProcessTest < Minitest::Test
                  "--> starting at object with constructor 'Object'\n    " \
                  "--- property 'o' closes the circle\n",
                  out
+  end
+end
+
+class FastCallsDeviationTest < Minitest::Test
+  include RubyProcess
+  include FastCallsFixtures
+
+  # Deviation behavior:fast-calls@ruby: mini_racer 0.22.1 compiles every eval,
+  # so CallSite#getScriptHash of its bottom frame hashes the source, and a
+  # render's wrapper, reached through `caller`, holds the literals it passes.
+  # A first fast call runs a template instead, which only reflection shows.
+  def test_reflection_shows_a_first_fast_call_runs_a_template
+    render = "(#{render("Hello", '{"n":1}', before: "", after: "")})"
+    out, err, status = run_ruby(<<~RUBY, env: { "MINI_RACER_RS_FAST_CALLS" => nil })
+      require "digest"
+      require "json"
+      require "mini_racer"
+      context = MiniRacer::Context.new
+      context.eval(#{REFLECTING.dump})
+      call = "(hash.apply(this, [1]))"
+      hash, _, wrapper = context.eval(#{render.dump})
+      puts JSON.generate([context.eval(call) == Digest::SHA256.hexdigest(call),
+                          hash == Digest::SHA256.hexdigest(#{render.dump}), wrapper.include?("'renderToString'")])
+    RUBY
+
+    assert_predicate status, :success?, err
+    assert_equal [false, false, false], JSON.parse(out)
   end
 end
