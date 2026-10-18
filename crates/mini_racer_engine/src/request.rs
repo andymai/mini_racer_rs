@@ -11,8 +11,8 @@ const MAX_ELEMENTS: usize = 1 << 24;
 // V8 throws for a BigInt past its limit, which this stays well short of.
 const MAX_BIGINT_WORDS: usize = 1 << 20;
 // V8's deserializer builds objects faster than the runner, which defines each
-// property through the API, unless they hold two properties or fewer each. A
-// call with a few properties in all still gains, as it saves the
+// property through the API, unless they hold two properties or fewer on
+// average. A call with a few properties in all still gains, as it saves the
 // deserializer's setup.
 const FEW_PROPERTIES: usize = 4;
 const PROPERTIES_PER_OBJECT: usize = 2;
