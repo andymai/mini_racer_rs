@@ -172,7 +172,6 @@ impl Pairs {
         }
     }
 
-    // Puts the innermost hash's waiting pairs in and ends its run.
     fn close(&mut self, ruby: &Ruby, hash: RHash) -> Result<(), Error> {
         let Some(at) = self.innermost else {
             return Err(errors::internal(ruby, "decode pairs without a hash"));
@@ -191,7 +190,6 @@ impl Pairs {
         Ok(())
     }
 
-    // Puts every open hash's waiting pairs in, innermost first.
     fn put_all(&mut self, ruby: &Ruby) -> Result<(), Error> {
         let mut end = self.len;
         let mut run = self.innermost;
