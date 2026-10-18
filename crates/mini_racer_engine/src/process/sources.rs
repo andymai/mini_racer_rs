@@ -63,8 +63,9 @@ impl Units {
 
 /// One copy of each large script's source, outside every V8 heap.
 ///
-/// A script is kept once the process has seen it before, and every context
-/// compiling it then reads the kept copy in place of one on its own heap.
+/// A script is kept by the first context to compile it, and every context
+/// compiling it, that one included, reads the kept copy in place of one on
+/// its own heap.
 /// Each string V8 makes from one holds a reference to it, which V8 hands back
 /// when the string dies (`sys::external_string`). A source is dropped only
 /// when no string holds one, so V8 never releases the last reference itself.
@@ -291,16 +292,14 @@ mod tests {
     use crate::control::JsText;
     use crate::process::code_cache::{CodeCache, Key};
 
-    // A script's key once the code cache has seen it twice.
+    // A script's key, as its first sighting in a context sharing it has it.
     fn key(text: &JsText) -> Key {
         let cache: &'static CodeCache = Box::leak(Box::default());
-        let name = JsText::from("bundle.js");
-        let _ = cache.plan(&name, text, None);
         cache
-            .plan(&name, text, None)
+            .plan(&JsText::from("bundle.js"), text, None, true)
             .key()
             .cloned()
-            .unwrap_or_else(|| panic!("a second sighting has a key"))
+            .unwrap_or_else(|| panic!("a shared first sighting has a key"))
     }
 
     fn script(seed: u8) -> JsText {

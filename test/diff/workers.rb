@@ -90,6 +90,11 @@ module DiffWorkers
     ensure
       @io.close unless @io.closed?
     end
+
+    def restart
+      stop
+      start
+    end
   end
 
   module_function
@@ -118,8 +123,11 @@ module DiffWorkers
     defined?(Bundler) ? Bundler.with_unbundled_env(&) : yield
   end
 
-  # Every side runs a case at the same time; the outcomes are read in turn.
+  # Every side runs a case at the same time; the outcomes are read in turn. A
+  # case marked fresh runs first in new processes, so the code cache and the
+  # shared sources start empty for it.
   def run_case(workers, kase)
+    workers.each(&:restart) if kase["fresh"]
     workers.each { |worker| worker.submit(kase) }
     workers.map(&:collect)
   end

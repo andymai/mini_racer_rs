@@ -274,7 +274,8 @@ memory_summary = {}
 if options[:memory]
   puts
   puts "Memory, resident set size after collections and a pause, medians. Per-context rows leave out a first " \
-       "context, which pays for starting V8."
+       "context, which pays for starting V8 and, in mini_racer_rs, makes the one copy of a large source the others " \
+       "read."
   puts
   puts "| Scenario | mini_racer | mini_racer_rs | Ratio | Note |"
   puts "|---|---|---|---|---|"
