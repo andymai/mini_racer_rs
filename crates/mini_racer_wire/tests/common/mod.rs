@@ -221,6 +221,63 @@ impl Visitor for Runs {
     }
 }
 
+/// A `Tree` that also notes each key the decoder hands to `key`, with the
+/// kind of container it belongs to.
+#[derive(Default)]
+pub struct Keys {
+    pub tree: Tree,
+    pub keys: Vec<(Kind, String)>,
+}
+
+impl Visitor for Keys {
+    type Value = usize;
+    type Frame = Frame;
+    type Error = String;
+
+    fn scalar(&mut self, scalar: Scalar<'_>) -> Result<usize, String> {
+        self.tree.scalar(scalar)
+    }
+
+    fn begin(&mut self, container: Container) -> Result<Begun<Frame, usize>, String> {
+        self.tree.begin(container)
+    }
+
+    fn push(&mut self, frame: &mut Frame, value: usize) -> Result<(), String> {
+        self.tree.push(frame, value)
+    }
+
+    fn insert(&mut self, frame: &mut Frame, key: usize, value: usize) -> Result<(), String> {
+        self.tree.insert(frame, key, value)
+    }
+
+    fn end(&mut self, frame: Frame) -> Result<usize, String> {
+        self.tree.end(frame)
+    }
+
+    fn key(&mut self, frame: &Frame, text: Text<'_>) -> Result<usize, String> {
+        self.keys.push((frame.kind, text_of(text)));
+        self.tree.scalar(Scalar::Text(text))
+    }
+
+    fn register(&mut self, id: u32, value: usize) -> Result<(), String> {
+        self.tree.register(id, value)
+    }
+
+    fn back_ref(&mut self, id: u32) -> Result<usize, String> {
+        self.tree.back_ref(id)
+    }
+}
+
+/// `render`, and the keys the decoder handed to `key` on the way.
+pub fn render_keys(bytes: &[u8], limits: Limits) -> (String, Vec<(Kind, String)>) {
+    let mut keys = Keys::default();
+    let rendered = match decode_value(bytes, limits, &mut keys) {
+        Ok(root) => keys.tree.render(root),
+        Err(error) => format!("error: {error}"),
+    };
+    (rendered, keys.keys)
+}
+
 /// `render`, and the runs the decoder handed over on the way.
 pub fn render_runs(bytes: &[u8], limits: Limits) -> (String, Vec<(&'static str, usize)>) {
     let mut runs = Runs::default();

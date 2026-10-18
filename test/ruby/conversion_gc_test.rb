@@ -105,6 +105,22 @@ class ConversionGcTest < Minitest::Test
     assert value["texts"].keys.all?(&:frozen?)
   end
 
+  # Keys of objects in arrays are interned once and kept for the rest of the
+  # decode, so every later row takes its keys from what the decoder holds.
+  def test_keys_held_across_rows_survive_collections_and_moves
+    rows = stressed do
+      @context.eval(<<~JS)
+        Array.from({length: 40}, (_, i) => Object.fromEntries(
+          Array.from({length: 70}, (_, j) => ["key" + j, i]).concat([["caf\\u00e9", i], ["\\u6771", i]])
+        ))
+      JS
+    end
+    names = Array.new(70) { |j| "key#{j}" } + %w[café 東]
+
+    rows.each_with_index { |row, i| assert_equal names.to_h { |name| [name, i] }, row }
+    assert(rows.flat_map(&:keys).all? { |key| key.frozen? && key.equal?(-key) })
+  end
+
   # Catches an unpinned value only in an optimized build, since a debug build's
   # stale stack copies pin values too; CI builds release. Skipped on macOS,
   # where Ruby 3.4's verification raises a malloc overflow after a few heap

@@ -1,6 +1,6 @@
 mod common;
 
-use common::{Node, Tree, render, render_runs};
+use common::{Kind, Node, Tree, render, render_keys, render_runs};
 use mini_racer_wire::{Limits, Writer, decode_value, decode_values};
 
 fn body(body: &[u8]) -> String {
@@ -479,6 +479,45 @@ fn sparse_runs_take_int32_keys_with_number_values() {
             ("number entries", 2)
         ]
     );
+}
+
+#[test]
+fn string_keys_reach_key_with_their_container() {
+    let object =
+        b"o\"\x01aI\x02S\x01b;\"\x01cI\x04I\x06I\x08:\x04I\x02c\x02\x00\x01\x00c\x02A\x00T{\x04";
+    let (rendered, keys) = render_keys(&frame(object), Limits::default());
+    assert_eq!(
+        rendered,
+        "{\"a\": 1, \"b\": map{\"c\": 2, 3: 4}, 1: \"\u{100}\", \"A\": true}"
+    );
+    let named = |kind, key: &str| (kind, key.to_owned());
+    assert_eq!(
+        keys,
+        [
+            named(Kind::Object, "a"),
+            named(Kind::Object, "b"),
+            named(Kind::Map, "c"),
+            named(Kind::Object, "A"),
+        ]
+    );
+    let arrays = b"A\x01a\x01\"\x01yI\x02@\x01\x01\"\x01xI\x04$\x01\x01";
+    let (rendered, keys) = render_keys(&frame(arrays), Limits::default());
+    assert_eq!(rendered, "[sparse[\"y\": 1], \"x\": 2]");
+    assert_eq!(keys, [named(Kind::Sparse, "y"), named(Kind::Dense, "x")]);
+    let (rendered, keys) = render_keys(&frame(b"rmS\x01xsS\x01y."), Limits::default());
+    assert_eq!(rendered, "error{\"message\": \"x\", \"stack\": \"y\"}");
+    assert_eq!(keys, []);
+}
+
+#[test]
+fn a_key_past_the_depth_limit_fails_before_it_is_read() {
+    let shallow = Limits {
+        max_depth: 0,
+        ..Limits::default()
+    };
+    let (rendered, keys) = render_keys(&frame(b"o\"\x01aI\x02{\x01"), shallow);
+    assert_eq!(rendered, "error: too much recursion");
+    assert_eq!(keys, []);
 }
 
 #[test]

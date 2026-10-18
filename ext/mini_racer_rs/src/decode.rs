@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use magnus::value::ReprValue;
 use magnus::{
     Class, Error, Fixnum, IntoValue, Module, Object, RArray, RClass, RHash, RModule, RObject,
@@ -86,6 +88,50 @@ struct Pending {
     filled: usize,
 }
 
+// json 3.1's parser keeps the names of objects inside arrays, which repeat,
+// for the rest of a parse: at most this many, each at most CACHED_KEY_BYTES
+// long and starting with a letter.
+const CACHED_KEYS: usize = 63;
+const CACHED_KEY_BYTES: usize = 55;
+
+// Interned keys sorted by length, then bytes, so a repeated key skips Ruby's
+// fstring table.
+struct KeyCache {
+    keys: [Value; CACHED_KEYS],
+    len: usize,
+}
+
+impl KeyCache {
+    fn fetch(&mut self, ruby: &Ruby, bytes: &[u8]) -> Result<Value, Error> {
+        let held = self.keys.get(..self.len).unwrap_or_default();
+        let found = held.binary_search_by(|&key| {
+            RString::from_value(key).map_or(Ordering::Less, |key| {
+                rb_raw::with_string_bytes(ruby, key, |key| {
+                    key.len().cmp(&bytes.len()).then_with(|| key.cmp(bytes))
+                })
+            })
+        });
+        let at = match found {
+            Ok(at) => {
+                return held
+                    .get(at)
+                    .copied()
+                    .ok_or_else(|| errors::internal(ruby, "key cache"));
+            }
+            Err(at) => at,
+        };
+        let key = rb_raw::interned_utf8(ruby, bytes)?.as_value();
+        if self.len < CACHED_KEYS {
+            self.keys.copy_within(at..self.len, at.saturating_add(1));
+            if let Some(slot) = self.keys.get_mut(at) {
+                *slot = key;
+            }
+            self.len = self.len.saturating_add(1);
+        }
+        Ok(key)
+    }
+}
+
 // The visitor and its frames live on the native stack for the whole decode,
 // where Ruby's GC finds them (I3); `refs` holds every value V8 gave an id,
 // made at the first, so a result without one allocates none.
@@ -93,6 +139,9 @@ struct RubyVisitor<'r> {
     ruby: &'r Ruby,
     refs: Option<RArray>,
     pending: Pending,
+    keys: Option<KeyCache>,
+    // Arrays and sets open around the current value.
+    arrays: u32,
 }
 
 impl RubyVisitor<'_> {
@@ -200,6 +249,41 @@ impl RubyVisitor<'_> {
         })
     }
 
+    // The key `Hash#[]=` would store, made interned in the first place. One
+    // with a lone surrogate stays UTF-16LE, which the hash interns itself,
+    // and the function marker stays a JavaScriptFunction.
+    fn interned(&mut self, text: Text<'_>) -> Result<Value, Error> {
+        let ruby = self.ruby;
+        match text {
+            Text::Utf8(bytes) => self.cached(bytes),
+            Text::Latin1(bytes) if bytes.is_ascii() => self.cached(bytes),
+            Text::Latin1(bytes) => {
+                Ok(rb_raw::interned_utf8(ruby, text::latin1_to_utf8(bytes).as_bytes())?.as_value())
+            }
+            Text::Utf16Le(bytes) if marker::is_javascript_function(bytes) => self.string(text),
+            Text::Utf16Le(bytes) => match text::utf16le_to_utf8(bytes) {
+                Some(utf8) => Ok(rb_raw::interned_utf8(ruby, utf8.as_bytes())?.as_value()),
+                None => self.string(text),
+            },
+        }
+    }
+
+    fn cached(&mut self, bytes: &[u8]) -> Result<Value, Error> {
+        let ruby = self.ruby;
+        if self.arrays == 0
+            || bytes.len() > CACHED_KEY_BYTES
+            || !bytes.first().is_some_and(u8::is_ascii_alphabetic)
+        {
+            return Ok(rb_raw::interned_utf8(ruby, bytes)?.as_value());
+        }
+        self.keys
+            .get_or_insert_with(|| KeyCache {
+                keys: [ruby.qnil().as_value(); CACHED_KEYS],
+                len: 0,
+            })
+            .fetch(ruby, bytes)
+    }
+
     // mini_racer splits a millisecond time into seconds and microseconds,
     // truncating each, and lets Time normalize a negative remainder.
     #[expect(
@@ -297,7 +381,10 @@ impl Visitor for RubyVisitor<'_> {
             }),
         };
         let value = match &frame {
-            Frame::Array(array) | Frame::Sparse { array, .. } => array.as_value(),
+            Frame::Array(array) | Frame::Sparse { array, .. } => {
+                self.arrays = self.arrays.saturating_add(1);
+                array.as_value()
+            }
             Frame::Object(hash) | Frame::Map(hash) => hash.as_value(),
             Frame::Error(parts) => parts.error,
         };
@@ -353,9 +440,19 @@ impl Visitor for RubyVisitor<'_> {
     fn end(&mut self, frame: Frame) -> Result<Value, Error> {
         self.flush()?;
         match frame {
-            Frame::Array(array) | Frame::Sparse { array, .. } => Ok(array.as_value()),
+            Frame::Array(array) | Frame::Sparse { array, .. } => {
+                self.arrays = self.arrays.saturating_sub(1);
+                Ok(array.as_value())
+            }
             Frame::Object(hash) | Frame::Map(hash) => Ok(hash.as_value()),
             Frame::Error(parts) => self.script_error(parts),
+        }
+    }
+
+    fn key(&mut self, frame: &Frame, text: Text<'_>) -> Result<Value, Error> {
+        match frame {
+            Frame::Object(_) | Frame::Map(_) => self.interned(text),
+            Frame::Array(_) | Frame::Sparse { .. } | Frame::Error(_) => self.string(text),
         }
     }
 
@@ -429,6 +526,8 @@ pub fn value(ruby: &Ruby, bytes: &[u8]) -> Result<Value, Error> {
             values: [ruby.qnil().as_value(); BATCH],
             filled: 0,
         },
+        keys: None,
+        arrays: 0,
     };
     decode_value(bytes, RESULT_LIMITS, &mut visitor).map_err(|e| match e {
         DecodeError::Visitor(error) => error,

@@ -1,4 +1,4 @@
-use std::ffi::{c_int, c_void};
+use std::ffi::{c_int, c_long, c_void};
 
 use magnus::rb_sys::{AsRawId, AsRawValue, FromRawValue, protect};
 use magnus::value::{IntoId, LazyId, ReprValue};
@@ -237,6 +237,24 @@ pub fn hash_aset_pairs(_ruby: &Ruby, hash: RHash, pairs: &[[Value; 2]]) -> Resul
         raw
     })?;
     Ok(())
+}
+
+/// The interned UTF-8 String of `bytes`, the frozen String `Hash#[]=` would
+/// store as the key in place of a new one.
+pub fn interned_utf8(ruby: &Ruby, bytes: &[u8]) -> Result<RString, Error> {
+    let len = c_long::try_from(bytes.len()).unwrap_or(c_long::MAX);
+    // SAFETY: rb_utf8_encoding only reads Ruby's built-in UTF-8 encoding.
+    let utf8 = unsafe { rb_sys::rb_utf8_encoding() };
+    let raw = protect(|| {
+        // SAFETY: the `&Ruby` argument proves this thread holds the GVL,
+        // `bytes` holds `len` bytes and outlives the call, which copies them
+        // when it makes a String, and `protect` catches an allocation failure.
+        unsafe { rb_sys::rb_enc_interned_str(bytes.as_ptr().cast(), len, utf8) }
+    })?;
+    // SAFETY: `raw` is the live String rb_enc_interned_str returned.
+    let value = unsafe { Value::from_raw(raw) };
+    RString::from_value(value)
+        .ok_or_else(|| Error::new(ruby.exception_type_error(), "expected String"))
 }
 
 /// How Ruby's own type errors name `value`: nil, true and false by value,

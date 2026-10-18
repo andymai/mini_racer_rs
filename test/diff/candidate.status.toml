@@ -96,10 +96,22 @@ status = "same"
 [cases."curated-invalid-date"]
 status = "same"
 
+[cases."curated-keys-equal-to-values"]
+status = "same"
+
+[cases."curated-keys-in-each-encoding"]
+status = "same"
+
+[cases."curated-keys-past-the-key-cache"]
+status = "same"
+
 [cases."curated-large-array"]
 status = "same"
 
 [cases."curated-lone-surrogate-key"]
+status = "same"
+
+[cases."curated-map-string-keys"]
 status = "same"
 
 [cases."curated-map-with-object-keys"]
