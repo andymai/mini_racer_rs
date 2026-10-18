@@ -230,7 +230,7 @@ impl Drop for WorkerTask {
     }
 }
 
-/// The processors online, which V8 sizes a default platform's pool by.
+/// The processors online, which `rusty_v8` sizes a platform's default pool by.
 #[must_use]
 pub fn processors_online() -> usize {
     // SAFETY: sysconf only reads the system's configuration.

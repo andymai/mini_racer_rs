@@ -2,9 +2,9 @@
 
 require_relative "prelude"
 
-# `--single-threaded` still leaves V8's platform one worker thread, and its
-# scavenger still posts jobs to it, so a child that allocates enough to collect
-# garbage posts to a worker it does not have.
+# Under `--single-threaded` V8's scavenger still hands its jobs to a worker
+# thread, so a child that allocates enough to collect garbage needs a worker of
+# its own, and nothing the parent's worker was waiting on.
 MiniRacer::Platform.set_flags!(:single_threaded)
 
 WORK = <<~JS

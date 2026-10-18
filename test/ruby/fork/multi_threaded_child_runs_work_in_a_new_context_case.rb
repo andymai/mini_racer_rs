@@ -4,8 +4,9 @@ require_relative "prelude"
 
 # With V8's default multi-threaded platform, a parent that has run JavaScript
 # and gone quiet forks, and the child's new context allocates enough for V8 to
-# hand garbage collection work to its worker threads, which the child has none
-# of.
+# hand garbage collection work to worker threads. The parent's workers do not
+# survive the fork, so the child needs workers of its own, and nothing the
+# parent's workers were waiting on.
 WORK = <<~JS
   function work(n) {
     const rows = [];

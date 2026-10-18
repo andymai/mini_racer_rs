@@ -120,6 +120,9 @@ CASES = [
     ("export missing from the allowlist", "check-exports.sh fake.so", "allowlist", [
         cc("fake.so", "void Init_mini_racer_rs(void) {}\nvoid planted_export(void) {}\n"),
     ]),
+    ("platform vtable of another size", "check-exports.sh fake.so", "vtable", [
+        cc("fake.so", "void Init_mini_racer_rs(void) {}\nconst void *planted_vtable[23] __asm__(\"_ZTV14CustomPlatform\") = {0};\n"),
+    ]),
     ("mangled symbol exported", "check-exports.sh fake.so", "mangled", [
         cc("fake.so", "void Init_mini_racer_rs(void) {}\nvoid planted(void) __asm__(\"_ZN7planted4testEv\");\nvoid planted(void) {}\n"),
     ]),
