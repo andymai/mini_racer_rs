@@ -136,11 +136,14 @@ fn render(source: &[u8]) -> Option<Shape<'_>> {
     })
 }
 
-/// Whether a render's `code` can neither run its call again away from its
-/// values nor share what V8 keeps per script between renders: it holds no
-/// `arguments` other than as a property name (its `callee` is the wrapper),
-/// no `eval` or `caller`, no escape that could spell one of them, and no
-/// template literal, as V8 keeps a tagged one's strings per script.
+/// Whether a render's `code` names nothing that reaches the wrapper or what V8
+/// keeps per script: no template literal (V8 keeps a tagged one's strings per
+/// script), no `eval` or `caller`, no escape that could spell one of them, and
+/// `arguments` only as a property after a `.` on the same line. With the code
+/// also compiling alone as a function body, the call line runs once,
+/// synchronously, at the wrapper's top level, short of reflection: names built
+/// at run time still reach `caller`, `arguments.callee` or
+/// `CallSite#getFunction`.
 pub fn leaves_the_call_alone(code: &[u8]) -> bool {
     !(code.contains(&b'`')
         || find(code, b"\\u").is_some()
@@ -151,7 +154,8 @@ pub fn leaves_the_call_alone(code: &[u8]) -> bool {
 
 // Whether `code` holds `name` as a whole word, unless `as_property` lets one
 // read as a property after a single `.` pass. A byte past ASCII never joins a
-// word, as V8 takes some of those for spaces.
+// word, as V8 takes some of those for spaces. The `.` must be on the same
+// line: one that ends a line comment or a number is no property access.
 fn names(code: &[u8], name: &[u8], as_property: bool) -> bool {
     let joins = |byte: &u8| byte.is_ascii_alphanumeric() || *byte == b'_' || *byte == b'$';
     let mut from = 0;
@@ -163,7 +167,7 @@ fn names(code: &[u8], name: &[u8], as_property: bool) -> bool {
             continue;
         }
         let mut before = code.get(..at).unwrap_or_default().iter().rev();
-        let property = before.find(|byte| !byte.is_ascii_whitespace()) == Some(&b'.')
+        let property = before.find(|byte| !matches!(byte, b' ' | b'\t' | b'\x0C')) == Some(&b'.')
             && before.next() != Some(&b'.');
         if !(as_property && property) {
             return true;
