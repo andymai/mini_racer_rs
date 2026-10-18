@@ -3,14 +3,14 @@ pub mod fork;
 pub mod platform;
 pub(crate) mod tasks;
 pub(crate) mod watchdog;
+pub(crate) mod workers;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Once, OnceLock};
 
 static INIT: Once = Once::new();
-// With the fork epoch it began in: its worker threads run only in that
-// process, never in a forked child.
-static PLATFORM: OnceLock<(v8::SharedRef<v8::Platform>, u64)> = OnceLock::new();
+// The platform points into it for the life of the process.
+static PLATFORM_VTABLE: OnceLock<Box<crate::sys::PlatformVtable>> = OnceLock::new();
 static NEXT_THREAD: AtomicU64 = AtomicU64::new(1);
 
 thread_local! {
@@ -29,31 +29,20 @@ pub fn ensure_initialized() {
         for flag in platform::freeze() {
             v8::V8::set_flags_from_string(&flag);
         }
+        workers::configure();
         // Unprotected: on PKU-capable CPUs the protected platform requires every
         // V8 thread to descend from the initializing thread, which Ruby threads
         // and per-context runners do not.
-        // rusty_v8 runs at least one worker, and under `--single-threaded`
-        // the scavenger still hands its job to it, one participant at a
-        // time, so one is enough; a fork has to hold it.
-        let workers = match platform::mode() {
-            platform::Mode::SingleThreaded => 1,
-            platform::Mode::MultiThreaded => 0,
-        };
-        let platform =
-            v8::new_custom_platform(workers, false, true, tasks::Foreground).make_shared();
-        let _ = PLATFORM.set((platform.clone(), fork::epoch()));
-        v8::V8::initialize_platform(platform);
+        // Worker tasks go to `workers`, whose threads each process starts for
+        // itself, as threads do not survive a fork. V8's own pool keeps the one
+        // thread rusty_v8 cannot go below, idle for good.
+        let mut platform = v8::new_custom_platform(1, false, true, tasks::Foreground);
+        let vtable = PLATFORM_VTABLE.get_or_init(|| crate::sys::worker_vtable(&platform));
+        crate::sys::use_vtable(&mut platform, vtable);
+        v8::V8::initialize_platform(platform.make_shared());
         v8::V8::initialize();
         crate::sys::register_fork_handlers();
     });
-}
-
-/// V8's platform, if this process runs its worker threads.
-pub(crate) fn platform_with_workers() -> Option<&'static v8::SharedRef<v8::Platform>> {
-    PLATFORM
-        .get()
-        .filter(|(_, began)| *began == fork::epoch())
-        .map(|(platform, _)| platform)
 }
 
 /// Tasks V8 posted for an isolate no runner had registered, dropped unrun.

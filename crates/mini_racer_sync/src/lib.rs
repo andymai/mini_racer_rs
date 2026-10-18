@@ -7,6 +7,7 @@ mod parker;
 pub mod primitives;
 mod tasks;
 mod termination;
+mod workers;
 
 pub use channel::{Channel, ChannelError, Nesting, Notifier, Protocol, Side, ToRuby, ToV8};
 pub use fork::{ForkGate, Phase, RunnerPhase};
@@ -16,3 +17,4 @@ pub use termination::{
     DispatchId, DispatchKind, Halt, Inherited, Interrupt, RequestMark, TermCell, TermError,
     TerminationCause, Terminator,
 };
+pub use workers::WorkerQueue;

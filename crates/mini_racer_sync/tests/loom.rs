@@ -9,7 +9,7 @@ use mini_racer_sync::primitives::{Condvar, Mutex};
 use mini_racer_sync::{
     Channel, ChannelError, DispatchKind, ForkGate, Halt, Interrupt, Nesting, Notifier, Phase,
     Protocol, RunnerPhase, Side, TaskQueue, TermCell, TerminationCause, Terminator, ToRuby, ToV8,
-    lock, wait,
+    WorkerQueue, lock, wait,
 };
 
 struct Numbers;
@@ -646,5 +646,58 @@ fn a_timeout_while_serializing_leaves_the_result_and_the_next_dispatch() {
 
         assert!(!isolate.terminating());
         assert_eq!(cell.end(second), None);
+    });
+}
+
+// Model 18: a fork's pause returns only once the worker task that started
+// before it has ended, and no task starts again until the resume.
+#[test]
+fn a_paused_worker_queue_runs_no_task_until_resumed() {
+    bounded(3, || {
+        let queue = Arc::new(WorkerQueue::default());
+        let running = Arc::new(AtomicBool::new(false));
+        queue.post(1_u8, Duration::ZERO);
+        let worker = {
+            let (queue, running) = (Arc::clone(&queue), Arc::clone(&running));
+            thread::spawn(move || {
+                for _ in 0..2 {
+                    queue.run_next(|_| {
+                        running.store(true, Ordering::SeqCst);
+                        thread::yield_now();
+                        running.store(false, Ordering::SeqCst);
+                    });
+                }
+            })
+        };
+
+        assert!(queue.pause(Duration::from_secs(60)));
+        assert!(!running.load(Ordering::SeqCst));
+        queue.post(2, Duration::ZERO);
+        thread::yield_now();
+        assert!(!running.load(Ordering::SeqCst));
+        queue.resume();
+        worker.join().expect("worker thread");
+    });
+}
+
+// Model 19: a task posted during a pause, while the worker sleeps or is on
+// its way to sleep, runs once the pause ends.
+#[test]
+fn a_task_posted_during_a_pause_runs_after_the_resume() {
+    loom::model(|| {
+        let queue = Arc::new(WorkerQueue::default());
+        let worker = {
+            let queue = Arc::clone(&queue);
+            thread::spawn(move || {
+                let mut ran = None;
+                queue.run_next(|task| ran = Some(task));
+                ran
+            })
+        };
+
+        assert!(queue.pause(Duration::from_secs(60)));
+        queue.post(7_u8, Duration::ZERO);
+        queue.resume();
+        assert_eq!(worker.join().expect("worker thread"), Some(7));
     });
 }
