@@ -4,7 +4,7 @@
 
 | Engine | Done | Planned | Deviation |
 |---|---|---|---|
-| CRuby | 54 | 0 | 25 |
+| CRuby | 54 | 0 | 26 |
 | TruffleRuby | 58 | 0 | 0 |
 
 ## Surface
@@ -179,6 +179,12 @@ Approved 2026-10-16.
 mini_racer_rs supports glibc Linux on x86_64 and aarch64, plus macOS on arm64 and x86_64. Installation stops on musl-based Linux, including Alpine, and on Windows, with a message naming the supported platforms.
 
 Approved 2026-10-16.
+
+### `behavior:shared-source-heap-stats@ruby`
+
+`Context#heap_stats` can report large source text differently from mini_racer 0.22.1. When a context evaluates a source of 1 MiB or more that the process has evaluated before under the same file name and startup snapshot, mini_racer_rs gives V8 one copy shared by every such context and held outside V8's heap. It reports that source in `:external_memory` and omits it from `:used_heap_size`. V8 counts the shared source by its length in characters, so two-byte text reports half its bytes. mini_racer 0.22.1 reports `:external_memory` as 0 and counts each context's own copy in `:used_heap_size`. JavaScript sees the same source text in both gems. Contexts using `max_memory:` and sources that are not valid UTF-8 retain individual copies. Setting `MINI_RACER_RS_CODE_CACHE=off` before creating the first context disables sharing and makes `heap_stats` count every source as mini_racer does.
+
+Approved 2026-10-18.
 
 ### `behavior:snapshot-filter-context@ruby`
 
