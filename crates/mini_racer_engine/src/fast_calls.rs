@@ -142,9 +142,9 @@ fn render(source: &[u8]) -> Option<Shape<'_>> {
 /// script), no `eval` or `caller`, no escape that could spell one of them, and
 /// `arguments` only as a property after a `.` on the same line. With the code
 /// also compiling alone as a function body, the call line runs once,
-/// synchronously, at the wrapper's top level, short of reflection: names built
-/// at run time still reach `caller`, `arguments.callee` or
-/// `CallSite#getFunction`.
+/// synchronously, at the wrapper's top level, short of reflection:
+/// `CallSite#getFunction` through `Error.prepareStackTrace`, or `caller` and
+/// `arguments.callee` through names built at run time.
 pub fn leaves_the_call_alone(code: &[u8]) -> bool {
     !(code.contains(&b'`')
         || find(code, b"\\u").is_some()
@@ -571,6 +571,8 @@ mod tests {
             "// x.\narguments.callee();",
             "x = 1.\narguments;",
             "x.\r\narguments;",
+            "x.\rarguments;",
+            "x.\u{2028}arguments;",
         ] {
             assert!(!leaves_the_call_alone(code.as_bytes()), "{code}");
         }

@@ -517,7 +517,7 @@ class FastCallsDeviationTest < Minitest::Test
     kept = %w[byCaller byFunction]
     again = kept.map { |name| context.eval("rerun('" + name + "')") }
     during = kept.map { |name| context.eval("(rerun.apply(this, [\\"" + name + "\\"]))") }
-    puts JSON.generate([reflected, again, during])
+    puts JSON.generate([reflected, again, during, context.heap_snapshot.include?("__mini_racer_rs_")])
   RUBY
 
   def reflected(switch)
@@ -534,15 +534,16 @@ class FastCallsDeviationTest < Minitest::Test
   # literals it passes and passes them again when called again. A fast call
   # runs a template instead, first or on a hit, which only reflection shows:
   # called again, the wrapper passes nothing outside a fast call and that
-  # call's values during one.
+  # call's values during one, and a heap snapshot shows the reader's const.
   def test_reflection_shows_a_fast_call_runs_a_template
     args = ->(n) { ["renderToString", "Hello", { "n" => n }] }
     fast = [
       [false, [false, 260, false, args[1]], [false, 260, false, args[2]], false],
       [[nil, nil, nil]] * 2,
       [[["byCaller"], nil, nil], [["byFunction"], nil, nil]],
+      true,
     ]
-    normal = [[true, [true, 185, true, args[1]], [true, 185, true, args[2]], true], [args[2]] * 2, [args[2]] * 2]
+    normal = [[true, [true, 185, true, args[1]], [true, 185, true, args[2]], true], [args[2]] * 2, [args[2]] * 2, false]
 
     assert_equal fast, reflected(nil)
     assert_equal normal, reflected("off")

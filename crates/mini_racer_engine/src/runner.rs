@@ -859,7 +859,8 @@ fn fast_call<'s>(
     let Some(text) = text.filter(|text| text.len() <= LARGE_SOURCE) else {
         return declined(tc);
     };
-    // Before parsing anything, so a template refused once costs nothing more.
+    // Before parsing anything, so a render whose template is refused is never
+    // JSON-parsed.
     let Some(script) = template(tc, runtime, text, &shape, filename) else {
         return declined(tc);
     };
