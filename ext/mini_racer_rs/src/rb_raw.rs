@@ -238,8 +238,9 @@ pub fn call_with_array(ruby: &Ruby, receiver: Value, args: RArray) -> Result<Val
 }
 
 /// Stores each key and value as `Hash#[]=` would, under one `rb_protect` for
-/// the whole slice. `pairs` must be where the GC sees them, on the native
-/// stack: storing a key can start a compacting collection.
+/// the whole slice. `pairs` must be where the GC sees and pins them, on the
+/// native stack or in a `gc_root::Spill`: storing a key can start a
+/// compacting collection.
 // rb_hash_bulk_insert would take the slice in one call, but it rehashes the
 // whole table whenever the hash already has entries.
 pub fn hash_aset_pairs(_ruby: &Ruby, hash: RHash, pairs: &[[Value; 2]]) -> Result<(), Error> {
