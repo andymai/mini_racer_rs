@@ -66,6 +66,12 @@ result = begin
   when "babel_contexts"
     babel = bundle("babel")
     per_live_context(count[20]) { loaded_context(babel) }
+  when "babel_snapshot_contexts"
+    babel = File.read(File.join(ROOT, "vendor", "mini_racer", "benchmark", "babel", "helper_files", "babel.js"))
+    snapshot = MiniRacer::Snapshot.new(babel)
+    per_live_context(count[20]) do
+      MiniRacer::Context.new(snapshot: snapshot).tap { |context| context.eval("typeof babel.transform") }
+    end
   when "mui_contexts"
     mui = bundle("mui")
     per_live_context(count[20]) { loaded_context(mui) }
