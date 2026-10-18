@@ -8,6 +8,7 @@ use crate::process::code_cache::Key;
 
 const MAX_SOURCES: usize = 8;
 const MAX_BYTES: usize = 256 << 20;
+const MAX_REFUSED: usize = 8;
 
 /// A large script's source as V8 stores a string of it: a byte a unit when
 /// every unit fits Latin-1, two otherwise. Never changed once made.
@@ -67,13 +68,29 @@ impl Units {
 /// Each string V8 makes from one holds a reference to it, which V8 hands back
 /// when the string dies (`sys::external_string`). A source is dropped only
 /// when no string holds one, so V8 never releases the last reference itself.
-#[derive(Default)]
 pub struct Sources {
-    // Most recently used last.
-    kept: Mutex<Vec<Kept>>,
+    list: Mutex<List>,
+    // How many sources, and how many bytes of them, may be kept and read.
+    bounds: (usize, usize),
     made: AtomicU64,
     reads: AtomicU64,
     conversions: AtomicU64,
+}
+
+impl Default for Sources {
+    fn default() -> Self {
+        Self::bounded(MAX_SOURCES, MAX_BYTES)
+    }
+}
+
+#[derive(Default)]
+struct List {
+    // Most recently used last.
+    kept: Vec<Kept>,
+    // What each source converted and left unkept takes, too much for the room
+    // left or, as invalid UTF-8, unbounded, so it is converted again only
+    // once there is room for it.
+    refused: Vec<(Key, usize)>,
 }
 
 struct Kept {
@@ -90,61 +107,119 @@ impl Kept {
     }
 }
 
+impl List {
+    fn find(&mut self, key: &Key) -> Option<Units> {
+        let at = self.kept.iter().position(|kept| kept.key == *key)?;
+        let found = self.kept.remove(at);
+        let units = found.units.clone();
+        self.kept.push(found);
+        Some(units)
+    }
+
+    // Whether `bytes` more fit beside what strings still read, which nothing
+    // can drop.
+    fn room(&self, bytes: usize, (sources, most): (usize, usize)) -> bool {
+        let (read, read_bytes) = self
+            .kept
+            .iter()
+            .filter(|kept| !kept.unread())
+            .fold((0, 0), |(count, total), kept| {
+                (count + 1, total + kept.units.bytes())
+            });
+        read < sources && read_bytes.saturating_add(bytes) <= most
+    }
+
+    fn refuse(&mut self, key: &Key, bytes: usize) {
+        self.refused.retain(|(refused, _)| refused != key);
+        if self.refused.len() >= MAX_REFUSED {
+            self.refused.remove(0);
+        }
+        self.refused.push((key.clone(), bytes));
+    }
+
+    fn least_bytes(&self, key: &Key, text: &JsText) -> usize {
+        self.refused
+            .iter()
+            .find(|(refused, _)| refused == key)
+            .map_or_else(|| least_bytes(text), |&(_, bytes)| bytes)
+    }
+}
+
+// The fewest bytes `text` can take as units, so a source that cannot fit is
+// never converted: UTF-8 takes at least a byte for every two, as Latin-1
+// written in UTF-8 does.
+const fn least_bytes(text: &JsText) -> usize {
+    match text {
+        JsText::Latin1(bytes) => bytes.len(),
+        JsText::Utf8(bytes) => bytes.len().div_ceil(2),
+        JsText::Utf16(units) => units.len(),
+    }
+}
+
 impl Sources {
+    fn bounded(sources: usize, bytes: usize) -> Self {
+        Self {
+            list: Mutex::default(),
+            bounds: (sources, bytes),
+            made: AtomicU64::new(0),
+            reads: AtomicU64::new(0),
+            conversions: AtomicU64::new(0),
+        }
+    }
+
     /// The shared source of the script `text` under `key`, kept from the first
     /// context that asks for it. `None` leaves the context its own copy: the
     /// source is invalid UTF-8, or too large for what is kept and still read.
+    /// Only a source that may fit is converted, outside the lock.
     pub(crate) fn units(&self, key: &Key, text: &JsText) -> Option<Units> {
-        if let Some(units) = self.find(key) {
+        let mut list = lock(&self.list);
+        if let Some(units) = list.find(key) {
             return Some(units);
         }
-        self.conversions.fetch_add(1, Ordering::Relaxed);
-        let units = Units::of(text)?;
-        let mut kept = lock(&self.kept);
-        if let Some(at) = kept.iter().position(|kept| kept.key == *key) {
-            // Made meanwhile by a context loading the same script.
-            let found = kept.remove(at);
-            let shared = found.units.clone();
-            kept.push(found);
-            return Some(shared);
-        }
-        let (read, read_bytes) = kept
-            .iter()
-            .filter(|kept| !kept.unread())
-            .fold((0, 0), |(count, bytes), kept| {
-                (count + 1, bytes + kept.units.bytes())
-            });
-        if read >= MAX_SOURCES || read_bytes + units.bytes() > MAX_BYTES {
+        if !list.room(list.least_bytes(key, text), self.bounds) {
             return None;
         }
+        drop(list);
+        self.conversions.fetch_add(1, Ordering::Relaxed);
+        let units = Units::of(text);
+        let mut list = lock(&self.list);
+        // Made meanwhile by a context loading the same script.
+        if let Some(found) = list.find(key) {
+            return Some(found);
+        }
+        let bytes = units.as_ref().map_or(usize::MAX, Units::bytes);
+        if !list.room(bytes, self.bounds) {
+            list.refuse(key, bytes);
+            drop(list);
+            return None;
+        }
+        let units = units?;
+        list.refused.retain(|(refused, _)| refused != key);
+        let (sources, most) = self.bounds;
         let mut dropped = Vec::new();
-        while kept.len() >= MAX_SOURCES
-            || kept.iter().map(|kept| kept.units.bytes()).sum::<usize>() + units.bytes() > MAX_BYTES
+        while list.kept.len() >= sources
+            || list
+                .kept
+                .iter()
+                .map(|kept| kept.units.bytes())
+                .sum::<usize>()
+                + bytes
+                > most
         {
-            let Some(at) = kept.iter().position(Kept::unread) else {
+            let Some(at) = list.kept.iter().position(Kept::unread) else {
                 break;
             };
-            dropped.push(kept.remove(at));
+            dropped.push(list.kept.remove(at));
         }
-        kept.push(Kept {
+        list.kept.push(Kept {
             key: key.clone(),
             units: units.clone(),
             held: 1,
         });
-        drop(kept);
+        drop(list);
         // Freed once the lock is released, as a large source takes a while.
         drop(dropped);
         self.made.fetch_add(1, Ordering::Relaxed);
-        Some(units)
-    }
-
-    fn find(&self, key: &Key) -> Option<Units> {
-        let mut kept = lock(&self.kept);
-        let at = kept.iter().position(|kept| kept.key == *key)?;
-        let found = kept.remove(at);
-        let units = found.units.clone();
-        kept.push(found);
-        drop(kept);
         Some(units)
     }
 
@@ -156,24 +231,25 @@ impl Sources {
     /// parent held them at the fork. The parent's list keeps its references
     /// in the child, so the child frees none of these.
     pub(crate) fn inherited(&self) -> Self {
-        let kept = self
-            .kept
+        let list = self
+            .list
             .try_lock()
-            .map(|kept| {
-                kept.iter()
+            .map(|list| List {
+                kept: list
+                    .kept
+                    .iter()
                     .map(|kept| Kept {
                         key: kept.key.clone(),
                         units: kept.units.clone(),
                         held: kept.held + 1,
                     })
-                    .collect()
+                    .collect(),
+                refused: list.refused.clone(),
             })
             .unwrap_or_default();
         Self {
-            kept: Mutex::new(kept),
-            made: AtomicU64::new(0),
-            reads: AtomicU64::new(0),
-            conversions: AtomicU64::new(0),
+            list: Mutex::new(list),
+            ..Self::bounded(self.bounds.0, self.bounds.1)
         }
     }
 
@@ -198,7 +274,8 @@ impl Sources {
     /// Strings alive now that read a kept source.
     #[must_use]
     pub fn reading(&self) -> usize {
-        lock(&self.kept)
+        lock(&self.list)
+            .kept
             .iter()
             .map(|kept| kept.units.references().saturating_sub(kept.held))
             .sum()
@@ -356,6 +433,43 @@ mod tests {
         assert_eq!(sources.conversions(), converted + 1);
     }
 
+    // Under a 5 MiB bound with 2 MiB still read: 2 MiB more of Latin-1 fits,
+    // and 2 MiB of UTF-8 seems to, until one astral character makes it 4.
+    #[test]
+    fn a_source_is_converted_only_while_it_may_fit() {
+        let sources = Sources::bounded(MAX_SOURCES, 5 << 20);
+        let read = script(50);
+        let still_read = sources.units(&key(&read), &read);
+        assert!(still_read.is_some());
+        let too_large = JsText::Latin1(vec![51; 4 << 20]);
+        assert!(sources.units(&key(&too_large), &too_large).is_none());
+        assert_eq!(sources.conversions(), 1);
+        let mut astral = vec![b'a'; 2 << 20];
+        astral.extend_from_slice("\u{1F600}".as_bytes());
+        let astral = JsText::Utf8(astral);
+        let astral_key = key(&astral);
+        for _ in 0..3 {
+            assert!(sources.units(&astral_key, &astral).is_none());
+        }
+        assert_eq!(sources.conversions(), 2);
+        drop(still_read);
+        assert!(two_byte(sources.units(&astral_key, &astral)).len() > 2 << 20);
+        assert_eq!((sources.conversions(), sources.made()), (3, 2));
+    }
+
+    #[test]
+    fn invalid_utf8_is_tried_once() {
+        let sources = Sources::default();
+        let mut invalid = vec![b'a'; 2 << 20];
+        invalid.push(0xFF);
+        let invalid = JsText::Utf8(invalid);
+        let invalid_key = key(&invalid);
+        for _ in 0..3 {
+            assert!(sources.units(&invalid_key, &invalid).is_none());
+        }
+        assert_eq!((sources.conversions(), sources.made()), (1, 0));
+    }
+
     #[test]
     fn a_child_reads_its_parents_copy_and_never_frees_it() {
         let parent: &'static Sources = Box::leak(Box::default());
@@ -393,7 +507,7 @@ mod tests {
         let text = script(3);
         let key = key(&text);
         let shared = one_byte(parent.units(&key, &text));
-        let held = parent.kept.lock();
+        let held = parent.list.lock();
         let child = parent.inherited();
         drop(held);
         assert!(!Arc::ptr_eq(&shared, &one_byte(child.units(&key, &text))));
