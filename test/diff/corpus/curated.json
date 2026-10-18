@@ -437,5 +437,106 @@
         ]
       }
     ]
+  },
+  {
+    "id": "curated-execjs-call-shape",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "function add(a, b) { return a + b }\nfunction outer(x) { throw new Error(\"boom \" + JSON.stringify(x)) }\nfunction keys(o) { return [Object.keys(o), Object.getPrototypeOf(o) === Object.prototype] }\nfunction receiver() { return this === globalThis }\nvar notfn = 1;\nvar ReactRailsUJS = {\n  serverRender: function (fn, name, props) {\n    if (name === \"Throws\") throw new TypeError(\"bad \" + props.n);\n    if (name === \"Logs\") console.log(\"hi\", props.n);\n    return \"<\" + fn + \":\" + name + \">\" + JSON.stringify(props);\n  },\n};\nvar console = { history: [], log: function () { console.history.push({ level: \"log\", arguments: Array.prototype.slice.call(arguments) }) } };",
+        "setup": true
+      },
+      {
+        "op": "eval",
+        "source": "(add.apply(this, [1,2]))"
+      },
+      {
+        "op": "eval",
+        "source": "(add.apply(this, [\"a \",{\"b\":[1.5,null,true,-0.0,1e400]}]))"
+      },
+      {
+        "op": "eval",
+        "source": "(receiver.apply(this, []))"
+      },
+      {
+        "op": "eval",
+        "source": "(nope.apply(this, [1]))"
+      },
+      {
+        "op": "eval",
+        "source": "(notfn.apply(this, []))"
+      },
+      {
+        "op": "eval",
+        "source": "(outer.apply(this, [{\"k\":1}]))"
+      },
+      {
+        "op": "eval",
+        "source": "(keys.apply(this, [{\"__proto__\":{\"x\":1},\"a\":1}]))"
+      },
+      {
+        "op": "eval",
+        "source": "(keys.apply(this, [{\"\\u005f_proto__\":{\"x\":1},\"a\":1}]))"
+      },
+      {
+        "op": "eval",
+        "source": "(keys.apply(this, [{\"a\":1,\"b\":2,\"a\":3}]))"
+      }
+    ]
+  },
+  {
+    "id": "curated-execjs-call-through-execjs",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "execjs",
+        "source": "function add(a, b) { return a + b }\nfunction outer(x) { throw new Error(\"boom \" + JSON.stringify(x)) }\nfunction keys(o) { return [Object.keys(o), Object.getPrototypeOf(o) === Object.prototype] }\nfunction receiver() { return this === globalThis }\nvar notfn = 1;\nvar ReactRailsUJS = {\n  serverRender: function (fn, name, props) {\n    if (name === \"Throws\") throw new TypeError(\"bad \" + props.n);\n    if (name === \"Logs\") console.log(\"hi\", props.n);\n    return \"<\" + fn + \":\" + name + \">\" + JSON.stringify(props);\n  },\n};\nvar console = { history: [], log: function () { console.history.push({ level: \"log\", arguments: Array.prototype.slice.call(arguments) }) } };",
+        "function": "add",
+        "args": [
+          [
+            "string",
+            "UTF-8",
+            "text",
+            "é "
+          ],
+          [
+            "int",
+            "7"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "curated-react-rails-render-shape",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "function add(a, b) { return a + b }\nfunction outer(x) { throw new Error(\"boom \" + JSON.stringify(x)) }\nfunction keys(o) { return [Object.keys(o), Object.getPrototypeOf(o) === Object.prototype] }\nfunction receiver() { return this === globalThis }\nvar notfn = 1;\nvar ReactRailsUJS = {\n  serverRender: function (fn, name, props) {\n    if (name === \"Throws\") throw new TypeError(\"bad \" + props.n);\n    if (name === \"Logs\") console.log(\"hi\", props.n);\n    return \"<\" + fn + \":\" + name + \">\" + JSON.stringify(props);\n  },\n};\nvar console = { history: [], log: function () { console.history.push({ level: \"log\", arguments: Array.prototype.slice.call(arguments) }) } };",
+        "setup": true
+      },
+      {
+        "op": "eval",
+        "source": "(          (function () {\n            if (typeof console !== \"undefined\" && console.history) {\n  console.history = [];\n}\n\n            var result = this.ReactRailsUJS.serverRender('renderToString', 'Hello', {\"name\":\"Wé\"});\n            (function (history) {\n  if (history && history.length > 0) {\n    result += '\\n<scr'+'ipt class=\"react-rails-console-replay\">';\n    history.forEach(function (msg) {\n      result += '\\nconsole.' + msg.level + '.apply(console, ' + JSON.stringify(msg.arguments) + ');';\n    });\n    result += '\\n</scr'+'ipt>';\n  }\n})(console.history);\n\n            return result;\n          })()\n)"
+      },
+      {
+        "op": "eval",
+        "source": "(          (function () {\n            if (typeof console !== \"undefined\" && console.history) {\n  console.history = [];\n}\n\n            var result = this.ReactRailsUJS.serverRender('renderToString', 'Logs', {\"n\":3});\n            (function (history) {\n  if (history && history.length > 0) {\n    result += '\\n<scr'+'ipt class=\"react-rails-console-replay\">';\n    history.forEach(function (msg) {\n      result += '\\nconsole.' + msg.level + '.apply(console, ' + JSON.stringify(msg.arguments) + ');';\n    });\n    result += '\\n</scr'+'ipt>';\n  }\n})(console.history);\n\n            return result;\n          })()\n)"
+      },
+      {
+        "op": "eval",
+        "source": "(          (function () {\n            if (typeof console !== \"undefined\" && console.history) {\n  console.history = [];\n}\n\n            var result = this.ReactRailsUJS.serverRender('renderToString', 'Throws', {\"n\":3});\n            (function (history) {\n  if (history && history.length > 0) {\n    result += '\\n<scr'+'ipt class=\"react-rails-console-replay\">';\n    history.forEach(function (msg) {\n      result += '\\nconsole.' + msg.level + '.apply(console, ' + JSON.stringify(msg.arguments) + ');';\n    });\n    result += '\\n</scr'+'ipt>';\n  }\n})(console.history);\n\n            return result;\n          })()\n)"
+      },
+      {
+        "op": "eval",
+        "source": "(          (function () {\n            if (typeof console !== \"undefined\" && console.history) {\n  console.history = [];\n}\n\n            var result = this.ReactRailsUJS.serverRender('renderToString', 'Hello', {name: 'js' + 1});\n            (function (history) {\n  if (history && history.length > 0) {\n    result += '\\n<scr'+'ipt class=\"react-rails-console-replay\">';\n    history.forEach(function (msg) {\n      result += '\\nconsole.' + msg.level + '.apply(console, ' + JSON.stringify(msg.arguments) + ');';\n    });\n    result += '\\n</scr'+'ipt>';\n  }\n})(console.history);\n\n            return result;\n          })()\n)"
+      },
+      {
+        "op": "eval",
+        "source": "(          (function () {\n            if (typeof console !== \"undefined\" && console.history) {\n  console.history = [];\n}\n\n            var result = this.ReactRailsUJS.serverRender('renderToString', 'Hello', {\"__proto__\":{\"a\":1},\"b\":2});\n            (function (history) {\n  if (history && history.length > 0) {\n    result += '\\n<scr'+'ipt class=\"react-rails-console-replay\">';\n    history.forEach(function (msg) {\n      result += '\\nconsole.' + msg.level + '.apply(console, ' + JSON.stringify(msg.arguments) + ');';\n    });\n    result += '\\n</scr'+'ipt>';\n  }\n})(console.history);\n\n            return result;\n          })()\n)"
+      }
+    ]
   }
 ]

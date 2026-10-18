@@ -30,6 +30,12 @@ status = "same"
 [cases."curated-error-without-message"]
 status = "same"
 
+[cases."curated-execjs-call-shape"]
+status = "same"
+
+[cases."curated-execjs-call-through-execjs"]
+status = "same"
+
 [cases."curated-global-state-across-steps"]
 status = "same"
 
@@ -67,6 +73,9 @@ status = "accepted:padded-two-byte-text"
 status = "same"
 
 [cases."curated-proxy"]
+status = "same"
+
+[cases."curated-react-rails-render-shape"]
 status = "same"
 
 [cases."curated-reference-after-date"]
