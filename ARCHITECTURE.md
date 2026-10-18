@@ -35,6 +35,8 @@ Primitive results, including small integers, heap numbers other than NaN, string
 
 Before serializing a result, the runner sanitizes it as mini_racer does. If V8 cannot clone the value, `crates/mini_racer_engine/src/serialize.rs` retries through mini_racer's filter in a separate safe context.
 
+The result decoder interns object and Map string keys and uses the per-decode cache Ruby's json gem uses for objects inside arrays, up to 63 keys of at most 55 bytes. Each Hash takes its pending pairs through one bulk insert when it ends; the pairs stay on the native stack or, past 128 values, in a garbage collector marked holder, and every open hash flushes before a container Map key can expose it. Latin-1 and UTF-16 strings transcode in one pass through a reused buffer and copy once into Ruby Strings; text whose UTF-8 could pass 64 KiB is measured first and receives an exact-size buffer.
+
 ## Termination and limits
 
 Each control block contains a termination cell from `crates/mini_racer_sync/src/termination.rs`. It records stop, timeout, cancel, and memory causes together with the dispatch to which they belong.
