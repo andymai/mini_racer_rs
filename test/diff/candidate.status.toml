@@ -258,6 +258,12 @@ status = "same"
 [cases."curated-sparse-named-keys"]
 status = "same"
 
+[cases."curated-strings-around-the-embedded-size"]
+status = "same"
+
+[cases."curated-strings-inside-containers-and-patterns"]
+status = "same"
+
 [cases."curated-thrown-error"]
 status = "same"
 

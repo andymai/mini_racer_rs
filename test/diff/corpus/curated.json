@@ -6189,5 +6189,25 @@
         "source": "(() => { const m = new Map(Array.from({length: 150}, (_, i) => [i % 2 ? 'k' + i : i, {i}])); m.set('nested', new Map(Array.from({length: 80}, (_, i) => [i, m]))); m.set('last', [m]); return m })()"
       }
     ]
+  },
+  {
+    "id": "curated-strings-around-the-embedded-size",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "[0, 1, 22, 23, 24, 31, 32, 33, 63, 64, 65, 200, 5000].flatMap((n) => ['\\u00e9'.repeat(n), 'a'.repeat(n) + '\\u00e9', '\\u00e9' + 'b'.repeat(n), '\\u0100'.repeat(n), '\\u{1F600}'.repeat(n), 'x'.repeat(n) + '\\u6771', '\\ud800' + 'y'.repeat(n), 'z'.repeat(n) + '\\udfff'])"
+      }
+    ]
+  },
+  {
+    "id": "curated-strings-inside-containers-and-patterns",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "[{k: 'na\\u00efve \\u{1F600}'}, new String('\\u00e9t\\u00e9'), new RegExp('caf\\u00e9'), new Map([[1, '\\u6771']]), new Set(['\\u00e9', '\\u00e9'])]"
+      }
+    ]
   }
 ]

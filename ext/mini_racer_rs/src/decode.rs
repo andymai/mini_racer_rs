@@ -261,6 +261,7 @@ struct RubyVisitor<'r> {
     keys: Option<KeyCache>,
     // Arrays and sets open around the current value.
     arrays: u32,
+    scratch: Vec<u8>,
 }
 
 impl RubyVisitor<'_> {
@@ -373,20 +374,38 @@ impl RubyVisitor<'_> {
         Err(errors::runtime(self.ruby, "bad state"))
     }
 
-    fn string(&self, text: Text<'_>) -> Result<Value, Error> {
+    // Text is transcoded into this one buffer, with room for the longest
+    // UTF-8 it could be and zeroed only as it grows, then copied into its
+    // String in one call: making a String to write into costs more Ruby
+    // calls than the copy saves.
+    fn scratch(&mut self, len: usize) -> &mut [u8] {
+        if self.scratch.len() < len {
+            self.scratch.resize(len, 0);
+        }
+        self.scratch.get_mut(..len).unwrap_or_default()
+    }
+
+    fn string(&mut self, text: Text<'_>) -> Result<Value, Error> {
         let ruby = self.ruby;
         Ok(match text {
             Text::Utf8(bytes) => ruby.enc_str_new(bytes, ruby.utf8_encoding()).as_value(),
             Text::Latin1(bytes) if bytes.is_ascii() => {
                 ruby.enc_str_new(bytes, ruby.utf8_encoding()).as_value()
             }
-            Text::Latin1(bytes) => ruby.str_new(&text::latin1_to_utf8(bytes)).as_value(),
+            Text::Latin1(bytes) => {
+                let out = self.scratch(bytes.len().saturating_mul(2));
+                let written = text::latin1_to_utf8_into(bytes, out);
+                ruby.enc_str_new(out.get(..written).unwrap_or_default(), ruby.utf8_encoding())
+                    .as_value()
+            }
             Text::Utf16Le(bytes) if marker::is_javascript_function(bytes) => {
                 JAVASCRIPT_FUNCTION.get(ruby).new_instance(())?
             }
             Text::Utf16Le(bytes) => {
-                if let Some(utf8) = text::utf16le_to_utf8(bytes) {
-                    ruby.str_new(&utf8).as_value()
+                let out = self.scratch(bytes.len().saturating_mul(3).div_ceil(2));
+                if let Some(written) = text::utf16le_to_utf8_into(bytes, out) {
+                    ruby.enc_str_new(out.get(..written).unwrap_or_default(), ruby.utf8_encoding())
+                        .as_value()
                 } else {
                     let utf16 = ruby
                         .find_encoding("UTF-16LE")
@@ -679,6 +698,7 @@ pub fn value(ruby: &Ruby, bytes: &[u8]) -> Result<Value, Error> {
         pairs: None,
         keys: None,
         arrays: 0,
+        scratch: Vec::new(),
     };
     decode_value(bytes, RESULT_LIMITS, &mut visitor).map_err(|e| match e {
         DecodeError::Visitor(error) => error,
