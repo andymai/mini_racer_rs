@@ -4,6 +4,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use mini_racer_wire::{WRITE_VERSION, tag};
 use v8::ValueDeserializerHelper;
 
+use crate::sys;
+
 // Deeper values are left to V8, which reads as deep as its stack allows.
 const MAX_DEPTH: u32 = 64;
 // Far below V8's own limit on an array's length, which it enforces itself.
@@ -48,16 +50,16 @@ pub const fn worth_building(objects: usize, properties: usize) -> bool {
 /// which its deserializer makes, element by element as a sparse array, so a
 /// function returning an argument costs far more than it need.
 ///
-/// A two-byte string is read by V8's own deserializer from its bytes alone.
-/// The whole request is `Unbuilt` for anything else this would not build as V8
-/// does or that V8 would refuse (a binary, a key that is not a string or an
-/// int32, a key given twice, an array inside itself, an object of more than
-/// `MAX_KEYS` keys, nesting past `MAX_DEPTH`), decided from the bytes before
-/// any value is made. A termination requested as it reads leaves it `Unbuilt`
-/// too: V8 acts on one before each value it reads, an array or object
-/// beginning as a value does, so this looks before the request and before
-/// each value. One requested before the dispatch refused it
-/// (`TermCell::refuses`).
+/// A two-byte string whose units all fit Latin-1 is read by V8's own
+/// deserializer from its bytes alone, which keeps it two-byte as V8's read of
+/// the whole would. The whole request is `Unbuilt` for anything else this would
+/// not build as V8 does or that V8 would refuse (a binary, a key that is not a
+/// string or an int32, a key given twice, an array inside itself, an object of
+/// more than `MAX_KEYS` keys, nesting past `MAX_DEPTH`), decided from the bytes
+/// before any value is made. A termination requested as it reads leaves it
+/// `Unbuilt` too: V8 acts on one before each value it reads, an array or object
+/// beginning as a value does, so this looks before the request and before each
+/// value. One requested before the dispatch refused it (`TermCell::refuses`).
 pub fn read<'s, 'b>(
     scope: &v8::PinScope<'s, '_>,
     bytes: &'b [u8],
@@ -74,6 +76,7 @@ pub fn read<'s, 'b>(
         objects: Vec::new(),
         elements: Vec::new(),
         shapes: Vec::new(),
+        units: Vec::new(),
     };
     match builder.call() {
         Some(call) => Read::Built(call),
@@ -119,6 +122,17 @@ impl<'b> Cursor<'b> {
         }
     }
 
+    // A value's tag, past the padding V8 skips, which aligns a two-byte
+    // string's units.
+    fn tag(&mut self) -> Option<u8> {
+        loop {
+            match self.byte()? {
+                tag::PADDING => {}
+                tag => return Some(tag),
+            }
+        }
+    }
+
     fn varint(&mut self) -> Option<u64> {
         let mut value = 0u64;
         for shift in (0..64).step_by(7) {
@@ -153,9 +167,9 @@ impl<'b> Cursor<'b> {
             .filter(|text| text.len() <= v8::String::MAX_LENGTH)
     }
 
-    fn two_byte(&mut self) -> Option<()> {
-        let len = self.text()?.len();
-        (len.is_multiple_of(2) && len / 2 <= v8::String::MAX_LENGTH).then_some(())
+    fn two_byte(&mut self) -> Option<&'b [u8]> {
+        self.text()
+            .filter(|text| text.len().is_multiple_of(2) && text.len() / 2 <= v8::String::MAX_LENGTH)
     }
 
     // The length of `[path, ...arguments]`, past V8's header.
@@ -312,7 +326,7 @@ impl Check<'_> {
     }
 
     fn value(&mut self, depth: u32) -> Option<()> {
-        match self.bytes.byte()? {
+        match self.bytes.tag()? {
             tag::INT32 => {
                 self.bytes.varint_u32()?;
             }
@@ -323,7 +337,9 @@ impl Check<'_> {
             tag::UTF8_STRING | tag::ONE_BYTE_STRING => {
                 self.bytes.string()?;
             }
-            tag::TWO_BYTE_STRING => self.bytes.two_byte()?,
+            tag::TWO_BYTE_STRING => {
+                self.bytes.two_byte()?;
+            }
             tag::BIGINT => {
                 self.bytes.bigint_bytes()?;
             }
@@ -393,6 +409,9 @@ struct Builder<'s, 'b, 'p, 'i> {
     // The names last made for each key position at each depth, so objects of
     // one shape share them instead of looking each up again.
     shapes: Vec<Vec<(Key<'b>, v8::Local<'s, v8::String>)>>,
+    // A two-byte string's units where the request's bytes hold them
+    // unaligned.
+    units: Vec<u16>,
 }
 
 // Reads again what `Check` accepted, so only a termination stops it, or V8's
@@ -419,7 +438,7 @@ impl<'s, 'b> Builder<'s, 'b, '_, '_> {
         self.unterminated()?;
         let scope = self.scope;
         let at = self.bytes;
-        Some(match self.bytes.byte()? {
+        Some(match self.bytes.tag()? {
             tag::INT32 => v8::Integer::new(scope, zigzag(self.bytes.varint_u32()?)).into(),
             tag::DOUBLE => v8::Number::new(scope, self.bytes.double()?).into(),
             tag::NULL => v8::null(scope).into(),
@@ -459,17 +478,35 @@ impl<'s, 'b> Builder<'s, 'b, '_, '_> {
             tag::BEGIN_DENSE_ARRAY => self.array(depth.checked_sub(1)?)?,
             tag::BEGIN_OBJECT => self.object(depth.checked_sub(1)?)?,
             tag::TWO_BYTE_STRING => {
-                self.bytes.two_byte()?;
-                self.two_byte(at)?
+                let text = self.bytes.two_byte()?;
+                self.two_byte(text, at)?
             }
             _ => return None,
         })
     }
 
-    // Reads the string from `at` up to the cursor with V8's own deserializer,
-    // which keeps it two-byte, where V8's API makes a one-byte string of
-    // whatever fits.
-    fn two_byte(&mut self, at: Cursor<'b>) -> Option<v8::Local<'s, v8::Value>> {
+    // V8's API makes a one-byte string of units that all fit Latin-1, where
+    // its deserializer keeps them two-byte, so only a string with a wider
+    // unit is made through the API, from the request's own bytes where the
+    // padding before them aligned them.
+    fn two_byte(&mut self, text: &[u8], at: Cursor<'b>) -> Option<v8::Local<'s, v8::Value>> {
+        let pairs = text.as_chunks::<2>().0;
+        if !pairs.iter().any(|&[_, high]| high != 0) {
+            return self.deserialized(at);
+        }
+        let units = if let Some(units) = sys::units(text) {
+            units
+        } else {
+            self.units.clear();
+            self.units
+                .extend(pairs.iter().map(|&pair| u16::from_le_bytes(pair)));
+            &self.units
+        };
+        v8::String::new_from_two_byte(self.scope, units, v8::NewStringType::Normal).map(Into::into)
+    }
+
+    // Reads the string from `at` up to the cursor with V8's own deserializer.
+    fn deserialized(&mut self, at: Cursor<'b>) -> Option<v8::Local<'s, v8::Value>> {
         let len = at.rest.len().checked_sub(self.bytes.rest.len())?;
         let mut bytes = vec![tag::HEADER, u8::try_from(WRITE_VERSION).ok()?];
         bytes.extend_from_slice(at.rest.get(..len)?);

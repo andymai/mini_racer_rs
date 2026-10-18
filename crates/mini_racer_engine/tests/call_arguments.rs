@@ -12,7 +12,7 @@ use mini_racer_engine::{
     CallRequest, ContextConfig, ContextHandle, EngineError, Host, JsErrorKind, TerminationCause,
     WaitHandle, WaitOutcome,
 };
-use mini_racer_wire::Writer;
+use mini_racer_wire::{Writer, tag};
 
 struct Parking;
 
@@ -305,6 +305,81 @@ fn two_byte_strings_are_read_by_v8_inside_built_requests() {
         },
         "['a', '\\u6771\\u4eac', 1]",
     );
+}
+
+// A two-byte string after the padding V8's serializer and the encoder write
+// to align its units is built with the rest of its call, so its array
+// arrives packed.
+#[test]
+fn padded_two_byte_strings_arrive_inside_built_requests() {
+    let context = spawn(ContextConfig::default());
+    let wide: Vec<u16> = "\u{6771}\u{4eac}".encode_utf16().collect();
+    let narrow: Vec<u16> = "h\u{e9}".encode_utf16().collect();
+    let sent = request("id", 1, |w| {
+        w.begin_array(4);
+        w.utf16_aligned(&wide);
+        w.utf8(b"a");
+        w.utf16_aligned(&wide);
+        w.utf16_aligned(&narrow);
+        w.end_array(4);
+    });
+    assert!(
+        sent.windows(2)
+            .any(|pair| pair == [tag::PADDING, tag::TWO_BYTE_STRING]),
+        "no padding written"
+    );
+    let returned = call(&context, sent).expect("call");
+    assert_eq!(returned.get(2), Some(&b'A'), "built, so packed");
+    assert_eq!(
+        eval(
+            &context,
+            "globalThis.texts = (a) => a.map((s) => [...s].map((c) => c.charCodeAt(0))); 0"
+        ),
+        eval(&context, "0")
+    );
+    let read = request("texts", 1, |w| {
+        w.begin_array(2);
+        w.utf16_aligned(&wide);
+        w.utf16_aligned(&narrow);
+        w.end_array(2);
+    });
+    assert_eq!(
+        call(&context, read).expect("call"),
+        eval(&context, "[[0x6771, 0x4eac], [0x68, 0xe9]]")
+    );
+}
+
+// A two-byte string arrives in the form V8's read of the whole call gives it,
+// padded or not: one holding a unit past Latin-1 made through V8's API, which
+// keeps it two-byte, and the rest read by V8's deserializer.
+#[test]
+fn two_byte_strings_arrive_as_v8_reads_the_whole_call() {
+    let context = spawn(ContextConfig::default());
+    let texts: [&[u16]; 8] = [
+        &[],
+        &[0x68],
+        &[0x68, 0xe9],
+        &[0x100],
+        &[0x6771, 0x4eac],
+        &[0xd83d, 0xde00, 0x61],
+        &[0xd800, 0x78],
+        &[0xdc00],
+    ];
+    for units in texts {
+        let bytes: Vec<u8> = units.iter().flat_map(|unit| unit.to_le_bytes()).collect();
+        for aligned in [false, true] {
+            let write = |w: &mut Writer<'_>| {
+                if aligned {
+                    w.utf16_aligned(units);
+                } else {
+                    w.utf16le(&bytes);
+                }
+            };
+            let built = counted(&context, request("id", 1, write), 0, 0).expect("built");
+            let read = counted(&context, request("id", 1, write), 1, 1_000).expect("read");
+            assert_eq!(built, read, "{units:x?} aligned {aligned}");
+        }
+    }
 }
 
 // V8's deserializer reads a call holding a binary whole, so its arrays stay

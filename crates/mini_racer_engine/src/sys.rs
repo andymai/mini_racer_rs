@@ -121,6 +121,17 @@ unsafe extern "C" fn release_two_byte(data: *mut u16, length: usize) {
     }
 }
 
+/// The UTF-16 units `bytes` hold, in the host's order as V8's deserializer
+/// reads them, without a copy; `None` when they do not start where a unit
+/// can be read from or hold an odd byte.
+#[must_use]
+pub fn units(bytes: &[u8]) -> Option<&[u16]> {
+    // SAFETY: every bit pattern is a valid u16, and `align_to` hands out only
+    // the aligned middle of `bytes`, borrowed for as long as `bytes` is.
+    let (head, units, tail) = unsafe { bytes.align_to::<u16>() };
+    (head.is_empty() && tail.is_empty()).then_some(units)
+}
+
 /// The address V8 names `isolate` by when it posts the isolate a task.
 #[must_use]
 pub fn isolate_key(isolate: &v8::Isolate) -> usize {
