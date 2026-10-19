@@ -146,7 +146,9 @@ class FiberSchedulerLifecycleTest < Minitest::Test
     end
     Sync do
       Fiber.scheduler.singleton_class.prepend(counter)
-      context.call("busy", 20)
+      # A runner that answers while this thread is descheduled mid-spin, as
+      # on a loaded runner, needs no wait, so a few naps make one certain.
+      3.times { context.call("nap", 100) if waits.zero? }
     end
 
     assert_operator waits, :>=, 1
