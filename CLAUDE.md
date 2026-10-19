@@ -93,6 +93,7 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | GVL release, interrupts, raw rb-sys | `ext/mini_racer_rs/src/rb_raw.rs` |
 | The `Process._fork` and `Process.daemon` hooks marking forks whose child runs Ruby | `ext/mini_racer_rs/src/fork.rs` |
 | Forking with contexts, one process per case | `test/ruby/fork_test.rb`, `test/ruby/fork/` |
+| Converting values with little of a fiber's or a thread's stack left, one process per case on Ruby's smallest stacks | `test/ruby/stack_test.rb`, `test/ruby/stack/` |
 | Loader and conflict guard | `lib/mini_racer_rs.rb` |
 | Error hierarchy and Ruby compositions | `lib/mini_racer_rs/vocabulary.rb` |
 | Native build, link flags | `ext/mini_racer_rs/extconf.rb`, `ext/mini_racer_rs/build.rs` |
