@@ -173,6 +173,28 @@ class ConversionGcImmediatesTest < Minitest::Test
       "last",
     ], result
   end
+
+  # Strings the encoder decodes ahead of V8, waiting behind a Stamp in hashes
+  # the runner builds and in ones V8 reads, each read from wherever its
+  # String has moved to.
+  def test_strings_decoded_ahead_of_v8_survive_collections_and_moves
+    if RUBY_PLATFORM.include?("darwin")
+      skip "GC.verify_compaction_references overflows on macOS after repeated heap doublings"
+    end
+
+    @context.eval("globalThis.echo = (...a) => a")
+    texts = ["café naïve Zürich crème", "東京 大阪 名古屋 札幌",
+             "\u{1F600} party \u{1F389} fun \u{1F680} go", "broken \xFF in the middle of it all",]
+    few = { "stamp" => Stamp.new, "texts" => texts.map(&:dup) }
+    many = { "stamp" => Stamp.new, "a" => 1, "b" => 2, "c" => 3, "d" => 4, "texts" => texts.map(&:dup) }
+    built = stressed { @context.call("echo", few, [Stamp.new, *texts.map(&:dup)]) }
+    read = stressed { @context.call("echo", many) }
+
+    expected = texts.map { |text| text.scrub("�") }
+
+    assert_equal [{ "stamp" => Time.at(0), "texts" => expected }, [Time.at(0), *expected]], built
+    assert_equal [{ "stamp" => Time.at(0), "a" => 1, "b" => 2, "c" => 3, "d" => 4, "texts" => expected }], read
+  end
 end
 
 # Keys and pairs the decoder keeps while it builds each hash.

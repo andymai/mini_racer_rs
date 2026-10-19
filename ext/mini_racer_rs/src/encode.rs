@@ -9,7 +9,7 @@ use magnus::{
     Error, Fixnum, Float, Module, Object, RArray, RClass, RHash, RModule, RObject, RString, Ruby,
     Time, Value,
 };
-use mini_racer_engine::CallRequest;
+use mini_racer_engine::{CallRequest, Decoded, Transcoder};
 use mini_racer_wire::Writer;
 
 use crate::gc_root::{OnceRoot, Pins, StaticRoot};
@@ -56,6 +56,8 @@ impl From<Error> for EncodeError {
 enum Item {
     // A pinned value, by its index in the holder.
     Value(usize),
+    // A pinned key of a hash.
+    Key(usize),
     // An element read when its turn comes, as serialize1 reads them, so a
     // to_time that changes the array is seen.
     Element { array: usize, index: isize },
@@ -101,6 +103,7 @@ struct Encoder<'r, 'o> {
     // whether to build a call's arguments itself.
     objects: usize,
     properties: usize,
+    transcoder: Transcoder,
 }
 
 /// Writes `value` as `mini_racer`'s `serialize` does, with the object ids V8
@@ -131,7 +134,7 @@ pub fn call(
     let mut encoder = Encoder::new(ruby, &mut bytes);
     let count = length(args.len().saturating_add(1));
     encoder.writer.begin_array(count);
-    encoder.string(name);
+    encoder.string(name, Text::Name);
     args.iter()
         .try_for_each(|&arg| encoder.top(arg))
         .map_err(|error| error.raise(unsupported))?;
@@ -151,6 +154,22 @@ impl EncodeError {
             Self::Raised(error) => error,
         }
     }
+}
+
+// How mini_racer sends a String, by its encoding's name.
+enum Sent {
+    Utf8,
+    Latin1,
+    Utf16,
+}
+
+// A key or a call's name goes in the form mini_racer sends unless it is
+// ASCII: the runner builds only calls whose keys are UTF-8 or ASCII, and one
+// is seldom long enough to be worth decoding.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Text {
+    Value,
+    Name,
 }
 
 fn length(len: usize) -> u32 {
@@ -181,6 +200,7 @@ impl<'r, 'o> Encoder<'r, 'o> {
             seen: HashMap::default(),
             objects: 0,
             properties: 0,
+            transcoder: Transcoder::default(),
         }
     }
 }
@@ -214,6 +234,10 @@ impl Encoder<'_, '_> {
                 Item::EndArray(length) => self.writer.end_array(length),
                 Item::EndObject(count) => self.writer.end_object(count),
                 Item::Value(index) => self.value(self.pinned(index))?,
+                Item::Key(index) => {
+                    let key = self.pinned(index);
+                    self.key(key, rb_raw::ruby_type(self.ruby, key));
+                }
                 Item::Element { array, index } => {
                     let element = RArray::from_value(self.pinned(array))
                         .map(|array| array.entry::<Value>(index))
@@ -239,12 +263,28 @@ impl Encoder<'_, '_> {
             RubyType::True => self.writer.bool(true),
             RubyType::False => self.writer.bool(false),
             RubyType::String => {
-                self.string(RString::from_value(value).unwrap_or_else(|| ruby.str_new("")));
+                let text = RString::from_value(value).unwrap_or_else(|| ruby.str_new(""));
+                self.string(text, Text::Value);
             }
-            RubyType::Symbol => self.string(rb_raw::sym2str(ruby, value)),
+            RubyType::Symbol => self.string(rb_raw::sym2str(ruby, value), Text::Value),
             _ => return false,
         }
         true
+    }
+
+    // A String, a Symbol or an Integer, the keys `hash` sends.
+    fn key(&mut self, key: Value, kind: RubyType) {
+        let ruby = self.ruby;
+        match kind {
+            RubyType::String => {
+                let text = RString::from_value(key).unwrap_or_else(|| ruby.str_new(""));
+                self.string(text, Text::Name);
+            }
+            RubyType::Symbol => self.string(rb_raw::sym2str(ruby, key), Text::Name),
+            _ => {
+                self.immediate(key, kind);
+            }
+        }
     }
 
     fn value(&mut self, value: Value) -> Result<(), EncodeError> {
@@ -338,7 +378,7 @@ impl Encoder<'_, '_> {
             );
             let item_kind = rb_raw::ruby_type(self.ruby, item);
             if keys_fit && pairs.is_empty() && immediate(item_kind) {
-                self.immediate(key, key_kind);
+                self.key(key, key_kind);
                 self.immediate(item, item_kind);
                 written = written.saturating_add(1);
             } else {
@@ -357,7 +397,7 @@ impl Encoder<'_, '_> {
         self.work.push(Item::EndObject(count));
         for (key, item) in pairs.into_iter().rev() {
             self.work.push(Item::Value(item));
-            self.work.push(Item::Value(key));
+            self.work.push(Item::Key(key));
         }
         Ok(())
     }
@@ -465,21 +505,43 @@ impl Encoder<'_, '_> {
 
     // mini_racer tells encodings apart by name. The ones it sends as UTF-8
     // that strings most often have are told by index, without the lookup.
-    fn string(&mut self, text: RString) {
+    // Bytes it sends as UTF-8 that are all ASCII are the same characters as
+    // one-byte text, which V8 copies where it would decode UTF-8. A value's
+    // other valid UTF-8 goes as the one-byte or two-byte text V8 would decode
+    // it to.
+    fn string(&mut self, text: RString, kind: Text) {
         let ruby = self.ruby;
         let index = text.enc_get();
         let utf8 = index == ruby.utf8_encindex()
             || index == ruby.usascii_encindex()
             || index == ruby.ascii8bit_encindex();
-        rb_raw::with_string_bytes(ruby, text, |bytes| {
-            if utf8 {
-                return self.writer.utf8(bytes);
-            }
+        let sent = if utf8 {
+            Sent::Utf8
+        } else {
             match RbEncoding::from(index).name() {
-                "ISO-8859-1" => self.writer.latin1(bytes),
-                "UTF-16LE" => self.writer.utf16le(bytes),
-                _ => self.writer.utf8(bytes),
+                "ISO-8859-1" => Sent::Latin1,
+                "UTF-16LE" => Sent::Utf16,
+                _ => Sent::Utf8,
             }
-        });
+        };
+        let writer = &mut self.writer;
+        match sent {
+            Sent::Latin1 => rb_raw::with_string_bytes(ruby, text, |bytes| writer.latin1(bytes)),
+            Sent::Utf16 => rb_raw::with_string_bytes(ruby, text, |bytes| writer.utf16le(bytes)),
+            Sent::Utf8 => {
+                let ascii = rb_raw::cached_ascii(ruby, text);
+                let transcoder = (kind == Text::Value).then_some(&mut self.transcoder);
+                rb_raw::with_string_bytes(ruby, text, |bytes| {
+                    if ascii.unwrap_or_else(|| bytes.is_ascii()) {
+                        return writer.latin1(bytes);
+                    }
+                    match transcoder.and_then(|transcoder| transcoder.decode(bytes)) {
+                        Some(Decoded::OneByte(latin1)) => writer.latin1(latin1),
+                        Some(Decoded::TwoByte(units)) => writer.utf16_aligned(units),
+                        None => writer.utf8(bytes),
+                    }
+                });
+            }
+        }
     }
 }

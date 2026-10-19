@@ -1,5 +1,6 @@
 use std::ffi::{c_int, c_long, c_void};
 
+use magnus::encoding::Coderange;
 use magnus::rb_sys::{AsRawId, AsRawValue, FromRawValue, protect};
 use magnus::value::{IntoId, LazyId, ReprValue};
 use magnus::{Error, RArray, RHash, RString, Ruby, Value};
@@ -341,6 +342,18 @@ pub fn sym2str(ruby: &Ruby, symbol: Value) -> RString {
     // SAFETY: `raw` is the live String rb_sym2str returned.
     let name = unsafe { Value::from_raw(raw) };
     RString::from_value(name).unwrap_or_else(|| ruby.str_new(""))
+}
+
+/// Whether every byte of `s` is ASCII, from the coderange Ruby keeps in the
+/// String's flags; `None` while Ruby has not worked it out. Working it out
+/// here would check every character of non-ASCII text one at a time, slower
+/// than reading the bytes. Never 7-bit in an encoding that is not
+/// ASCII-compatible.
+pub fn cached_ascii(_ruby: &Ruby, s: RString) -> Option<bool> {
+    match s.enc_coderange() {
+        Coderange::Unknown => None,
+        known => Some(known == Coderange::SevenBit),
+    }
 }
 
 /// Runs `read` over the string's bytes without copying them; `read` must not

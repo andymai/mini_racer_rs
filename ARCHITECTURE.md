@@ -31,6 +31,8 @@ Values cross the channel in V8's serialization format. Results are decoded from 
 
 Arguments to `Context#call` travel in the other direction. `ext/mini_racer_rs/src/encode.rs` writes format version 15 directly from Ruby values.
 
+The encoder in `ext/mini_racer_rs/src/encode.rs` writes Ruby Strings sent as UTF-8 as V8 one-byte text when Ruby's cached coderange, or a byte scan when no coderange exists, identifies all-ASCII input. For valid non-ASCII UTF-8 from 16 bytes through 8 MiB, bundled simdutf decoding produces V8's one-byte or padded two-byte storage form, while broken UTF-8, larger values, Hash keys, and call names retain mini_racer's form, and the runner builds calls holding padded or wide two-byte strings itself.
+
 Primitive results, including small integers, heap numbers other than NaN, strings, booleans, null, and undefined, are written byte for byte by `serialize::primitive` in `crates/mini_racer_engine/src/serialize.rs` as V8's serializer writes them; other results go through V8's serializer. The encoder writes `[name, *args]` directly from method arguments without building a Ruby array. After the byte-only `request::buildable` pass in `crates/mini_racer_engine/src/request.rs` approves the whole call, the runner builds packed arguments with at most 4 pairs total or at most 2 per hash on average from those bytes; V8's deserializer reads every other call whole.
 
 Before serializing a result, the runner sanitizes it as mini_racer does. If V8 cannot clone the value, `crates/mini_racer_engine/src/serialize.rs` retries through mini_racer's filter in a separate safe context.
