@@ -37,7 +37,8 @@ def settled_rss_bytes
 end
 
 # The first context pays for starting V8 and its platform once per process,
-# so it is made before the baseline and left out of the per-context figure.
+# and makes the one copy of a large source the others read, so it is made
+# before the baseline and left out of the per-context figure.
 def per_live_context(count, &)
   first = yield
   before = settled_rss_bytes

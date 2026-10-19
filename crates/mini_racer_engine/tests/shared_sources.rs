@@ -39,6 +39,15 @@ fn spawn() -> ContextHandle {
     spawn_with(ContextConfig::default())
 }
 
+// mini_racer counts the source against `max_memory:`, so a context with one
+// keeps its own copy, which the shared one must read the same as.
+fn own_copy() -> ContextHandle {
+    spawn_with(ContextConfig {
+        max_memory: Some(1 << 30),
+        ..ContextConfig::default()
+    })
+}
+
 fn eval(context: &ContextHandle, source: &JsText) -> Result<Vec<u8>, EngineError> {
     context.eval(JsText::from("bundle.js"), source.clone(), &mut Parking)
 }
@@ -93,19 +102,21 @@ fn shared_sources() {
     }
     let text = JsText::from(script(1));
     let contexts = [spawn(), spawn(), spawn()];
+    let own = own_copy();
     let results: Vec<String> = contexts
         .iter()
+        .chain([&own])
         .map(|context| format!("{:?}", eval(context, &text)))
         .collect();
     assert!(results.iter().all(|result| *result == results[0]));
-    // Seen once by the first context, then kept by the second.
+    // Kept by the first context, at its first sighting, and read by all three.
     assert_eq!(sources().made(), 1);
-    assert_eq!(sources().reads(), 2);
-    assert_eq!(sources().reading(), 2);
+    assert_eq!(sources().reads(), 3);
+    assert_eq!(sources().reading(), 3);
     for probe_source in probes(1) {
-        let from_own = probe(&contexts[0], &probe_source);
+        let from_own = probe(&own, &probe_source);
         assert!(!from_own.contains("Err(Internal"), "{from_own}");
-        for context in &contexts[1..] {
+        for context in &contexts {
             assert_eq!(probe(context, &probe_source), from_own, "{probe_source}");
         }
     }
@@ -113,27 +124,18 @@ fn shared_sources() {
     // Evaluated again, one of the context's two strings is garbage, which the
     // next collection releases.
     eval(&contexts[1], &text).expect("eval");
-    assert_eq!(sources().reads(), 3);
+    assert_eq!(sources().reads(), 4);
     contexts[1]
         .low_memory_notification(&mut Parking)
         .expect("collection");
-    assert_eq!(sources().reading(), 2);
+    assert_eq!(sources().reading(), 3);
     contexts[2].begin_dispose();
     contexts[2].dispose(&mut Parking).expect("dispose");
-    assert_eq!(sources().reading(), 1);
+    assert_eq!(sources().reading(), 2);
 
     let later = spawn();
     eval(&later, &text).expect("eval");
-    assert_eq!((sources().made(), sources().reads()), (1, 4));
-
-    // mini_racer counts the source against `max_memory:`, so a context with
-    // one keeps its own copy.
-    let limited = spawn_with(ContextConfig {
-        max_memory: Some(1 << 30),
-        ..ContextConfig::default()
-    });
-    eval(&limited, &text).expect("eval");
-    assert_eq!(sources().reads(), 4);
+    assert_eq!((sources().made(), sources().reads()), (1, 5));
 
     // A context from a snapshot keys the script apart, as the code cache does.
     let built = ContextHandle::create_snapshot("var shared = 1".into(), None, &mut Parking)
@@ -146,7 +148,7 @@ fn shared_sources() {
         });
         eval(&from_blob, &text).expect("eval");
     }
-    assert_eq!((sources().made(), sources().reads()), (2, 5));
+    assert_eq!((sources().made(), sources().reads()), (2, 7));
 
     // A parse error and a runtime error read the same from the shared copy as
     // from a copy of their own.
@@ -155,13 +157,14 @@ fn shared_sources() {
         format!("{}\nthrower3()", script(3)),
     ] {
         let broken = JsText::from(broken);
-        let outcomes: Vec<String> = (0..3)
-            .map(|_| format!("{:?}", eval(&spawn(), &broken)))
+        let outcomes: Vec<String> = [spawn(), spawn(), spawn(), own_copy()]
+            .iter()
+            .map(|context| format!("{:?}", eval(context, &broken)))
             .collect();
         assert!(outcomes[0].starts_with("Err(Js("), "{}", outcomes[0]);
         assert!(outcomes.iter().all(|outcome| *outcome == outcomes[0]));
     }
-    assert_eq!((sources().made(), sources().reads()), (4, 9));
+    assert_eq!((sources().made(), sources().reads()), (4, 13));
 
     // Invalid UTF-8 is left to V8's decoder, so each context keeps its own.
     let mut invalid = script(6).into_bytes();
@@ -172,7 +175,7 @@ fn shared_sources() {
         .collect();
     assert!(outcomes[0].starts_with("Ok("), "{}", outcomes[0]);
     assert!(outcomes.iter().all(|outcome| *outcome == outcomes[0]));
-    assert_eq!((sources().made(), sources().reads()), (4, 9));
+    assert_eq!((sources().made(), sources().reads()), (4, 13));
 
     // Across encodings: UTF-16 with a lone surrogate in a string, and
     // Latin-1.
@@ -185,18 +188,32 @@ fn shared_sources() {
         .map(|unit| u8::try_from(unit).unwrap_or(b' '))
         .collect();
     for (seed, text) in [(4, JsText::Utf16(units)), (5, JsText::Latin1(latin1))] {
-        let contexts = [spawn(), spawn(), spawn()];
-        for context in &contexts {
+        let contexts = [spawn(), spawn()];
+        let own = own_copy();
+        for context in contexts.iter().chain([&own]) {
             eval(context, &text).expect("eval");
         }
         let mut checks = probes(seed);
         checks.push("[typeof lone4, typeof lone4 === 'string' && lone4.charCodeAt(0)]".to_owned());
         for probe_source in checks {
-            let from_own = probe(&contexts[0], &probe_source);
-            for context in &contexts[1..] {
+            let from_own = probe(&own, &probe_source);
+            for context in &contexts {
                 assert_eq!(probe(context, &probe_source), from_own, "{probe_source}");
             }
         }
     }
-    assert_eq!((sources().made(), sources().reads()), (6, 13));
+    assert_eq!((sources().made(), sources().reads()), (6, 17));
+
+    // A script one context alone loaded goes once that context does, at the
+    // next large eval, so loading it again copies it again; that copy, which
+    // a second context has now read, stays as any shared one does.
+    let once = JsText::from(script(7));
+    for (made, reads) in [(7, 19), (8, 21), (8, 23)] {
+        let loaded = spawn();
+        eval(&loaded, &once).expect("eval");
+        loaded.begin_dispose();
+        loaded.dispose(&mut Parking).expect("dispose");
+        eval(&spawn(), &text).expect("eval");
+        assert_eq!((sources().made(), sources().reads()), (made, reads));
+    }
 }

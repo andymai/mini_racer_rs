@@ -62,6 +62,9 @@ struct Runtime {
     freed: AtomicBool,
     // The startup snapshot this isolate began from, for the code cache's key.
     snapshot: Option<u64>,
+    // Tells this context's reads of a shared source from other contexts', as
+    // a copy only one context read is dropped once no string reads it.
+    reader: u64,
     // Large scripts to cache once their dispatch is over, so making a cache
     // never counts against a timeout.
     uncached: Mutex<Vec<Uncached>>,
@@ -142,6 +145,7 @@ impl Runtime {
             running: AtomicU32::new(0),
             freed: AtomicBool::new(false),
             snapshot,
+            reader: generation.sources().reader(),
             uncached: Mutex::default(),
             hoisting: Mutex::default(),
             frames: Mutex::default(),
@@ -770,10 +774,12 @@ fn evaluate(
     }
     let plan = if large(source) {
         runtime.freed.store(true, Ordering::Relaxed);
-        runtime
-            .generation
-            .code_cache()
-            .plan(filename, source, runtime.snapshot)
+        runtime.generation.code_cache().plan(
+            filename,
+            source,
+            runtime.snapshot,
+            shares_sources(runtime),
+        )
     } else {
         Plan::Compile(None)
     };
@@ -796,21 +802,25 @@ fn evaluate(
     Ok(reply)
 }
 
-// A large script the process has seen before reads its source from the copy
-// every context compiling it shares, outside the V8 heap. `max_memory:`
-// measures the heap, where mini_racer keeps the source, so a context with it
-// keeps its own copy.
+// `max_memory:` measures the heap, where mini_racer keeps the source, so a
+// context with it keeps its own copy.
+fn shares_sources(runtime: &Runtime) -> bool {
+    runtime.block.config.max_memory.is_none()
+}
+
+// A large script reads its source from the copy every context compiling it
+// shares, outside the V8 heap, made by the first of them.
 fn shared_source<'s>(
     scope: &v8::PinScope<'s, '_>,
     runtime: &Runtime,
     key: Option<&Key>,
     source: &JsText,
 ) -> Option<v8::Local<'s, v8::String>> {
-    if runtime.block.config.max_memory.is_some() {
+    if !shares_sources(runtime) {
         return None;
     }
     let sources = runtime.generation.sources();
-    let string = sys::external_string(scope, &sources.units(key?, source)?)?;
+    let string = sys::external_string(scope, &sources.units(key?, source, runtime.reader)?)?;
     sources.read();
     Some(string)
 }

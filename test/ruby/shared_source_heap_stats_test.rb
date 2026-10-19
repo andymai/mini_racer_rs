@@ -23,22 +23,26 @@ class SharedSourceHeapStatsTest < Minitest::Test
     puts JSON.generate([source.encode("UTF-16LE").bytesize / 2, stats])
   RUBY
 
+  def reported(code_cache)
+    out, err, status = run_ruby(STATS, env: { "MINI_RACER_RS_CODE_CACHE" => code_cache })
+
+    assert_predicate status, :success?, err
+    JSON.parse(out)
+  end
+
   # Deviation behavior:shared-source-heap-stats@ruby: mini_racer 0.22.1
   # reports `:external_memory` as 0 in all three contexts and the same
   # `:used_heap_size` in each, 14,578,448 bytes for this script, as each
-  # keeps a copy of the source of its own. Here the second and third read
-  # the one copy the process shares, outside V8's heap, which V8 counts in
-  # `:external_memory` by its length in characters.
-  def test_a_context_reading_a_shared_source_reports_it_as_external_memory
-    out, err, status = run_ruby(STATS, env: { "MINI_RACER_RS_CODE_CACHE" => nil })
+  # keeps a copy of the source of its own. Here all three, the first
+  # included, read the one copy the process shares, outside V8's heap, which
+  # V8 counts in `:external_memory` by its length in characters.
+  def test_every_context_reading_a_shared_source_reports_it_as_external_memory
+    units, shared = reported(nil)
+    _, own = reported("off")
 
-    assert_predicate status, :success?, err
-    units, ((first_used, first_external), *later) = JSON.parse(out)
-
-    assert_equal 0, first_external
-    later.each do |used, external|
-      assert_equal units, external
-      assert_operator first_used - used, :>, units * 2 * 0.9
+    assert_equal [units] * 3, shared.map(&:last)
+    shared.zip(own).each do |(used, _), (own_used, _)|
+      assert_operator own_used - used, :>, units * 2 * 0.9
     end
   end
 
@@ -46,10 +50,7 @@ class SharedSourceHeapStatsTest < Minitest::Test
   # before the first context, every context keeps its own copy and reports
   # it as mini_racer 0.22.1 does.
   def test_with_the_code_cache_off_every_context_counts_its_own_copy
-    out, err, status = run_ruby(STATS, env: { "MINI_RACER_RS_CODE_CACHE" => "off" })
-
-    assert_predicate status, :success?, err
-    units, stats = JSON.parse(out)
+    units, stats = reported("off")
     first_used = stats.first.first
 
     assert_equal [0, 0, 0], stats.map(&:last)

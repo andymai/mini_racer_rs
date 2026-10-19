@@ -17,7 +17,12 @@ end
 first = MiniRacer::Context.new
 raise "first" unless first.eval(SOURCE) == 1000
 
-own_heap = used_heap(first)
+# A context with `max_memory:` keeps a copy of its own on its heap.
+own = MiniRacer::Context.new(max_memory: 1 << 30)
+raise "own" unless own.eval(SOURCE) == 1000
+
+own_heap = used_heap(own)
+own.dispose
 second = MiniRacer::Context.new
 raise "second" unless second.eval(SOURCE) == 1000
 

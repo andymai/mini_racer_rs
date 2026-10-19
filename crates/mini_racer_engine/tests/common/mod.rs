@@ -32,8 +32,8 @@ fn terminated(result: Result<Vec<u8>, EngineError>) -> bool {
 }
 
 // Every fourth context starts from one snapshot blob the threads share, and
-// every seventh loads one large script, read from a source contexts share
-// once the process has seen it, so the leak checks cover both.
+// every seventh loads one large script, read from the source contexts share,
+// so the leak checks cover both.
 pub fn churn() {
     let built = ContextHandle::create_snapshot("var shared = 1".into(), None, &mut Parking)
         .expect("snapshot");

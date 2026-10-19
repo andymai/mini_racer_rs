@@ -219,6 +219,12 @@ status = "same"
 [cases."curated-shared-source-astral-in-utf8-3"]
 status = "same"
 
+[cases."curated-shared-source-fresh-astral-in-utf8"]
+status = "same"
+
+[cases."curated-shared-source-fresh-latin1-in-utf8"]
+status = "same"
+
 [cases."curated-shared-source-latin1-1"]
 status = "same"
 

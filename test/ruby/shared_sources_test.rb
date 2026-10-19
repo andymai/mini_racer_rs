@@ -22,19 +22,24 @@ class SharedSourcesTest < Minitest::Test
     puts JSON.generate([source.encode("UTF-16LE").bytesize, results, heaps])
   RUBY
 
-  # The first context to load a large script keeps its source on its own
-  # heap; the process has seen it by the next one, which reads it from the
-  # copy every context loading it shares.
-  def test_a_script_the_process_has_seen_keeps_no_copy_on_each_heap
-    out, err, status = run_ruby(HEAPS, env: { "MINI_RACER_RS_CODE_CACHE" => nil })
+  def outcome(script, code_cache)
+    out, err, status = run_ruby(script, env: { "MINI_RACER_RS_CODE_CACHE" => code_cache })
 
     assert_predicate status, :success?, err
-    bytes, results, (first, *later) = JSON.parse(out)
+    JSON.parse(out)
+  end
+
+  # Every context loading a large script, the first included, reads its
+  # source from the copy they all share; with the code cache off, each keeps
+  # one on its own heap.
+  def test_a_large_script_keeps_no_copy_on_any_heap
+    bytes, results, heaps = outcome(HEAPS, nil)
+    _, _, own = outcome(HEAPS, "off")
 
     assert_equal [1, 1, 1], results
-    later.each do |heap|
-      assert_operator first - heap, :>, bytes * 0.9,
-                      "a later context's heap is #{first - heap} bytes smaller than the first's"
+    heaps.zip(own).each do |heap, own_heap|
+      assert_operator own_heap - heap, :>, bytes * 0.9,
+                      "a context's heap is #{own_heap - heap} bytes smaller than with a copy of its own"
     end
   end
 
@@ -75,14 +80,12 @@ class SharedSourcesTest < Minitest::Test
   ].freeze
 
   def test_a_shared_utf16_source_reads_its_lone_surrogates_as_mini_racer_does
-    out, err, status = run_ruby(LONE, env: { "MINI_RACER_RS_CODE_CACHE" => nil })
-
-    assert_predicate status, :success?, err
-    bytes, outcomes, (first, *later) = JSON.parse(out)
+    bytes, outcomes, heaps = outcome(LONE, nil)
+    _, _, own = outcome(LONE, "off")
 
     assert_equal [LONE_OUTCOME] * 3, outcomes
-    later.each do |heap|
-      assert_operator first - heap, :>, bytes * 0.9, "a later context read a copy of its own"
+    heaps.zip(own).each do |heap, own_heap|
+      assert_operator own_heap - heap, :>, bytes * 0.9, "a context read a copy of its own"
     end
   end
 end

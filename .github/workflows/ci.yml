@@ -449,6 +449,11 @@ jobs:
         run: |
           bundle exec ruby -Ilib test/stress/shared_load.rb single
           bundle exec ruby -Ilib test/stress/shared_load.rb multi
+      - name: Memory a process keeps after large scripts each loaded once, both V8 platform modes
+        if: runner.os == 'Linux'
+        run: |
+          bundle exec ruby -Ilib test/stress/one_off_load.rb single
+          bundle exec ruby -Ilib test/stress/one_off_load.rb multi
       - name: Forks from a multi-threaded parent while other threads evaluate
         run: bundle exec ruby -Ilib test/stress/fork_busy.rb 300 4
       # The margin was calibrated on Linux; macOS's allocator returns memory differently.

@@ -3,11 +3,11 @@
 # Loads one generated script of about 3 MiB into several contexts and reads
 # resident memory per context once all of them are loaded. One astral
 # character makes V8 keep the source two bytes a unit, 6 MiB of it. The first
-# context to load the script, kept live outside the reading, has a copy of its
-# own; the process has seen it by the next, which reads the one copy they all
-# share. On x86_64 Linux a context measured about 10 MiB reading the shared
-# copy and 19 MiB with a copy of its own, in both platform modes. Fails over
-# the limit.
+# context to load the script, kept live outside the reading, makes the one
+# copy they all read, itself included. On x86_64 Linux a context measured
+# about 9 MiB reading the shared copy and 14 MiB with a copy of its own
+# (`MINI_RACER_RS_CODE_CACHE=off`), in both platform modes. Fails over the
+# limit.
 #   ruby -Ilib test/stress/shared_load.rb single|multi [contexts] [max_mib]
 
 require "mini_racer"

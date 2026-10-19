@@ -21,8 +21,9 @@ const SAMPLE_POINTS: usize = 8;
 /// compiling it again.
 ///
 /// A script is cached the second time the process sees it. The first sighting
-/// costs a sampled digest, not a full one or a cache, as a large script
-/// evaluated once (per-request data, say) gains nothing from either.
+/// costs a sampled digest and no cache, as a large script evaluated once
+/// (per-request data, say) gains nothing from one; it costs the full digest
+/// too only in a context that reads the script from its shared source.
 #[derive(Default)]
 pub struct CodeCache {
     // Most recently used last.
@@ -77,8 +78,9 @@ impl Drop for Building {
 
 /// How the runner compiles a large script.
 pub(crate) enum Plan {
-    /// From source: a first sighting or the cache is off, or with its key, a
-    /// key being built elsewhere or a refused cache.
+    /// From source: the cache is off or a first sighting, or with its key, a
+    /// first sighting whose source is shared, a key being built elsewhere or
+    /// a refused cache.
     Compile(Option<Key>),
     /// From source, then a cache made once the dispatch is over.
     Make(Building),
@@ -87,7 +89,7 @@ pub(crate) enum Plan {
 }
 
 impl Plan {
-    /// The key of a script the process has seen before.
+    /// The script's key, unless the plan needed none.
     pub(crate) const fn key(&self) -> Option<&Key> {
         match self {
             Self::Compile(key) => key.as_ref(),
@@ -98,11 +100,14 @@ impl Plan {
 }
 
 impl CodeCache {
+    /// `shared` asks for a first sighting's key as well, which only a
+    /// context reading the script from its shared source needs.
     pub(crate) fn plan(
         &'static self,
         filename: &JsText,
         source: &JsText,
         snapshot: Option<u64>,
+        shared: bool,
     ) -> Plan {
         if !enabled() {
             return Plan::Compile(None);
@@ -113,7 +118,8 @@ impl CodeCache {
         let cached = lock(&self.entries)
             .iter()
             .any(|entry| entry.key.sighting == sighting);
-        if !seen && !cached {
+        let first = !seen && !cached;
+        if first && !shared {
             return Plan::Compile(None);
         }
         let key = Key {
@@ -123,6 +129,9 @@ impl CodeCache {
             digest: self.hasher.hash_one(source),
             sighting,
         };
+        if first {
+            return Plan::Compile(Some(key));
+        }
         let mut entries = lock(&self.entries);
         if let Some(at) = entries.iter().position(|entry| entry.key == key) {
             let entry = entries.remove(at);
@@ -300,8 +309,8 @@ mod tests {
 
     // Sees `text` twice and stores a cache for it.
     fn cached(cache: &'static CodeCache, text: &JsText, data: Box<[u8]>) {
-        let _ = cache.plan(&name(), text, None);
-        let Plan::Make(building) = cache.plan(&name(), text, None) else {
+        let _ = cache.plan(&name(), text, None, true);
+        let Plan::Make(building) = cache.plan(&name(), text, None, true) else {
             panic!("a second sighting makes a cache");
         };
         cache.store(building, data);
@@ -311,22 +320,46 @@ mod tests {
     fn caches_a_script_the_second_time_it_is_seen() {
         let cache = cache();
         assert!(matches!(
-            cache.plan(&name(), &source(1), None),
-            Plan::Compile(None)
+            cache.plan(&name(), &source(1), None, true),
+            Plan::Compile(Some(_))
         ));
         cached(cache, &source(1), Box::from(&b"compiled"[..]));
         assert!(matches!(
-            cache.plan(&name(), &source(1), None),
+            cache.plan(&name(), &source(1), None, true),
             Plan::Consume(..)
         ));
         assert!(matches!(
-            cache.plan(&name(), &source(1), Some(7)),
-            Plan::Compile(None)
+            cache.plan(&name(), &source(1), Some(7), true),
+            Plan::Compile(Some(_))
         ));
         assert!(matches!(
-            cache.plan(&JsText::from("other.js"), &source(1), None),
+            cache.plan(&JsText::from("other.js"), &source(1), None, true),
+            Plan::Compile(Some(_))
+        ));
+    }
+
+    // The key a first sighting has for its shared source is the one the
+    // cache is then made and found under.
+    #[test]
+    fn a_first_sighting_has_its_key_only_for_a_shared_source() {
+        let cache = cache();
+        assert!(matches!(
+            cache.plan(&name(), &source(8), None, false),
             Plan::Compile(None)
         ));
+        let first = cache.plan(&name(), &source(9), None, true);
+        assert!(matches!(first, Plan::Compile(Some(_))));
+        let second = cache.plan(&name(), &source(9), None, false);
+        assert!(matches!(second, Plan::Make(..)));
+        assert!(first.key() == second.key());
+        let Plan::Make(building) = second else {
+            panic!("a second sighting makes a cache");
+        };
+        cache.store(building, Box::from(&b"compiled"[..]));
+        let Plan::Consume(_, key) = cache.plan(&name(), &source(9), None, true) else {
+            panic!("a stored cache is found");
+        };
+        assert!(first.key() == Some(&key));
     }
 
     // Sources that match on every sampled unit and differ elsewhere share a
@@ -344,7 +377,10 @@ mod tests {
             cache.sighting(&name(), &second, None)
         );
         cached(cache, &first, Box::from(&b"compiled"[..]));
-        assert!(matches!(cache.plan(&name(), &second, None), Plan::Make(..)));
+        assert!(matches!(
+            cache.plan(&name(), &second, None, true),
+            Plan::Make(..)
+        ));
     }
 
     #[test]
@@ -353,10 +389,10 @@ mod tests {
         cached(cache, &source(2), Box::from(&b"compiled"[..]));
         // More sightings than the list keeps.
         for seed in 10_u8..80 {
-            let _ = cache.plan(&name(), &source(seed), None);
+            let _ = cache.plan(&name(), &source(seed), None, false);
         }
         assert!(matches!(
-            cache.plan(&name(), &source(2), None),
+            cache.plan(&name(), &source(2), None, true),
             Plan::Consume(..)
         ));
     }
@@ -364,15 +400,15 @@ mod tests {
     #[test]
     fn a_script_being_built_is_built_once() {
         let cache = cache();
-        let _ = cache.plan(&name(), &source(3), None);
-        let first = cache.plan(&name(), &source(3), None);
+        let _ = cache.plan(&name(), &source(3), None, true);
+        let first = cache.plan(&name(), &source(3), None, true);
         assert!(matches!(first, Plan::Make(..)));
-        let elsewhere = cache.plan(&name(), &source(3), None);
+        let elsewhere = cache.plan(&name(), &source(3), None, true);
         assert!(matches!(elsewhere, Plan::Compile(Some(_))));
         assert!(elsewhere.key() == first.key());
         drop(first);
         assert!(matches!(
-            cache.plan(&name(), &source(3), None),
+            cache.plan(&name(), &source(3), None, true),
             Plan::Make(..)
         ));
     }
@@ -383,7 +419,7 @@ mod tests {
         cached(cache, &source(4), Box::from(&b"compiled"[..]));
         let child: &'static CodeCache = Box::leak(Box::new(cache.inherited()));
         assert!(matches!(
-            child.plan(&name(), &source(4), None),
+            child.plan(&name(), &source(4), None, true),
             Plan::Consume(..)
         ));
     }
@@ -396,7 +432,7 @@ mod tests {
         let child: &'static CodeCache = Box::leak(Box::new(cache.inherited()));
         drop(held);
         assert!(matches!(
-            child.plan(&name(), &source(5), None),
+            child.plan(&name(), &source(5), None, true),
             Plan::Make(..)
         ));
     }
@@ -412,11 +448,11 @@ mod tests {
         );
         assert_eq!(cache.stored(), 1);
         assert!(matches!(
-            cache.plan(&name(), &source(7), None),
+            cache.plan(&name(), &source(7), None, true),
             Plan::Compile(Some(_))
         ));
         assert!(matches!(
-            cache.plan(&name(), &source(6), None),
+            cache.plan(&name(), &source(6), None, true),
             Plan::Consume(..)
         ));
     }

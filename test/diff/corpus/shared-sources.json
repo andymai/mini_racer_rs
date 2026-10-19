@@ -511,5 +511,63 @@
         "source": "sharedThrow()"
       }
     ]
+  },
+  {
+    "id": "curated-shared-source-fresh-astral-in-utf8",
+    "kind": "program",
+    "fresh": true,
+    "steps": [
+      {
+        "op": "eval",
+        "source": "function sharedFill(n) { return n * 2 + 1; } var sharedCount = (typeof sharedCount === 'number' ? sharedCount : 0) + 1;\n",
+        "repeat": 10000,
+        "append": "function sharedProbe(a, b) { /* fresh café 😀 */ return [a, b, 'fresh café 😀']; }\nfunction sharedThrow() { return sharedInner(); }\nfunction sharedInner() { throw new Error('from a fresh process café 😀'); }\n[sharedCount, sharedProbe(1, 2)]"
+      },
+      {
+        "op": "eval",
+        "source": "[sharedProbe.toString(), sharedProbe.toString().length]"
+      },
+      {
+        "op": "eval",
+        "source": "(() => { try { sharedThrow() } catch (e) { return e.stack } })()"
+      },
+      {
+        "op": "eval",
+        "source": "(() => { Error.prepareStackTrace = (_, sites) => sites.map((site) => [site.getFileName(), site.getLineNumber(), site.getColumnNumber(), site.getPosition(), site.getScriptHash(), site.getFunctionName(), site.isToplevel(), site.isEval()]); try { sharedThrow() } catch (e) { return e.stack } finally { delete Error.prepareStackTrace } })()"
+      },
+      {
+        "op": "eval",
+        "source": "sharedThrow()"
+      }
+    ]
+  },
+  {
+    "id": "curated-shared-source-fresh-latin1-in-utf8",
+    "kind": "program",
+    "fresh": true,
+    "steps": [
+      {
+        "op": "eval",
+        "source": "function sharedFill(n) { return n * 2 + 1; } var sharedCount = (typeof sharedCount === 'number' ? sharedCount : 0) + 1;\n",
+        "repeat": 10000,
+        "append": "function sharedProbe(a, b) { /* fresh café */ return [a, b, 'fresh café']; }\nfunction sharedThrow() { return sharedInner(); }\nfunction sharedInner() { throw new Error('from a fresh process café'); }\n[sharedCount, sharedProbe(1, 2)]"
+      },
+      {
+        "op": "eval",
+        "source": "[sharedProbe.toString(), sharedProbe.toString().length]"
+      },
+      {
+        "op": "eval",
+        "source": "(() => { try { sharedThrow() } catch (e) { return e.stack } })()"
+      },
+      {
+        "op": "eval",
+        "source": "(() => { Error.prepareStackTrace = (_, sites) => sites.map((site) => [site.getFileName(), site.getLineNumber(), site.getColumnNumber(), site.getPosition(), site.getScriptHash(), site.getFunctionName(), site.isToplevel(), site.isEval()]); try { sharedThrow() } catch (e) { return e.stack } finally { delete Error.prepareStackTrace } })()"
+      },
+      {
+        "op": "eval",
+        "source": "sharedThrow()"
+      }
+    ]
   }
 ]

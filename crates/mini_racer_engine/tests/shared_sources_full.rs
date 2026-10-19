@@ -72,11 +72,8 @@ fn a_full_list_leaves_another_script_to_copies_of_its_own_unconverted() {
     if std::env::var_os("MINI_RACER_RS_CODE_CACHE").is_some() {
         return;
     }
-    let readers: Vec<(ContextHandle, ContextHandle)> = (0..u32::try_from(KEPT).unwrap_or(0))
-        .map(|seed| {
-            let text = script(seed);
-            (loaded(&text), loaded(&text))
-        })
+    let readers: Vec<ContextHandle> = (0..u32::try_from(KEPT).unwrap_or(0))
+        .map(|seed| loaded(&script(seed)))
         .collect();
     assert_eq!((sources().made(), sources().reads()), (KEPT, KEPT));
     let converted = sources().conversions();
@@ -92,7 +89,7 @@ fn a_full_list_leaves_another_script_to_copies_of_its_own_unconverted() {
     }
 
     // One kept source no longer read makes room for it.
-    let (_, reader) = &readers[0];
+    let reader = &readers[0];
     reader.begin_dispose();
     reader.dispose(&mut Parking).expect("dispose");
     let shared = loaded(&extra);
