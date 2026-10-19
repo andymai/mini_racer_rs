@@ -8,7 +8,7 @@
 # Usage: restore-v8-static-lib.sh [checkout] (after sourcing fetch-v8-archive.sh)
 set -euo pipefail
 
-root=$(cd "${1:-$(dirname "$0")/..}" && pwd)
+root=$(cd "${1:-$(dirname "$0")/..}" && pwd -P)
 archive=${RUSTY_V8_ARCHIVE:?source scripts/fetch-v8-archive.sh first}
 
 while IFS= read -r -d '' output; do
