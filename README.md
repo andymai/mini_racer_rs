@@ -15,42 +15,42 @@ A drop-in replacement for mini_racer, implemented in Rust on V8 15.2.
 
 </div>
 
-mini_racer_rs implements the `MiniRacer` Ruby API from mini_racer 0.22.1, with faster Ruby and JavaScript round trips, V8 15.2, prebuilt native gems, fiber scheduler support, and safer handling of difficult values. It defines the `MiniRacer` namespace and ships `lib/mini_racer.rb`, so `require "mini_racer"` and ExecJS continue to work.
+mini_racer_rs implements the `MiniRacer` API from mini_racer 0.22.1. It defines `MiniRacer` and ships `lib/mini_racer.rb`, so `require "mini_racer"` and ExecJS keep working.
 
 > mini_racer_rs is an independent project and is not affiliated with the Discourse staff who maintain mini_racer.
 
 ## Highlights
 
-- **JavaScript round trips are 5 to 9 times faster.** An eval takes 1.09 µs against 6.91 µs, a call takes 0.72 µs against 6.51 µs, and a callback takes 1.12 µs against 6.12 µs. A call on a context with `timeout:` takes 0.76 µs instead of 20.48 µs because one watchdog serves the process.
-- **A Babel transform through ExecJS is 1.95x faster.** It takes 5.15 ms instead of 10.05 ms. Babel itself takes 5.3 ms inside V8 15.2, against 10.3 ms inside V8 13.6, while Terser and React rendering take about the same time in both gems.
-- **A 44 MB production server rendering bundle loads 4.6x faster.** It loads into a new context in 215 ms against 983 ms, measured at commit `2513a48`, and scripts of 1 MB or more compile from a process-wide V8 code cache. At commit `220bfe7`, the 8.2 MB MUI bundle loads and renders once in 105 ms against 167 ms, while startup plus Babel takes 13.3 ms against 44.4 ms.
-- **A context holding the MUI bundle uses 44 MB instead of 110 MB.** At commit `220bfe7`, a context holding Babel uses 15.2 MB against 28.5 MB, and contexts loading the same large script read one shared copy of its source. A context holding the 44 MB production bundle used 136 MB against 301 MB at commit `2513a48`, before sources were shared. When 20,000 contexts are left to Ruby's garbage collector, resident memory peaks at 102 MB against 2,920 MB.
-- **Forks pause worker work, and children use their own threads.** For forks made through Ruby's `fork`, `IO.popen("-")`, or `Process.daemon`, mini_racer_rs waits for context runners, pauses its worker pool, and waits for running tasks; an async `WebAssembly.compile` in a new default-mode child completes on the child's own pool. On Ubuntu 24.04 with glibc 2.39, 20 of 20 mini_racer children aborted with signal 6 after loading and rendering React, while 20 of 20 mini_racer_rs children exited cleanly. On Fedora, mini_racer children hung within the first 50 forks of `test/stress/fork_busy.rb`, while mini_racer_rs completed 300 forks per run on Fedora and Ubuntu.
-- **V8 15.2.124.1.** mini_racer 0.22.1 uses V8 13.6.233.17.
-- **No compiler at release install.** Native gems cover glibc Linux on x86_64 and aarch64, plus macOS on arm64 and x86_64. Each carries extensions for Ruby 3.3, 3.4, and 4.0. mini_racer 0.22.1 ships as source and compiles C++ against libv8-node.
-- **Fiber scheduler support.** A fiber waiting on JavaScript lets other fibers on its thread run. Three 100 ms busy loops in separate contexts and fibers finish in 100 ms, against 300 ms when mini_racer blocks the thread.
-- **171 of 174 upstream tests pass.** The mini_racer suite runs unmodified, with its other 3 tests skipped by mini_racer itself. ExecJS passes 197 of 198 tests on its MiniRacer runtime, with 1 skipped.
-- **Difficult values return safely.** A `Map` with a function key returns an error Hash instead of aborting the process with SIGABRT. `Object(1n)` returns `1`, and an offset typed array returns its buffer as a binary String.
-- **Four checked layers.** A script enforces crate boundaries, `unsafe` is confined to four fenced modules, loom model-checks the thread handoff, fuzzing covers the wire codec, sanitizers run nightly, and results are differentially tested against mini_racer. The release pipeline runs the full suites for every released extension.
+- **Round trips:** 5 to 9 times faster (0.72 µs vs 6.51 µs per call).
+- **Babel through ExecJS:** 1.95x faster (5.15 ms vs 10.05 ms).
+- **Bundle load:** 4.6x faster for a 44 MB production server rendering bundle (215 ms vs 983 ms).
+- **Memory:** A context holding the MUI bundle uses 44 MB vs 110 MB.
+- **Forks:** After loading and rendering React: 20 of 20 clean mini_racer_rs exits vs 20 of 20 mini_racer aborts.
+- **V8:** V8 15.2.124.1 vs V8 13.6.233.17 in mini_racer 0.22.1.
+- **No compiler:** Native gems cover glibc Linux and macOS, both architectures, with Ruby 3.3, 3.4 and 4.0 extensions.
+- **Fiber scheduler:** Three 100 ms loops in separate contexts and fibers finish in 100 ms vs 300 ms.
+- **Upstream suites:** mini_racer passes 171 of 174 with 3 skipped by itself; ExecJS passes 197 of 198 with 1 skipped.
+- **Difficult values:** A `Map` with a function key returns an error Hash instead of aborting with SIGABRT.
+- **Checks:** Script-enforced crate boundaries, four fenced `unsafe` modules, loom, wire-codec fuzzing, nightly sanitizers and mini_racer differential tests.
 
-All performance numbers compare mini_racer_rs with mini_racer 0.22.1 on Ruby 3.4.2 and Linux on an AMD Ryzen 9 7950X3D, with both gems pinned to the same eight cores and the `performance` governor.
+These numbers compare with mini_racer 0.22.1. See [Benchmarks](#benchmarks) for the method.
 
 ## Install
 
-The package switch is one Gemfile line:
+Switch packages with one Gemfile line:
 
 ```diff
 - gem "mini_racer"
 + gem "mini_racer_rs"
 ```
 
-Run `bundle install`. Bundler is required because RubyGems may otherwise activate the original `mini_racer` first. Loading both gems raises a `LoadError` that names the conflict. Reverse the Gemfile change to switch back.
+Run `bundle install`. Bundler is required because RubyGems may activate the original `mini_racer` first. Loading both gems raises a `LoadError` naming the conflict. Reverse the Gemfile change to switch back.
 
-On x86_64-linux-gnu, aarch64-linux-gnu, arm64-darwin, and x86_64-darwin, `bundle install` installs a native gem and compiles nothing. Elsewhere, the source gem builds the extension and requires Rust 1.91 or newer and libclang. To build from a checkout, follow [CONTRIBUTING.md](CONTRIBUTING.md) and run `bin/setup`.
+On x86_64-linux-gnu, aarch64-linux-gnu, arm64-darwin, and x86_64-darwin, `bundle install` installs a native gem without compiling. Elsewhere, the source gem requires Rust 1.91 or newer and libclang to build the extension. For a checkout, follow [CONTRIBUTING.md](CONTRIBUTING.md) and run `bin/setup`.
 
 ## Quick start
 
-This example was run against both gems and produced exactly the outputs shown:
+Both gems produced exactly these outputs:
 
 ```ruby check
 require "mini_racer"
@@ -112,31 +112,35 @@ ExecJS.eval("[1, 2].map(x => x * 2)")         # => [2, 4]
 | `ensure_gc_after_idle:` | Idle milliseconds before one full garbage collection. `0` disables it. |
 | `snapshot:` | A `MiniRacer::Snapshot` used to initialize the context. |
 
-Errors are `MiniRacer::ParseError`, `MiniRacer::RuntimeError` with JavaScript frames in its backtrace, `MiniRacer::ScriptTerminatedError`, `MiniRacer::V8OutOfMemoryError`, `MiniRacer::ContextDisposedError`, `MiniRacer::SnapshotError`, and `MiniRacer::PlatformAlreadyInitialized`. All descend from `MiniRacer::Error`.
+Errors are `MiniRacer::ParseError`, `MiniRacer::RuntimeError`, `MiniRacer::ScriptTerminatedError`, `MiniRacer::V8OutOfMemoryError`, `MiniRacer::ContextDisposedError`, `MiniRacer::SnapshotError`, and `MiniRacer::PlatformAlreadyInitialized`. `MiniRacer::RuntimeError` includes JavaScript frames in its backtrace. All descend from `MiniRacer::Error`.
 
-**Source maps.** The bundle must be a UTF-8 String of at least 1,024 bytes, and the map must be a JSON String in source map v3 format. When a context evaluates a UTF-8 source containing that bundle, `MiniRacer::RuntimeError` backtraces replace V8 positions inside it with mapped original file, line, and column positions while retaining V8 function names. Async frames, frames after the tenth, `eval` or `new Function` code, frames outside the bundle, positions the map does not cover, and stacks reformatted by JavaScript keep V8 positions. Detailed stack capture makes creating and throwing errors in affected contexts more expensive, while measured React and MUI server renders were unchanged. Registration is process wide and holds at most eight bundles, and a map cannot be removed; registering a bundle again replaces its map. Trust bundles and maps like application code because source names appear in Ruby backtraces.
+**Source maps.** Bundles must be UTF-8 Strings of at least 1,024 bytes. Maps must be JSON Strings in source map v3 format. When a context evaluates UTF-8 source containing a registered bundle, mini_racer_rs rewrites `MiniRacer::RuntimeError` backtraces. V8 positions inside the bundle become mapped original file, line, and column positions. V8 function names remain.
+
+V8 positions remain for async frames and frames after the tenth. They also remain for `eval`, `new Function`, uncovered positions, and frames outside the bundle. JavaScript-reformatted stacks also keep V8 positions.
+
+Detailed stack capture makes creating and throwing errors more expensive in affected contexts. Measured React and MUI server renders were unchanged. Registration is process wide and holds at most eight bundles. Maps cannot be removed. Registering a bundle again replaces its map. Trust bundles and maps like application code because source names appear in Ruby backtraces.
 
 ## Switching from mini_racer
 
 ### What changes
 
-The public API and require path stay the same. The main changes are native installation, faster small calls and Babel transforms, fiber-aware waiting, newer V8 behavior, and safer conversion of difficult values. Applications that make many small calls gain the most. See [Highlights](#highlights) for measurements.
+The public API and require path stay the same. Changes include native installation, faster calls and Babel transforms, fiber-aware waiting, newer V8 behavior, and safer value conversion. `Object(1n)` returns `1`, and an offset typed array returns its buffer as a binary String. Applications making many small calls gain the most. See [Highlights](#highlights) for measurements.
 
 ### Check before you ship
 
-- You're affected if your tests or code compare exact JavaScript error messages or locale-formatted text. V8 15.2 can word them differently from V8 13.6.
+- You're affected if tests or code compare exact JavaScript errors or locale-formatted text. V8 15.2 may differ from V8 13.6.
 
-- You're affected if an attached Ruby callback calls back into its own context from another fiber, such as inside `Enumerator#next`. mini_racer_rs raises `ThreadError`; mini_racer allows it.
+- You're affected if an attached callback reenters its context from another fiber, including inside `Enumerator#next`. mini_racer_rs raises `ThreadError`; mini_racer allows it.
 
-- You're affected if a callback exits by `throw`, returns out of a proc, or is stopped by `Thread#kill`. The script ends with `Error: terminated`, then the jump continues after `eval` returns. mini_racer hangs.
+- You're affected if a callback exits by `throw`, returns from a proc, or receives `Thread#kill`. The script ends with `Error: terminated`. The jump continues after `eval` returns. mini_racer hangs.
 
-- You're affected if JavaScript reads a non-ASCII message from a callback exception. mini_racer_rs passes UTF-8, such as `"café"`, while mini_racer passes `"cafÃ©"`.
+- You're affected if JavaScript reads a callback exception's non-ASCII message. mini_racer_rs passes UTF-8, such as `"café"`; mini_racer passes `"cafÃ©"`.
 
-- You're affected if `fork`, `IO.popen("-")`, or `Process.daemon` runs after V8 starts. Both modes wait up to 500 ms for runners, interrupting JavaScript after 50 ms; both then pause the worker pool and wait up to 100 ms for running tasks. Uninterruptible operations and workers can outlast these best-effort waits, and the fork proceeds. Default children reject inherited contexts; new contexts run worker work on the child's own threads, but are best effort after either wait expires. `:single_threaded` children take over idle inherited contexts, reject busy ones (all after runner timeout), and accept new contexts.
+- You're affected if `fork`, `IO.popen("-")`, or `Process.daemon` runs after V8 starts. Both modes wait up to 500 ms for runners and interrupt JavaScript after 50 ms. They pause the worker pool and wait up to 100 ms for running tasks. Uninterruptible work may outlast these best-effort waits, and the fork proceeds. Default children reject inherited contexts. New contexts use the child's threads, but are best effort after either timeout. `:single_threaded` children take over idle inherited contexts and reject busy ones. After a runner timeout, they reject all inherited contexts. They accept new contexts.
 
-- You're affected if, with `:single_threaded`, you fork in a way that bypasses Ruby's `fork`, such as a C-level `fork()`. Inherited contexts are unusable in the child.
+- You're affected if `:single_threaded` forks bypass Ruby's `fork`, such as a C-level `fork()`. Inherited contexts are unusable in the child.
 
-- You're affected if another thread calls `dispose` while a call is running. It returns after the call finishes and the isolate is gone. mini_racer returns immediately and frees the isolate later.
+- You're affected if another thread calls `dispose` during a call. It returns after the call finishes and the isolate is gone. mini_racer returns immediately and frees the isolate later.
 
 - You're affected if your code references `MiniRacer::Loader`. It does not exist in mini_racer_rs.
 
@@ -144,26 +148,28 @@ See [COMPATIBILITY.md](COMPATIBILITY.md) for every difference.
 
 ### Stay on mini_racer if
 
-- You deploy on musl-based Linux such as Alpine. mini_racer supports it through libv8-node's musl gems, while mini_racer_rs does not install there. Neither gem supports Windows.
+- You deploy on musl-based Linux such as Alpine. mini_racer supports it through libv8-node's musl gems; mini_racer_rs does not. Neither supports Windows.
 
-- Download size matters more than compile time. The largest mini_racer_rs native gem is 65.6 MB because it includes extensions for three Ruby versions. The mini_racer download on x86_64 Linux is 47.1 MB, followed by compilation.
+- Download size matters more than compile time. The largest native gem is 65.6 MB because it contains three Ruby extensions. mini_racer downloads 47.1 MB on x86_64 Linux, then compiles.
 
 ### Gems that depend on mini_racer
 
-If another gem brings in `mini_racer`, point Bundler at the repository's shim. It is an empty gem named `mini_racer`, version 0.22.1, that depends on the `mini_racer_rs` version from the same checkout.
+If another gem adds `mini_racer`, point Bundler to the repository's shim. This empty `mini_racer` gem is version 0.22.1. It depends on the `mini_racer_rs` version from the same checkout.
 
 ```ruby
 gem "mini_racer_rs"
 gem "mini_racer", github: "andymai/mini_racer_rs", tag: "vX.Y.Z", glob: "shim/*.gemspec"
 ```
 
-The repository tests shim resolution with `path:` sources and rtlcss in `test/consumers/transitive/`. The `github:` form has not been run end to end. A dependency whose `mini_racer` requirement excludes version 0.22.1 cannot use the shim.
+The repository tests `path:` shim resolution with rtlcss in `test/consumers/transitive/`. The `github:` form has not run end to end. A dependency excluding `mini_racer` 0.22.1 cannot use the shim.
 
 ### Forking servers such as Puma
 
-Prime the process-wide V8 code cache before forking by evaluating each bundle of 1 MB or more twice in the master, using exactly the source text and file name the renderer uses, then dispose those contexts. The second evaluation builds the cache, later matching evaluations compile from it, and forked children inherit it. For Babel's 2.3 MB bundle at commit `5e13c1c`, a forked child's first load took, as medians across 5 trials, 60.8 ms when the parent had not loaded it, 65.5 ms after one load, and 25.0 ms after two loads. You can prime a `react-rails` app by building its server renderer twice. Parent contexts are not used in children. Only the cache carries over.
+Before forking, evaluate each bundle of 1 MB or more twice in the master, then dispose those contexts. Use the renderer's exact source text and file name. The second evaluation builds the process-wide V8 code cache. Matching evaluations compile from it, and forked children inherit it. For Babel's 2.3 MB bundle at commit `5e13c1c`, a forked child's first load took 60.8 ms without a parent load. It took 65.5 ms after one load and 25.0 ms after two. These are medians across 5 trials. Prime a `react-rails` app by building its server renderer twice. Children do not use parent contexts. Only the cache carries over.
 
-With `mini_racer` 0.22.1, each worker compiles the bundle from source on its first load because there is no code cache.
+For Ruby's `fork`, `IO.popen("-")`, or `Process.daemon`, mini_racer_rs waits for context runners, pauses its worker pool and waits for running tasks. An async `WebAssembly.compile` in a new default-mode child completes on the child's own pool. On Ubuntu 24.04 with glibc 2.39, 20 of 20 mini_racer children aborted with signal 6 after React rendering; all mini_racer_rs children exited cleanly. On Fedora, mini_racer hung within 50 `test/stress/fork_busy.rb` forks; mini_racer_rs completed 300 per run on Fedora and Ubuntu.
+
+With `mini_racer` 0.22.1, each worker compiles the bundle from source on its first load because it has no code cache.
 
 ## Benchmarks
 
@@ -179,13 +185,28 @@ With `mini_racer` 0.22.1, each worker compiles the bundle from source on its fir
 | MUI in a new context: load the 8.2 MB bundle and render once, through ExecJS | 167 ms | 105 ms | 1.6x |
 | Load a 44 MB production server rendering bundle into a new context, through ExecJS | 983 ms | 215 ms | 4.6x |
 
-Results are medians of 5 runs, with every workload producing identical output in both gems. The eight library workloads use the release build of commit `220bfe7`, and the 44 MB production server rendering bundle load uses commit `2513a48`. Measurements ran on Ruby 3.4.2 and Linux on an AMD Ryzen 9 7950X3D, with the CPU governor set to `performance` and both gems pinned to CPUs 0 through 7.
+Results are medians of 5 runs. Every workload produced identical output in both gems. The eight library workloads use the release build of commit `220bfe7`. The 44 MB production bundle load uses commit `2513a48`. Benchmarks ran on Ruby 3.4.2 and Linux with an AMD Ryzen 9 7950X3D. The governor was `performance`. Both gems were pinned to CPUs 0 through 7.
+
+The per-call and memory figures below were measured on the same machine. Startup plus Babel, Babel context and MUI context figures come from commit `220bfe7`. One watchdog thread serves the whole process, making a call with `timeout:` fast. Scripts of 1 MB or more use a process-wide V8 code cache. Contexts loading the same large script share one source copy.
+
+| Measure | mini_racer 0.22.1 | mini_racer_rs |
+|---|---:|---:|
+| eval round trip | 6.91 µs | 1.09 µs |
+| call round trip | 6.51 µs | 0.72 µs |
+| callback round trip | 6.12 µs | 1.12 µs |
+| call on a context with `timeout:` | 20.48 µs | 0.76 µs |
+| Babel inside V8 | 10.3 ms | 5.3 ms |
+| startup plus Babel | 44.4 ms | 13.3 ms |
+| context holding Babel | 28.5 MB | 15.2 MB |
+| context holding the 8.2 MB MUI bundle | 110 MB | 44 MB |
+| context holding the 44 MB production bundle, at commit `2513a48` before sources were shared | 301 MB | 136 MB |
+| peak resident memory with 20,000 contexts left to Ruby's garbage collector | 2,920 MB | 102 MB |
 
 ```sh
 bundle exec ruby bench/run.rb --cpus 0-7
 ```
 
-[BENCHMARKS.md](BENCHMARKS.md) describes the method, per-call costs, memory results, and mini_racer's own `benchmark/serde` suite.
+[BENCHMARKS.md](BENCHMARKS.md) covers the method, per-call costs, memory results, and mini_racer's `benchmark/serde` suite.
 
 <!-- compat-table:start -->
 ## Compatibility
@@ -200,7 +221,7 @@ See [COMPATIBILITY.md](COMPATIBILITY.md).
 
 ## How it works
 
-mini_racer_rs uses the `v8` crate, rusty_v8 152.2.0, with Ruby bindings through magnus and rb-sys. Each context owns a V8 isolate and a native runner thread with a stack of at least 2 MiB, so V8 frames never use a Ruby thread's stack. A per-context lock permits one dispatch at a time.
+mini_racer_rs uses the `v8` crate, rusty_v8 152.2.0, with magnus and rb-sys Ruby bindings. Each context owns a V8 isolate and native runner thread. Its stack is at least 2 MiB, keeping V8 frames off Ruby thread stacks. A per-context lock allows one dispatch at a time.
 
 ```text
  Ruby thread                          runner thread (one per context)
@@ -216,34 +237,36 @@ mini_racer_rs uses the `v8` crate, rusty_v8 152.2.0, with Ruby bindings through 
  result
 ```
 
-A waiting Ruby thread first spins briefly with the GVL held, then spins without it, then parks with the GVL released. Under a fiber scheduler, only the waiting fiber parks. Values use V8's serialization format and decode directly into Ruby objects without an intermediate tree. Repeated objects retain their identity.
+A waiting Ruby thread spins with the GVL held, then without it. It then parks with the GVL released. Under a fiber scheduler, only the waiting fiber parks. Values use V8's serialization format and decode directly into Ruby objects. There is no intermediate tree. Repeated objects keep their identity.
 
-One watchdog thread per process enforces every context's `timeout:`. In `:single_threaded` mode, a fork quiesces the runners, the child takes over contexts that were idle, and contexts in use raise there. In every process, mini_racer_rs points V8's platform at a copied vtable whose worker-thread slots post to a pool it owns. V8's platform has one worker thread, which never receives a task. A fork pauses the pool, and the parent resumes it when the fork returns; inherited contexts raise in the child in the default multi-threaded mode.
+One watchdog thread per process enforces every context's `timeout:`. In `:single_threaded` mode, forks quiesce runners. Children take over idle contexts; contexts in use raise there. mini_racer_rs gives V8 a copied platform vtable in each process. Worker-thread slots post to its own pool. V8's platform has one worker thread, which receives no tasks. Forking pauses the pool. The parent resumes it afterward. Default multi-threaded children reject inherited contexts.
 
-The implementation is split into four crates:
+The implementation has four crates:
 
 - `mini_racer_wire`: the wire codec, with no unsafe code.
 - `mini_racer_sync`: the thread protocol, with no unsafe code and loom checking.
-- `mini_racer_engine`: V8 process state and runners, and the only crate that names `v8`.
-- `mini_racer_rs`: the Ruby extension, and the only crate that names magnus or rb-sys.
+- `mini_racer_engine`: V8 process state and runners, and the only crate naming `v8`.
+- `mini_racer_rs`: the Ruby extension, and the only crate naming magnus or rb-sys.
 
-[ARCHITECTURE.md](ARCHITECTURE.md) follows a call end to end and covers the design in depth.
+The release pipeline runs the full suites for every released extension.
+
+[ARCHITECTURE.md](ARCHITECTURE.md) follows a call end to end and explains the design.
 
 ## Scope
 
-mini_racer_rs deliberately does not:
+mini_racer_rs does not:
 
-- Run on Windows or musl-based Linux such as Alpine. Supported platforms are glibc Linux on x86_64 and aarch64, plus macOS on arm64 and x86_64.
+- Run on Windows or musl-based Linux such as Alpine. It supports glibc Linux on x86_64 and aarch64, and macOS on arm64 and x86_64.
 
-- Provide Node.js APIs. JavaScript runs in plain V8 without file system, network, or process access. JavaScript can reach only the Ruby callables you `attach`.
+- Provide Node.js APIs. JavaScript runs in plain V8 without file system, network, or process access. It can reach only Ruby callables you `attach`.
 
 - Work reliably without Bundler. RubyGems may activate the original mini_racer first.
 
-- Satisfy a dependency that pins a `mini_racer` version other than 0.22.1. This includes minibars with its `~> 0.6.4` requirement.
+- Satisfy dependencies pinning `mini_racer` versions other than 0.22.1. This includes minibars and its `~> 0.6.4` requirement.
 
-- Extend the `MiniRacer` API beyond mini_racer 0.22.1. Deliberate differences are recorded in [COMPATIBILITY.md](COMPATIBILITY.md).
+- Extend the `MiniRacer` API beyond mini_racer 0.22.1. [COMPATIBILITY.md](COMPATIBILITY.md) records deliberate differences.
 
-Supported Ruby implementations are CRuby 3.3, 3.4, and 4.0, plus TruffleRuby through mini_racer's unchanged TruffleRuby backend.
+Supported implementations are CRuby 3.3, 3.4, and 4.0, plus TruffleRuby through mini_racer's unchanged TruffleRuby backend.
 
 ## Documentation
 
