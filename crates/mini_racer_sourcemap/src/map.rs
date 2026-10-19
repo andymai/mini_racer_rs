@@ -316,6 +316,12 @@ pub struct SourceMap {
 // whole.
 const HEAD: usize = 64;
 
+/// Refuses a map past 256 MiB by its length alone, before it is copied or
+/// read.
+pub const fn check_length(length: usize) -> Result<(), MapError> {
+    within("bytes in the source map", length, MAX_MAP)
+}
+
 impl SourceMap {
     /// Parses `map`, a regular version 3 source map, for `bundle`. Its
     /// generated lines are counted at each LF, as source map generators do;
@@ -325,7 +331,7 @@ impl SourceMap {
         if bundle.is_empty() {
             return Err(MapError::EmptyBundle);
         }
-        within("bytes in the source map", map.len(), MAX_MAP)?;
+        check_length(map.len())?;
         // serde would read a struct from a JSON array too.
         let first = map
             .iter()

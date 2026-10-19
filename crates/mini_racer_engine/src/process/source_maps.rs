@@ -13,6 +13,12 @@ pub const MAX_MAPS: usize = 8;
 /// times longer, the smallest of the consumer bundles 90 KB.
 pub const MIN_BUNDLE: usize = 1024;
 
+/// Refuses a map too long to parse by its length alone, so a caller need not
+/// copy it first.
+pub fn check_length(length: usize) -> Result<(), SourceMapError> {
+    Ok(mini_racer_sourcemap::check_length(length)?)
+}
+
 /// The source maps one process has registered, found by their bundle's
 /// content: each kept once, parsed, and read by every context whose eval
 /// holds its bundle.
@@ -37,23 +43,30 @@ impl SourceMaps {
             return Err(SourceMapError::Short(MIN_BUNDLE));
         }
         let parsed = Arc::new(SourceMap::new(bundle, map)?);
-        let mut maps = lock(&self.maps);
-        if let Some(kept) = maps
-            .iter_mut()
-            .find(|kept| kept.bundle() == bundle.as_bytes())
-        {
-            *kept = parsed;
-        } else if maps.len() < MAX_MAPS {
-            maps.push(parsed);
-        } else {
-            return Err(SourceMapError::Full(MAX_MAPS));
-        }
-        let shortest = maps
-            .iter()
-            .map(|kept| kept.bundle().len())
-            .min()
-            .unwrap_or(0);
-        self.shortest.store(shortest, Ordering::Release);
+        // A child forked while this holds the lock starts with no maps, so it
+        // is held only to swap, and a map replaced is freed after.
+        let replaced = {
+            let mut maps = lock(&self.maps);
+            let replaced = if let Some(kept) = maps
+                .iter_mut()
+                .find(|kept| kept.bundle() == bundle.as_bytes())
+            {
+                Some(std::mem::replace(kept, parsed))
+            } else if maps.len() < MAX_MAPS {
+                maps.push(parsed);
+                None
+            } else {
+                return Err(SourceMapError::Full(MAX_MAPS));
+            };
+            let shortest = maps
+                .iter()
+                .map(|kept| kept.bundle().len())
+                .min()
+                .unwrap_or(0);
+            self.shortest.store(shortest, Ordering::Release);
+            replaced
+        };
+        drop(replaced);
         Ok(())
     }
 

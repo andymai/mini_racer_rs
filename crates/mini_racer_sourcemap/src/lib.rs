@@ -9,5 +9,5 @@ mod map;
 mod rewrite;
 mod vlq;
 
-pub use map::{MapError, Original, Placement, SourceMap};
+pub use map::{MapError, Original, Placement, SourceMap, check_length};
 pub use rewrite::{Frame, Match, rewrite};
