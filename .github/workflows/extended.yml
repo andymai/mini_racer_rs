@@ -151,6 +151,11 @@ jobs:
           NEWEST=$newest ruby -i -pe 'sub(/\Av8 = "=[^"]+"/) { %(v8 = "=#{ENV.fetch("NEWEST")}") }' Cargo.toml
           grep -qx "v8 = \"=$newest\"" Cargo.toml || { echo "::error::the v8 pin was not rewritten"; exit 1; }
           cargo update -p v8
+          # Without the pinned archive there is nothing to restore the static
+          # library from, so a cached v8 rebuilds from its build script, which
+          # fetches the newest archive itself.
+          cargo clean -p v8
+          cargo clean -p v8 --release
           # extconf.rb pins the committed archive digest unless the variable
           # exists; v8's build script treats an empty one as unset.
           echo "RUSTY_V8_ARCHIVE_SHA256=" >>"$GITHUB_ENV"
