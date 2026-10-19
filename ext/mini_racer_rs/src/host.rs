@@ -210,6 +210,12 @@ impl<'r> RubyHost<'r> {
     fn run(&self, request: &[u8]) -> Result<Vec<u8>, Error> {
         let ruby = self.ruby;
         let bad = || errors::runtime(ruby, "bad callback id");
+        // An unoptimized build's frames from the eval to the decoder's first
+        // container take all of Ruby's margin, so a callback is refused here
+        // first; the callable would need the room anyway.
+        if rb_raw::stack_exhausted(ruby) {
+            return Err(errors::stack_exhausted(ruby));
+        }
         let args = RArray::from_value(decode::value(ruby, request)?).ok_or_else(bad)?;
         let id = Integer::from_value(args.pop::<Value>()?).ok_or_else(bad)?;
         let id = isize::try_from(id.to_i64()?).map_err(|_| bad())?;
@@ -243,13 +249,21 @@ fn exception(ruby: &Ruby, error: &Error) -> Option<Exception> {
 }
 
 // What V8 throws for a raising callback: the exception's to_s, in its own
-// encoding, or mini_racer's fallback text.
+// encoding, or mini_racer's fallback text. A callback refused for want of
+// stack has no room left to call to_s, so its text is the one Ruby raises
+// SystemStackError with, as mini_racer's callbacks hand JavaScript.
 fn message(ruby: &Ruby, exception: Exception) -> JsText {
     exception
         .funcall::<_, _, RString>("to_s", ())
         .ok()
         .and_then(|text| context::js_text(ruby, text).ok())
-        .unwrap_or_else(|| JsText::from("Ruby exception"))
+        .unwrap_or_else(|| {
+            if exception.is_kind_of(ruby.exception_sys_stack_error()) {
+                JsText::from(errors::STACK_EXHAUSTED)
+            } else {
+                JsText::from("Ruby exception")
+            }
+        })
 }
 
 impl Host for RubyHost<'_> {

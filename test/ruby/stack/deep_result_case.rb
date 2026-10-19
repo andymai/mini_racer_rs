@@ -16,16 +16,22 @@ def rss_kib = Integer(`ps -o rss= -p #{Process.pid}`.strip)
 check_the_dive
 context = MiniRacer::Context.new
 %i[fiber thread].each do |where|
-  SHAPES.each_value do |step|
+  SHAPES.each do |shape, step|
+    whole = context.eval(nested(step))
     GAPS.each do |gap|
-      near_the_limit(where, gap) { outcome { context.eval(nested(step)) } }
+      answer = near_the_limit(where, gap) { outcome { context.eval(nested(step)) } }
+      check_outcome(answer, "#{shape}, #{gap} levels short of a #{where}'s limit", whole)
     end
   end
 end
 large = nested("v = {a: v}", bottom: "'x'.repeat(4 << 20)")
-2.times { near_the_limit(:fiber, 0) { outcome { context.eval(large) } } }
+deep_large = lambda do
+  answer = near_the_limit(:fiber, 0) { outcome { context.eval(large) } }
+  check_outcome(answer.is_a?(Hash) ? :decoded : answer, "a 4 MiB result at a fiber's limit", :decoded)
+end
+2.times { deep_large.call }
 before = rss_kib
-20.times { near_the_limit(:fiber, 0) { outcome { context.eval(large) } } }
+20.times { deep_large.call }
 grown = (rss_kib - before) / 1024
 raise "RSS grew #{grown} MiB over 20 results of 4 MiB each" if grown > 32
 

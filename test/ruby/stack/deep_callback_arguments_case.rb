@@ -16,12 +16,15 @@ context.attach("f", ->(value) { value.class.name })
 %i[fiber thread].each do |where|
   SHAPES.each do |shape, step|
     source = "(() => { const v = #{nested(step, levels: 94)}; try { return f(v) } catch (e) { return e.message } })()"
+    whole = context.eval(source)
     GAPS.each do |gap|
-      near_the_limit(where, gap) { outcome { context.eval(source) } }
+      label = "#{shape}, #{gap} levels short of a #{where}'s limit"
+      answer = near_the_limit(where, gap) { outcome { context.eval(source) } }
+      check_outcome(answer, label, whole, "stack level too deep")
       answer = outcome { context.eval("1 + 1") }
       next if answer == 2
 
-      raise "#{shape}, #{gap} levels short of a #{where}'s limit: the context no longer evaluates: #{answer.inspect}"
+      raise "#{label}: the context no longer evaluates: #{answer.inspect}"
     end
   end
 end

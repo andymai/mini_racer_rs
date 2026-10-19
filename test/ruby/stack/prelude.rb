@@ -5,8 +5,10 @@
 # SystemStackError, so the block starts with little more than the margin Ruby
 # keeps for a C function; `check_the_dive`, which fails the case if it does
 # not; `nested`, a script whose result nests a shape 95 deep around a bottom
-# value; `outcome`, a block's value or the exception it raised; and `usable`,
-# which fails the case unless the context still evaluates and disposes.
+# value; `outcome`, a block's value or the exception it raised;
+# `check_outcome`, which fails the case unless an outcome is one it allows or
+# Ruby's own SystemStackError; and `usable`, which fails the case unless the
+# context still evaluates and disposes.
 
 $LOAD_PATH.unshift File.expand_path("../../../lib", __dir__)
 require "mini_racer"
@@ -64,6 +66,13 @@ def outcome
   yield
 rescue Exception => e # rubocop:disable Lint/RescueException
   e
+end
+
+def check_outcome(answer, label, *allowed)
+  return if allowed.include?(answer)
+  return if answer.instance_of?(SystemStackError) && answer.message == "stack level too deep"
+
+  raise "#{label}: #{answer.inspect[0, 300]}"
 end
 
 def usable(context)

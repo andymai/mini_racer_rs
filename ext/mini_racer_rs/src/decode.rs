@@ -25,6 +25,12 @@ static JAVASCRIPT_FUNCTION: StaticRoot<RClass> = StaticRoot::new(|ruby| {
         .expect("init defines MiniRacer::JavaScriptFunction")
 });
 
+// Resolved at load, as the error classes are, rather than first near the end
+// of the stack, where its lookup could fail and panic.
+pub fn init(ruby: &Ruby) {
+    JAVASCRIPT_FUNCTION.get(ruby);
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Number {
     Integer(i64),
@@ -273,6 +279,9 @@ struct RubyVisitor<'r> {
     // Arrays and sets open around the current value.
     arrays: u32,
     scratch: Vec<u8>,
+    // The deepest stack address at which a container began with the room
+    // Ruby keeps for a C function still left.
+    roomy: usize,
 }
 
 impl RubyVisitor<'_> {
@@ -380,6 +389,24 @@ impl RubyVisitor<'_> {
         }
         pairs.put_all(ruby)?;
         rb_raw::hash_aset_pairs(ruby, hash, &[[key, value]])
+    }
+
+    // A machine stack that runs out under the decoder's recursion faults, and
+    // Ruby's handler then jumps over every Rust frame to raise. The decoder
+    // stops instead while Ruby's margin is left, so its error unwinds
+    // normally. Only a container deeper than any checked before asks Ruby,
+    // since the stack grows down on every supported platform.
+    fn check_stack(&mut self) -> Result<(), Error> {
+        let here = 0u8;
+        let at = std::ptr::from_ref(std::hint::black_box(&here)).addr();
+        if at >= self.roomy {
+            return Ok(());
+        }
+        if rb_raw::stack_exhausted(self.ruby) {
+            return Err(errors::stack_exhausted(self.ruby));
+        }
+        self.roomy = at;
+        Ok(())
     }
 
     fn bad_state<T>(&self) -> Result<T, Error> {
@@ -559,6 +586,7 @@ impl Visitor for RubyVisitor<'_> {
     }
 
     fn begin(&mut self, container: Container) -> Result<Begun<Frame, Value>, Error> {
+        self.check_stack()?;
         self.flush()?;
         let ruby = self.ruby;
         let frame = match container {
@@ -732,6 +760,7 @@ pub fn value(ruby: &Ruby, bytes: &[u8]) -> Result<Value, Error> {
         keys: None,
         arrays: 0,
         scratch: Vec::new(),
+        roomy: usize::MAX,
     };
     decode_value(bytes, RESULT_LIMITS, &mut visitor).map_err(|e| match e {
         DecodeError::Visitor(error) => error,
