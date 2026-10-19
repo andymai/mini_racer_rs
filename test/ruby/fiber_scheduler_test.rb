@@ -127,7 +127,9 @@ class FiberSchedulerLifecycleTest < Minitest::Test
     busy_context.dispose
     before = open_descriptors
     context = busy_context
-    Sync { context.call("busy", 5) }
+    # Long enough that the reply cannot come before the fiber's wait opens
+    # its descriptor, even on a loaded CI machine.
+    Sync { context.call("nap", 100) }
 
     assert_operator open_descriptors, :>, before
     context.dispose
@@ -146,8 +148,9 @@ class FiberSchedulerLifecycleTest < Minitest::Test
     end
     Sync do
       Fiber.scheduler.singleton_class.prepend(counter)
-      # A runner that answers while this thread is descheduled mid-spin, as
-      # on a loaded runner, needs no wait, so a few naps make one certain.
+      # A runner that answers before this thread is back on a CPU needs no
+      # wait, which a loaded CI machine can cause, so up to three naps make
+      # one all but certain.
       3.times { context.call("nap", 100) if waits.zero? }
     end
 
