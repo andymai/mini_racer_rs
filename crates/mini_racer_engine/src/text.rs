@@ -1,8 +1,9 @@
 use crate::sys;
 
-// V8 decodes UTF-8 this short about as fast as a conversion starts, as
-// rusty_v8's own `String::new_from_utf8` finds.
+// V8 decodes shorter UTF-8 faster than a conversion starts: converting all of
+// it made arrays of short BMP and emoji strings about a tenth slower to send.
 const SHORT: usize = 16;
+const WIDE_LEAD: u8 = 0xC4;
 
 /// The characters of valid UTF-8 as V8 stores them once it has decoded it:
 /// one byte each when every one is at most U+00FF, UTF-16 units otherwise.
@@ -36,9 +37,13 @@ impl Transcoder {
         self.decode_long(text)
     }
 
+    // One conversion each: in valid UTF-8 a byte from 0xC4 up starts a
+    // character past U+00FF, and text without one that does not convert to
+    // Latin-1 is not valid.
     fn decode_long(&mut self, text: &[u8]) -> Option<Decoded<'_>> {
-        grow(&mut self.one_byte, text.len());
-        if let Some(count) = sys::utf8_to_latin1(text, &mut self.one_byte) {
+        if text.iter().fold(0, |most, &byte| most.max(byte)) < WIDE_LEAD {
+            grow(&mut self.one_byte, text.len());
+            let count = sys::utf8_to_latin1(text, &mut self.one_byte)?;
             return self.one_byte.get(..count).map(Decoded::OneByte);
         }
         grow(&mut self.two_byte, text.len());
