@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/andymai/mini_racer_rs/compare/v1.0.6...v1.1.0) (2026-10-19)
+
+
+### Features
+
+* **source-maps:** map runtime error frames back to original sources ([#97](https://github.com/andymai/mini_racer_rs/issues/97)) ([d92bb05](https://github.com/andymai/mini_racer_rs/commit/d92bb0505ecd02deb1a0b62aa952268a5bdfb689))
+
 ## [1.0.6](https://github.com/andymai/mini_racer_rs/compare/v1.0.5...v1.0.6) (2026-10-19)
 
 
