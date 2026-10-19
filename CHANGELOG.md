@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.6](https://github.com/andymai/mini_racer_rs/compare/v1.0.5...v1.0.6) (2026-10-19)
+
+
+### Bug Fixes
+
+* **decode:** raise SystemStackError when a decode runs out of stack ([#95](https://github.com/andymai/mini_racer_rs/issues/95)) ([7d21103](https://github.com/andymai/mini_racer_rs/commit/7d2110338352c0259eef2e4f22f439a4875765eb))
+
 ## [1.0.5](https://github.com/andymai/mini_racer_rs/compare/v1.0.4...v1.0.5) (2026-10-19)
 
 
