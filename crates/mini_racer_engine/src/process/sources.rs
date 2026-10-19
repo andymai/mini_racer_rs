@@ -512,6 +512,28 @@ mod tests {
         assert_eq!(sources.made(), 2);
     }
 
+    // Contexts loading two scripts in turn, each gone before the next, sweep
+    // each other's copy; a copy made again after its sweep is kept as one more
+    // than one context read, so each script is converted twice in all.
+    #[test]
+    fn scripts_loaded_in_turn_by_short_lived_contexts_stay_after_their_second_copy() {
+        let sources = Sources::default();
+        let texts = [script(78), script(79)];
+        let keys = texts.each_ref().map(key);
+        for _ in 0..2 {
+            for (key, text) in keys.iter().zip(&texts) {
+                drop(sources.units(key, text, sources.reader()));
+            }
+        }
+        assert_eq!(sources.made(), 4);
+        for _ in 0..3 {
+            for (key, text) in keys.iter().zip(&texts) {
+                drop(sources.units(key, text, sources.reader()));
+            }
+        }
+        assert_eq!(sources.made(), 4);
+    }
+
     #[test]
     fn a_full_list_converts_nothing() {
         let sources = Sources::default();
