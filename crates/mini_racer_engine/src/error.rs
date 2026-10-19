@@ -31,6 +31,8 @@ pub enum SourceMapError {
     Map(#[from] mini_racer_sourcemap::MapError),
     #[error("at most {0} bundles can have a source map")]
     Full(usize),
+    #[error("the bundle is shorter than {0} bytes")]
+    Short(usize),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -26,6 +26,9 @@ const FRAME: &str = "    at ";
 // Past V8's frame limit for a detailed trace, which the engine sets, and so
 // past any trace it hands over; pairing costs this much for each line at most.
 const FRAMES: usize = 256;
+// V8 writes no more frames than `Error.stackTraceLimit`; a longer run of
+// lines that look like frames is the message's, and only this many are read.
+const RUN: usize = 4096;
 
 // One line of V8's default stack format: a frame located by line and column,
 // which V8's detailed trace has a frame for; an async frame, where that trace
@@ -80,16 +83,14 @@ fn number(text: &str) -> Option<u32> {
 /// lines before a later one are taken as the message's, which may hold lines
 /// that look like frames, if pairing from exactly one later line agrees.
 /// With none, or more than one, or a matched frame whose line does not name
-/// its script as `Match::name`, the text comes back as it was.
+/// its script as `Match::name`, the text comes back as it was, as it does
+/// when more than 4,096 lines that look like frames end it.
 #[must_use]
 pub fn rewrite<'t>(text: &'t str, frames: &[Frame], matches: &[Match<'_>]) -> Cow<'t, str> {
     let frames = frames.get(..FRAMES).unwrap_or(frames);
-    let lines: Vec<&str> = text.split('\n').collect();
-    let run = lines
-        .iter()
-        .rposition(|line| !line.starts_with(FRAME))
-        .map_or(0, |at| at.saturating_add(1));
-    let trailing = lines.get(run..).unwrap_or_default();
+    let Some((message, trailing)) = trailing(text) else {
+        return Cow::Borrowed(text);
+    };
     let kinds: Vec<Kind> = trailing.iter().map(|line| kind(line)).collect();
     // A pairing walks only these, so trying each start costs at most a pass
     // over the detailed frames.
@@ -113,13 +114,14 @@ pub fn rewrite<'t>(text: &'t str, frames: &[Frame], matches: &[Match<'_>]) -> Co
     };
     let mut paired = pairs.iter().peekable();
     let mut out = String::with_capacity(text.len());
+    out.push_str(message);
     let mut changed = false;
-    for (index, line) in lines.iter().enumerate() {
+    for (index, line) in trailing.iter().enumerate() {
         if index > 0 {
             out.push('\n');
         }
         let frame = paired
-            .next_if(|&&(at, _)| run.checked_add(at) == Some(index))
+            .next_if(|&&(at, _)| at == index)
             .map(|&(_, frame)| frame);
         match frame.map_or(Relocated::Kept, |frame| relocate(line, frame, matches)) {
             Relocated::Mismatch => return Cow::Borrowed(text),
@@ -135,6 +137,35 @@ pub fn rewrite<'t>(text: &'t str, frames: &[Frame], matches: &[Match<'_>]) -> Co
     } else {
         Cow::Borrowed(text)
     }
+}
+
+// The text before the frame lines that end it, with the line break before
+// them, and those lines; read from the end, so a long message costs nothing
+// past its last line, and `None` past `RUN` of them.
+fn trailing(text: &str) -> Option<(&str, Vec<&str>)> {
+    let mut lines = Vec::new();
+    let mut run = text.len();
+    let mut end = text.len();
+    let mut breaks = memchr::memrchr_iter(b'\n', text.as_bytes());
+    loop {
+        let newline = breaks.next();
+        let start = newline.map_or(0, |at| at.saturating_add(1));
+        let line = text.get(start..end)?;
+        if !line.starts_with(FRAME) {
+            break;
+        }
+        if lines.len() >= RUN {
+            return None;
+        }
+        lines.push(line);
+        run = start;
+        match newline {
+            Some(at) => end = at,
+            None => break,
+        }
+    }
+    lines.reverse();
+    Some((text.get(..run)?, lines))
 }
 
 // The lines, by index into the run, and the detailed frames they pair with,

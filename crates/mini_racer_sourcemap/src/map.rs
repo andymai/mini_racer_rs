@@ -1,9 +1,10 @@
 use std::borrow::Cow;
-use std::sync::OnceLock;
+use std::cell::RefCell;
+use std::fmt;
 
 use memchr::memmem::Finder;
 use serde::Deserialize;
-use serde::de::{Deserializer, IgnoredAny};
+use serde::de::{self, DeserializeSeed, Deserializer, IgnoredAny, MapAccess, SeqAccess, Visitor};
 
 use crate::vlq;
 
@@ -18,6 +19,10 @@ const MAX_NAMES: usize = 1 << 22;
 // A source and the source root, each, in bytes: a rewritten frame prints one
 // of each.
 const MAX_URL: usize = 1 << 16;
+// The map whole, before it is read: the bound the process already puts on
+// the large sources and code caches it keeps, twenty times the largest map
+// measured, sourcesContent included.
+const MAX_MAP: usize = 256 << 20;
 
 #[derive(Debug, thiserror::Error)]
 pub enum MapError {
@@ -55,27 +60,24 @@ pub enum MapError {
     },
     #[error("there are more than {limit} {what}")]
     Limit { what: &'static str, limit: usize },
+    #[error("a source or the source root of the source map holds a control character")]
+    Control,
     #[error("the bundle or its source map is too large")]
     TooLarge,
 }
 
-// serde skips `sourcesContent` and every other field this does not name as it
-// reads them, keeping none of it. Every field is optional here so that an
-// index map is told apart before the fields it lacks.
-#[derive(Deserialize)]
+// The fields a map is read for; `sourcesContent` and every other field are
+// skipped as they are read, keeping none of it. Each is optional here so that
+// an index map is told apart before the fields it lacks, and a field given
+// twice keeps its last value, as `JSON.parse` does.
+#[derive(Default)]
 struct Raw<'a> {
-    #[serde(default)]
     version: Option<f64>,
-    #[serde(default, deserialize_with = "present")]
     sections: bool,
-    #[serde(default, rename = "sourceRoot")]
     source_root: Option<String>,
-    #[serde(default)]
     sources: Option<Vec<Option<String>>>,
-    #[serde(default)]
-    names: Vec<IgnoredAny>,
-    #[serde(borrow, default)]
-    mappings: Option<Text<'a>>,
+    names: usize,
+    mappings: Option<Cow<'a, str>>,
 }
 
 // serde borrows a string from the input only for a field typed `Cow<str>`
@@ -83,9 +85,176 @@ struct Raw<'a> {
 #[derive(Deserialize)]
 struct Text<'a>(#[serde(borrow)] Cow<'a, str>);
 
-// ECMA-426 reads a map with `sections` as an index map, even a null one.
-fn present<'de, D: Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
-    IgnoredAny::deserialize(deserializer).map(|_| true)
+// A read stopped at a cap or a control character carries only serde's own
+// error out, so the reason waits here.
+type Refusal = RefCell<Option<MapError>>;
+
+fn refuse<E: de::Error>(refusal: &Refusal, error: MapError) -> E {
+    let text = error.to_string();
+    *refusal.borrow_mut() = Some(error);
+    E::custom(text)
+}
+
+#[derive(Clone, Copy)]
+struct Fields<'r>(&'r Refusal);
+
+impl<'de> Visitor<'de> for Fields<'_> {
+    type Value = Raw<'de>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a source map object")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Raw<'de>, A::Error> {
+        let mut raw = Raw::default();
+        while let Some(key) = map.next_key::<String>()? {
+            match key.as_str() {
+                "version" => raw.version = map.next_value()?,
+                // ECMA-426 reads a map with `sections` as an index map, even
+                // a null one.
+                "sections" => {
+                    map.next_value::<IgnoredAny>()?;
+                    raw.sections = true;
+                }
+                "sourceRoot" => raw.source_root = map.next_value_seed(Url(self.0))?,
+                "sources" => raw.sources = Some(map.next_value_seed(Sources(self.0))?),
+                "names" => raw.names = map.next_value_seed(Names(self.0))?,
+                "mappings" => raw.mappings = Some(map.next_value::<Text<'de>>()?.0),
+                _ => {
+                    map.next_value::<IgnoredAny>()?;
+                }
+            }
+        }
+        Ok(raw)
+    }
+}
+
+// Each source as it arrives, so the count and each length stop the read
+// before the rest is kept.
+struct Sources<'r>(&'r Refusal);
+
+impl<'de> DeserializeSeed<'de> for Sources<'_> {
+    type Value = Vec<Option<String>>;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
+        deserializer.deserialize_seq(self)
+    }
+}
+
+impl<'de> Visitor<'de> for Sources<'_> {
+    type Value = Vec<Option<String>>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("an array of sources")
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        let mut sources = Vec::new();
+        while let Some(source) = seq.next_element_seed(Url(self.0))? {
+            if sources.len() >= MAX_SOURCES {
+                let limit = MapError::Limit {
+                    what: "sources in the source map",
+                    limit: MAX_SOURCES,
+                };
+                return Err(refuse(self.0, limit));
+            }
+            sources.push(source);
+        }
+        Ok(sources)
+    }
+}
+
+struct Names<'r>(&'r Refusal);
+
+impl<'de> DeserializeSeed<'de> for Names<'_> {
+    type Value = usize;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<usize, D::Error> {
+        deserializer.deserialize_seq(self)
+    }
+}
+
+impl<'de> Visitor<'de> for Names<'_> {
+    type Value = usize;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("an array of names")
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<usize, A::Error> {
+        let mut count = 0_usize;
+        while seq.next_element::<IgnoredAny>()?.is_some() {
+            if count >= MAX_NAMES {
+                let limit = MapError::Limit {
+                    what: "names in the source map",
+                    limit: MAX_NAMES,
+                };
+                return Err(refuse(self.0, limit));
+            }
+            count = count.saturating_add(1);
+        }
+        Ok(count)
+    }
+}
+
+// A source or the root: a string or null, printed into a backtrace line, so
+// bounded and free of anything that would add a line or disguise one.
+#[derive(Clone, Copy)]
+struct Url<'r>(&'r Refusal);
+
+impl Url<'_> {
+    fn checked<E: de::Error>(self, text: &str) -> Result<Option<String>, E> {
+        if text.len() > MAX_URL {
+            let limit = MapError::Limit {
+                what: "bytes in a source or the source root",
+                limit: MAX_URL,
+            };
+            return Err(refuse(self.0, limit));
+        }
+        if text.chars().any(unprintable) {
+            return Err(refuse(self.0, MapError::Control));
+        }
+        Ok(Some(text.to_owned()))
+    }
+}
+
+impl<'de> DeserializeSeed<'de> for Url<'_> {
+    type Value = Option<String>;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
+        deserializer.deserialize_option(self)
+    }
+}
+
+impl<'de> Visitor<'de> for Url<'_> {
+    type Value = Option<String>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a string or null")
+    }
+
+    fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+        Ok(None)
+    }
+
+    fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+        Ok(None)
+    }
+
+    fn visit_some<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
+        deserializer.deserialize_str(self)
+    }
+
+    fn visit_str<E: de::Error>(self, text: &str) -> Result<Self::Value, E> {
+        self.checked(text)
+    }
+}
+
+// Control characters, the line and paragraph separators, and the bidi
+// embeddings, overrides and isolates.
+fn unprintable(c: char) -> bool {
+    c.is_control()
+        || matches!(c, '\u{2028}' | '\u{2029}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
 }
 
 const UNMAPPED: u32 = u32::MAX;
@@ -127,12 +296,11 @@ pub struct Original<'a> {
 
 /// A bundle with its parsed source map, checked against each other.
 pub struct SourceMap {
-    bundle: Box<str>,
-    // The bundle's first bytes, and the bundle whole for a search linear
-    // however it repeats itself, built the first time the first place those
-    // bytes occur is not where the bundle starts.
+    // The bundle's first bytes, and the bundle whole, its only copy, for a
+    // search linear however it repeats itself; built here, as a forked child
+    // may share the map and must never wait on one built on demand.
     head: Finder<'static>,
-    whole: OnceLock<Finder<'static>>,
+    whole: Finder<'static>,
     // Joined to each source when one is printed, so a long root costs once.
     root: Box<str>,
     sources: Box<[Option<Box<str>>]>,
@@ -157,6 +325,7 @@ impl SourceMap {
         if bundle.is_empty() {
             return Err(MapError::EmptyBundle);
         }
+        within("bytes in the source map", map.len(), MAX_MAP)?;
         // serde would read a struct from a JSON array too.
         let first = map
             .iter()
@@ -164,30 +333,28 @@ impl SourceMap {
         if first != Some(&b'{') {
             return Err(MapError::NotAnObject);
         }
-        let raw: Raw<'_> = serde_json::from_slice(map)?;
+        let refusal = Refusal::default();
+        let mut json = serde_json::Deserializer::from_slice(map);
+        let raw = match json
+            .deserialize_map(Fields(&refusal))
+            .and_then(|raw| json.end().map(|()| raw))
+        {
+            Ok(raw) => raw,
+            Err(error) => return Err(refusal.into_inner().unwrap_or(MapError::Json(error))),
+        };
         if raw.sections {
             return Err(MapError::IndexMap);
         }
         if raw.version != Some(3.0) {
             return Err(MapError::Version);
         }
-        let Some(Text(mappings)) = raw.mappings else {
+        let Some(mappings) = raw.mappings else {
             return Err(MapError::Missing("mappings"));
         };
         let Some(listed) = raw.sources else {
             return Err(MapError::Missing("sources"));
         };
-        within("sources in the source map", listed.len(), MAX_SOURCES)?;
-        within("names in the source map", raw.names.len(), MAX_NAMES)?;
-        let longest = listed
-            .iter()
-            .flatten()
-            .chain(&raw.source_root)
-            .map(String::len)
-            .max()
-            .unwrap_or(0);
-        within("bytes in a source or the source root", longest, MAX_URL)?;
-        let (starts, segments) = decode(mappings.as_bytes(), listed.len(), raw.names.len())?;
+        let (starts, segments) = decode(mappings.as_bytes(), listed.len(), raw.names)?;
         let shape = Shape::of(bundle, starts.len().saturating_sub(1))?;
         check(&starts, &segments, &shape)?;
         // Joined with a slash unless it ends in one, as ECMA-426 joins them,
@@ -203,9 +370,8 @@ impl SourceMap {
             .get(..HEAD.min(bundle.len()))
             .unwrap_or_default();
         Ok(Self {
-            bundle: bundle.into(),
             head: Finder::new(head).into_owned(),
-            whole: OnceLock::new(),
+            whole: Finder::new(bundle.as_bytes()).into_owned(),
             root: root.into_boxed_str(),
             sources: listed
                 .into_iter()
@@ -218,9 +384,10 @@ impl SourceMap {
         })
     }
 
+    /// The bundle's bytes, UTF-8.
     #[must_use]
-    pub fn bundle(&self) -> &str {
-        &self.bundle
+    pub fn bundle(&self) -> &[u8] {
+        self.whole.needle()
     }
 
     /// Where the bundle first starts in `source`, if `source` holds it whole
@@ -228,17 +395,14 @@ impl SourceMap {
     /// in both however the bundle repeats itself.
     #[must_use]
     pub fn find(&self, source: &[u8]) -> Option<Placement> {
-        let bundle = self.bundle.as_bytes();
+        let bundle = self.bundle();
+        // Almost always the bundle starts where its first bytes first occur.
         let first = self.head.find(source)?;
         let at = if source.get(first..)?.starts_with(bundle) {
             first
         } else {
             let after = first.checked_add(1)?;
-            if source.len().saturating_sub(after) < bundle.len() {
-                return None;
-            }
-            let whole = self.whole.get_or_init(|| Finder::new(bundle).into_owned());
-            after.checked_add(whole.find(source.get(after..)?)?)?
+            after.checked_add(self.whole.find(source.get(after..)?)?)?
         };
         let prefix = std::str::from_utf8(source.get(..at)?).ok()?;
         Shape::end_of(prefix, bundle.first().copied())
@@ -673,7 +837,7 @@ pub mod tests {
         );
         let map = SourceMap::new(&bundle(1), text.as_bytes()).unwrap();
         assert_eq!(map.original(AT_START, 1, 3), original("a.js", 4, 6));
-        assert_eq!(map.bundle(), bundle(1));
+        assert_eq!(map.bundle(), bundle(1).as_bytes());
     }
 
     #[test]

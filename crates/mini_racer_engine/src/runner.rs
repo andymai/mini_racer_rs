@@ -80,7 +80,7 @@ struct Runtime {
 struct Matched {
     script_id: i32,
     // As V8 prints the script in a frame: its source URL or its file name.
-    name: String,
+    name: Arc<str>,
     map: Arc<SourceMap>,
     placement: Placement,
 }
@@ -324,7 +324,7 @@ fn adopt(
             (inherited.context.clone(), inherited.filter.clone()),
             (key, inherited.snapshot),
         ));
-        // Try-locked, as the parent's runner may have held it at the fork.
+        // A child only try-locks what it inherited.
         if let Ok(matched) = inherited.matched.try_lock() {
             lock(&runtime.matched).clone_from(&matched);
         }
@@ -848,17 +848,21 @@ fn match_bundle(
         .ok()
         .filter(|url| url.length() > 0)
         .unwrap_or(filename);
-    let name = match printed.to_rust_string_lossy(tc) {
-        name if name.is_empty() => "<anonymous>".to_owned(),
-        name => name,
+    let name: Arc<str> = match printed.to_rust_string_lossy(tc) {
+        name if name.is_empty() => Arc::from("<anonymous>"),
+        name => Arc::from(name),
     };
     tc.set_capture_stack_trace_for_uncaught_exceptions(true, DETAILED_FRAMES);
+    let script_id = script.script_id();
     let mut matched = lock(&runtime.matched);
+    // V8's compilation cache hands a source evaluated again its earlier
+    // script, id and all, whose entry gives way to this one and its map.
+    matched.retain(|kept| kept.script_id != script_id);
     if matched.len() >= MATCHED {
         matched.remove(0);
     }
     matched.push(Matched {
-        script_id: script.script_id(),
+        script_id,
         name,
         map,
         placement,
