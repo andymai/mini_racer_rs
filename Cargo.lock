@@ -468,6 +468,7 @@ version = "1.0.6"
 dependencies = [
  "deno_core_icudata",
  "libc",
+ "mini_racer_sourcemap",
  "mini_racer_sync",
  "mini_racer_wire",
  "thiserror",

@@ -4,7 +4,7 @@
 
 | Engine | Done | Planned | Deviation |
 |---|---|---|---|
-| CRuby | 54 | 0 | 27 |
+| CRuby | 54 | 0 | 28 |
 | TruffleRuby | 58 | 0 | 0 |
 
 ## Surface
@@ -191,6 +191,12 @@ Approved 2026-10-18.
 mini_racer_rs returns the same filtered results from a snapshot-based context as from a context without a snapshot. In a context made from `MiniRacer::Snapshot.new("Object.getOwnPropertyDescriptors = () => ({})")`, `({a: 1, f() {}})` returns `{"a" => 1}`, and `[1, function() {}]` returns `[1]`. mini_racer 0.22.1 returns `nil` for both. Both gems copy results that V8 refuses to serialize as is through a filter in a separate safe context. mini_racer_rs keeps an untouched context in each snapshot blob and uses it for that filter, while mini_racer 0.22.1 builds the safe context from the snapshot, exposing the filter's built-ins to snapshot code. User code still sees the replacement in both gems: `Object.getOwnPropertyDescriptors({a: 1})` returns `{}`.
 
 Approved 2026-10-16.
+
+### `behavior:source-maps@ruby`
+
+After `MiniRacerRs.register_source_map(bundle, map)`, a `MiniRacer::RuntimeError` raised from a context that evaluated a source holding `bundle` gives, for each JavaScript frame inside the bundle, the original position the map gives in place of V8's, and keeps V8's function name. mini_racer 0.22.1 has no source maps. What JavaScript reads, such as `Error.prototype.stack`, is unchanged.
+
+Pending review.
 
 ### `behavior:stack-exhaustion@ruby`
 

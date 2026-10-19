@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use mini_racer_sourcemap::{Frame, Match, Placement, SourceMap};
 use mini_racer_sync::{
     DispatchId, DispatchKind, Halt, Interrupt, Phase, Side, TerminationCause, ToV8, lock,
 };
@@ -71,7 +72,24 @@ struct Runtime {
     hoisting: Mutex<Hoisting>,
     // The values of each fast call running, innermost last, for `hoisted`.
     frames: Mutex<Vec<v8::Global<v8::Array>>>,
+    // Scripts that hold a bundle with a source map, latest last.
+    matched: Mutex<Vec<Matched>>,
 }
+
+#[derive(Clone)]
+struct Matched {
+    script_id: i32,
+    // As V8 prints the script in a frame: its source URL or its file name.
+    name: String,
+    map: Arc<SourceMap>,
+    placement: Placement,
+}
+
+// A context evaluates its bundle once or a few times, each a new script.
+const MATCHED: usize = 16;
+// V8's default `Error.stackTraceLimit`, so the detailed trace holds every
+// frame of a default stack.
+const DETAILED_FRAMES: i32 = 10;
 
 struct Uncached {
     script: v8::Global<v8::UnboundScript>,
@@ -149,6 +167,7 @@ impl Runtime {
             uncached: Mutex::default(),
             hoisting: Mutex::default(),
             frames: Mutex::default(),
+            matched: Mutex::default(),
         }
     }
 }
@@ -305,6 +324,10 @@ fn adopt(
             (inherited.context.clone(), inherited.filter.clone()),
             (key, inherited.snapshot),
         ));
+        // Try-locked, as the parent's runner may have held it at the fork.
+        if let Ok(matched) = inherited.matched.try_lock() {
+            lock(&runtime.matched).clone_from(&matched);
+        }
         locker.set_slot(Arc::clone(&runtime));
         runtime
     };
@@ -784,6 +807,7 @@ fn evaluate(
         Plan::Compile(None)
     };
     let too_large = || EngineError::Internal("source too large".to_owned());
+    let text = source;
     let source = shared_source(tc, runtime, plan.key(), source)
         .or_else(|| string(tc, source))
         .ok_or_else(too_large)?;
@@ -791,6 +815,7 @@ fn evaluate(
     let origin = serialize::origin(tc, name.into());
     let (script, make) = compile(tc, runtime, source, &origin, plan);
     let script = script.ok_or_else(|| failure(tc, JsErrorKind::Parse))?;
+    match_bundle(tc, runtime, text, name, script);
     let value = script
         .run(tc)
         .ok_or_else(|| failure(tc, JsErrorKind::Runtime))?;
@@ -800,6 +825,86 @@ fn evaluate(
         lock(&runtime.uncached).push(Uncached { script, building });
     }
     Ok(reply)
+}
+
+// A script holding a bundle with a source map is recorded before it runs,
+// and from then on its isolate keeps V8's detailed trace with each error,
+// which only the rewrite of a runtime error's message reads.
+fn match_bundle(
+    tc: &mut Tc<'_, '_, '_, '_>,
+    runtime: &Runtime,
+    source: &JsText,
+    filename: v8::Local<'_, v8::String>,
+    script: v8::Local<'_, v8::Script>,
+) {
+    let JsText::Utf8(bytes) = source else {
+        return;
+    };
+    let Some((map, placement)) = runtime.generation.source_maps().find(bytes) else {
+        return;
+    };
+    let url = script.get_unbound_script(tc).get_source_url(tc);
+    let printed = v8::Local::<v8::String>::try_from(url)
+        .ok()
+        .filter(|url| url.length() > 0)
+        .unwrap_or(filename);
+    let name = match printed.to_rust_string_lossy(tc) {
+        name if name.is_empty() => "<anonymous>".to_owned(),
+        name => name,
+    };
+    tc.set_capture_stack_trace_for_uncaught_exceptions(true, DETAILED_FRAMES);
+    let mut matched = lock(&runtime.matched);
+    if matched.len() >= MATCHED {
+        matched.remove(0);
+    }
+    matched.push(Matched {
+        script_id: script.script_id(),
+        name,
+        map,
+        placement,
+    });
+}
+
+// The locations of a runtime error's frames in a bundle with a source map,
+// as its map gives them, paired with V8's detailed trace for the exception.
+fn relocated(tc: &Tc<'_, '_, '_, '_>, message: String) -> String {
+    let Some(runtime) = tc.get_slot::<Arc<Runtime>>().cloned() else {
+        return message;
+    };
+    let scripts = lock(&runtime.matched).clone();
+    if scripts.is_empty() {
+        return message;
+    }
+    let trace = tc
+        .exception()
+        .and_then(|exception| v8::Exception::get_stack_trace(tc, exception))
+        .or_else(|| tc.message().and_then(|message| message.get_stack_trace(tc)));
+    let Some(trace) = trace else {
+        return message;
+    };
+    let frames: Vec<Frame> = (0..trace.get_frame_count())
+        .filter_map(|index| trace.get_frame(tc, index))
+        .filter_map(|frame| {
+            Some(Frame {
+                script_id: i32::try_from(frame.get_script_id()).ok()?,
+                line: u32::try_from(frame.get_line_number()).ok()?,
+                column: u32::try_from(frame.get_column()).ok()?,
+            })
+        })
+        .collect();
+    let matches: Vec<Match<'_>> = scripts
+        .iter()
+        .map(|script| Match {
+            script_id: script.script_id,
+            name: &script.name,
+            map: &script.map,
+            placement: script.placement,
+        })
+        .collect();
+    match mini_racer_sourcemap::rewrite(&message, &frames, &matches) {
+        Cow::Borrowed(_) => message,
+        Cow::Owned(text) => text,
+    }
 }
 
 // `max_memory:` measures the heap, where mini_racer keeps the source, so a
@@ -1588,6 +1693,11 @@ fn described(tc: &Tc<'_, '_, '_, '_>, kind: JsErrorKind) -> EngineError {
                 |text| text.to_rust_string_lossy(tc),
             )
     });
+    let message = if kind == JsErrorKind::Runtime {
+        relocated(tc, message)
+    } else {
+        message
+    };
     EngineError::from(JsError { kind, message })
 }
 
