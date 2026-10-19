@@ -71,7 +71,7 @@ dependencies = [
 
 [[package]]
 name = "mini_racer_wire"
-version = "1.0.4"
+version = "1.0.5"
 dependencies = [
  "thiserror",
 ]
