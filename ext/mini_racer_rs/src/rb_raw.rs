@@ -110,8 +110,9 @@ pub fn fiber_scheduler(_ruby: &Ruby) -> bool {
 /// `SystemStackError`.
 pub fn stack_exhausted(_ruby: &Ruby) -> bool {
     // SAFETY: the `&Ruby` argument proves this thread holds the GVL, and
-    // ruby_stack_check only compares the stack pointer with the bounds Ruby
-    // keeps for the current thread or fiber.
+    // ruby_stack_check only records the stack pointer, as Ruby's own checks do
+    // on every method call, and compares it with the bounds Ruby keeps for the
+    // current thread or fiber.
     unsafe { rb_sys::ruby_stack_check() != 0 }
 }
 
