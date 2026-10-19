@@ -156,6 +156,12 @@ gem "mini_racer", github: "andymai/mini_racer_rs", tag: "vX.Y.Z", glob: "shim/*.
 
 The repository tests shim resolution with `path:` sources and rtlcss in `test/consumers/transitive/`. The `github:` form has not been run end to end. A dependency whose `mini_racer` requirement excludes version 0.22.1 cannot use the shim.
 
+### Forking servers such as Puma
+
+Prime the process-wide V8 code cache before forking by evaluating each bundle of 1 MB or more twice in the master, using exactly the source text and file name the renderer uses, then dispose those contexts. The second evaluation builds the cache, later matching evaluations compile from it, and forked children inherit it. For Babel's 2.3 MB bundle at commit `5e13c1c`, a forked child's first load took, as medians across 5 trials, 60.8 ms when the parent had not loaded it, 65.5 ms after one load, and 25.0 ms after two loads. You can prime a `react-rails` app by building its server renderer twice. Parent contexts are not used in children. Only the cache carries over.
+
+With `mini_racer` 0.22.1, each worker compiles the bundle from source on its first load because there is no code cache.
+
 ## Benchmarks
 
 | Workload | mini_racer 0.22.1 | mini_racer_rs | Ratio |
