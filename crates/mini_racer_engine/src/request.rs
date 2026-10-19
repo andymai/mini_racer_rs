@@ -505,7 +505,6 @@ impl<'s, 'b> Builder<'s, 'b, '_, '_> {
         v8::String::new_from_two_byte(self.scope, units, v8::NewStringType::Normal).map(Into::into)
     }
 
-    // Reads the string from `at` up to the cursor with V8's own deserializer.
     fn deserialized(&mut self, at: Cursor<'b>) -> Option<v8::Local<'s, v8::Value>> {
         let len = at.rest.len().checked_sub(self.bytes.rest.len())?;
         let mut bytes = vec![tag::HEADER, u8::try_from(WRITE_VERSION).ok()?];
