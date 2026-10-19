@@ -14,7 +14,7 @@ The V8 version changes only in a minor release, never a patch, and the release n
 
 ## Covered
 
-The public API covers the `MiniRacer` namespace defined by mini_racer 0.22.1, plus the `MiniRacerRs` constants described above.
+The public API covers the `MiniRacer` namespace defined by mini_racer 0.22.1, plus `MiniRacerRs.register_source_map` and the `MiniRacerRs` constants described above.
 
 `COMPATIBILITY.md` lists the mini_racer 0.22.1 public surface and its status. Deliberate differences include a reason and a test. Compatibility is also checked against mini_racer's unmodified test suite.
 

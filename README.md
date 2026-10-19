@@ -101,6 +101,7 @@ ExecJS.eval("[1, 2].map(x => x * 2)")         # => [2, 4]
 | `Context#pump_message_loop`, `#perform_microtask_checkpoint` | Runs pending V8 tasks and microtasks. |
 | `Snapshot.new`, `#warmup!`, `#dump`, `Snapshot.load` | Creates, warms, serializes, and loads startup snapshots. |
 | `Platform.set_flags!(*flags)` | Sets V8 flags before the first context. |
+| `MiniRacerRs.register_source_map(bundle, map)` | Registers a source map for a bundle, so `MiniRacer::RuntimeError` backtraces show its original files and positions. |
 
 `Context.new` accepts these options:
 
@@ -112,6 +113,8 @@ ExecJS.eval("[1, 2].map(x => x * 2)")         # => [2, 4]
 | `snapshot:` | A `MiniRacer::Snapshot` used to initialize the context. |
 
 Errors are `MiniRacer::ParseError`, `MiniRacer::RuntimeError` with JavaScript frames in its backtrace, `MiniRacer::ScriptTerminatedError`, `MiniRacer::V8OutOfMemoryError`, `MiniRacer::ContextDisposedError`, `MiniRacer::SnapshotError`, and `MiniRacer::PlatformAlreadyInitialized`. All descend from `MiniRacer::Error`.
+
+**Source maps.** The bundle must be a UTF-8 String of at least 1,024 bytes, and the map must be a JSON String in source map v3 format. When a context evaluates a UTF-8 source containing that bundle, `MiniRacer::RuntimeError` backtraces replace V8 positions inside it with mapped original file, line, and column positions while retaining V8 function names. Async frames, frames after the tenth, `eval` or `new Function` code, frames outside the bundle, positions the map does not cover, and stacks reformatted by JavaScript keep V8 positions. Detailed stack capture makes creating and throwing errors in affected contexts more expensive, while measured React and MUI server renders were unchanged. Registration is process wide and holds at most eight bundles, and a map cannot be removed; registering a bundle again replaces its map. Trust bundles and maps like application code because source names appear in Ruby backtraces.
 
 ## Switching from mini_racer
 
