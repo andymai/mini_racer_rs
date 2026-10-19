@@ -105,6 +105,17 @@ pub fn fiber_scheduler(_ruby: &Ruby) -> bool {
     scheduler != rb_sys::Qnil as rb_sys::VALUE
 }
 
+/// Whether the current thread's or fiber's machine stack has less room left
+/// than Ruby keeps for a C function, where its own method calls raise
+/// `SystemStackError`.
+pub fn stack_exhausted(_ruby: &Ruby) -> bool {
+    // SAFETY: the `&Ruby` argument proves this thread holds the GVL, and
+    // ruby_stack_check only records the stack pointer, as Ruby's own checks do
+    // on every method call, and compares it with the bounds Ruby keeps for the
+    // current thread or fiber.
+    unsafe { rb_sys::ruby_stack_check() != 0 }
+}
+
 pub fn dbl2big(_ruby: &Ruby, n: f64) -> Value {
     // SAFETY: rb_dbl2big allocates a Bignum and requires the GVL, which the
     // `&Ruby` argument proves this thread holds.

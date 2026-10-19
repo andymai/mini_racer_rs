@@ -173,10 +173,15 @@ impl Spill {
     }
 }
 
+// Each holder's class is looked up once, by a Ruby call whose failure panics;
+// near the end of a fiber's stack Ruby fails it with SystemStackError, so it is
+// looked up here instead, at load, with room to spare.
 pub fn init(ruby: &Ruby, rs: RModule) -> Result<(), Error> {
     for name in ["Pins", "Spill"] {
         rs.define_class(name, ruby.class_object())?
             .undef_default_alloc_func();
     }
+    Pins::class(ruby);
+    Spill::class(ruby);
     Ok(())
 }

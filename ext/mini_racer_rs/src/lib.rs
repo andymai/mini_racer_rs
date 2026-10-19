@@ -40,6 +40,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     racer.define_class("JavaScriptFunction", ruby.class_object())?;
     gc_root::init(ruby, rs)?;
     errors::init(ruby)?;
+    decode::init(ruby);
+    encode::init(ruby);
     platform::init(ruby, racer)?;
     context::init(ruby, racer)?;
     snapshot::init(ruby, racer)?;

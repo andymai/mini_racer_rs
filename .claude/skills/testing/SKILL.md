@@ -20,6 +20,7 @@ A change gets a test at the lowest layer that can see it, and the suites above i
 | A protocol interleaving | a model in `crates/mini_racer_sync/tests/loom.rs` | the loom command in `CLAUDE.md`, then `-- <model>` |
 | The Ruby API | `test/ruby/<area>_test.rb` | `bundle exec ruby -Itest/ruby test/ruby/<area>_test.rb -n <test>` |
 | Forking with contexts | `test/ruby/fork/<what>_case.rb` | `bundle exec ruby test/ruby/fork/<what>_case.rb; echo $?` |
+| Little stack left on a fiber or a thread | `test/ruby/stack/<what>_case.rb` | `bundle exec ruby -Itest/ruby test/ruby/stack_test.rb -n test_<what>` (StackTest sets Ruby's smallest stacks) |
 | Values or programs against the real gem | a case in `test/diff/corpus/curated.json` | `bundle exec ruby test/diff/run.rb --strict` |
 | A real library | `DiffConsumers::WORKLOADS` in `test/consumers/workloads.rb` | `bundle exec ruby test/diff/run.rb --set consumers --strict` |
 | Memory or lifecycle over minutes | a script in `test/stress/` | reference.md |

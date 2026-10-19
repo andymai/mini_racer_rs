@@ -34,6 +34,12 @@ static BINARY: StaticRoot<RClass> = StaticRoot::new(|ruby| {
         .expect("the vocabulary defines MiniRacer::Binary")
 });
 
+// Resolved at load, as the error classes are, rather than first near the end
+// of the stack, where its lookup could fail and panic.
+pub fn init(ruby: &Ruby) {
+    BINARY.get(ruby);
+}
+
 enum EncodeError {
     // mini_racer's text for a value it cannot send, cut as it cuts it.
     Unsupported(Vec<u8>),

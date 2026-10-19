@@ -38,8 +38,10 @@ macro_rules! roots {
                 StaticRoot::new(|ruby| resolved(ruby, $module, $name));
         )*
 
+        // Resolved now, since a root resolved first near the end of the stack
+        // would panic on the SystemStackError its Ruby calls raise there.
         pub fn init(ruby: &Ruby) -> Result<(), Error> {
-            $( class(ruby, $module, $name)?; )*
+            $( class(ruby, $module, $name)?; $root.get(ruby); )*
             SCRIPT.get(ruby).define_method("cause", export!(method cause, 0))?;
             Ok(())
         }
@@ -153,4 +155,10 @@ pub fn runtime(ruby: &Ruby, message: impl AsRef<[u8]>) -> Error {
 
 pub fn internal(ruby: &Ruby, message: impl AsRef<[u8]>) -> Error {
     raised(ruby, INTERNAL.get(ruby), message)
+}
+
+pub const STACK_EXHAUSTED: &str = "stack level too deep";
+
+pub fn stack_exhausted(ruby: &Ruby) -> Error {
+    Error::new(ruby.exception_sys_stack_error(), STACK_EXHAUSTED)
 }
