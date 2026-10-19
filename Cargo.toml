@@ -29,8 +29,8 @@ mini_racer_sync = {path = "crates/mini_racer_sync"}
 mini_racer_wire = {path = "crates/mini_racer_wire"}
 proptest = {version = "1", default-features = false, features = ["std"]}
 rb-sys = "=0.9.130"
-serde = {version = "1", features = ["derive"]}
-serde_json = "1"
+serde = {version = "1", default-features = false, features = ["alloc", "derive"]}
+serde_json = {version = "1", default-features = false, features = ["alloc"]}
 thiserror = "2"
 v8 = "=152.2.0"
 
