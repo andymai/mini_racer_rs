@@ -462,12 +462,43 @@ mod tests {
         );
     }
 
-    // V8 writes no more frames than `Error.stackTraceLimit`, so a run of
-    // frame lines past a few thousand is a message's, and stays as it is.
+    // `Error.stackTraceLimit` has no cap, so the frames of an error thrown
+    // deep in the bundle run on for thousands of lines; the top ones, which
+    // V8's detailed trace covers, are rewritten.
     #[test]
-    fn leaves_a_run_of_too_many_frame_lines_alone() {
-        let text = format!("Error: x{}", "\n    at f (<eval>:11:5)".repeat(5_000));
-        unchanged(&text, &[frame(EVAL, 11, 5)]);
+    fn rewrites_the_top_of_a_run_of_thousands_of_frames() {
+        let deep = "\n    at down (<eval>:12:1)".repeat(5_000);
+        let text = format!("Error: deep\n    at Ue (<eval>:11:5){deep}");
+        let frames: Vec<Frame> = std::iter::once(frame(EVAL, 11, 5))
+            .chain(std::iter::repeat_n(frame(EVAL, 12, 1), 9))
+            .collect();
+        let mapped = format!("\n    at down ({APP}:10:5)").repeat(9);
+        let rest = "\n    at down (<eval>:12:1)".repeat(4_991);
+        assert_eq!(
+            rewritten(&text, &frames, OWN_LINE),
+            format!("Error: deep\n    at Ue ({HEADER}:41:13){mapped}{rest}")
+        );
+    }
+
+    // When pairing from the first frame line disagrees, each later start is
+    // tried, which costs the run times the detailed frames, so only a run of
+    // up to 4,096 lines gets that search.
+    #[test]
+    fn searches_past_message_lines_in_a_run_of_up_to_4096() {
+        let run = |lines: usize| {
+            let filler = "\n    at x (native)".repeat(lines - 3);
+            format!(
+                "Error: bad\n    at fake (<eval>:1:1){filler}\n    at Ue (<eval>:11:5)\n    at <eval>:12:1"
+            )
+        };
+        let frames = [frame(EVAL, 11, 5), frame(EVAL, 12, 1)];
+        let at_the_bound = run(4_096);
+        let rewritten_text = rewritten(&at_the_bound, &frames, OWN_LINE);
+        assert!(
+            rewritten_text.ends_with(&format!("    at Ue ({HEADER}:41:13)\n    at {APP}:10:5"))
+        );
+        assert!(rewritten_text.contains("    at fake (<eval>:1:1)\n"));
+        unchanged(&run(4_097), &frames);
     }
 
     // The message before the frames is copied whole, however many lines.

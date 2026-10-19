@@ -191,6 +191,13 @@ class SourceMapRegistrationTest < Minitest::Test
     assert_raises(TypeError) { MiniRacerRs.register_source_map("x", nil) }
   end
 
+  # A map past 256 MiB is refused by its length, before it is copied or read.
+  def test_refuses_a_map_past_256_mib
+    map = "{#{" " * (256 << 20)}}"
+    error = assert_raises(ArgumentError) { MiniRacerRs.register_source_map(padded("var x = 1;\n"), map) }
+    assert_equal "there are more than 268435456 bytes in the source map", error.message
+  end
+
   # A bundle short enough to turn up in unrelated code is refused.
   def test_refuses_a_bundle_shorter_than_1_kib
     ["", "throw new Error(", "x" * 1023].each do |bundle|

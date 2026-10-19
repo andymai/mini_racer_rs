@@ -160,6 +160,49 @@ fn rewrites_a_bundle_named_by_its_source_url() {
     assert_eq!(got, mapped(&want, "app.js", (0, 0), (6, 0)));
 }
 
+// `Error.stackTraceLimit` has no cap: an error thrown 5,000 frames deep
+// prints them all, and V8's detailed trace covers the top ten.
+#[test]
+fn rewrites_the_top_frames_of_an_error_thrown_thousands_deep() {
+    let bundle = format!(
+        "function UeK() {{ throw new Error('deep K'); }}\n\
+         function downK(n) {{ return n ? downK(n - 1) : UeK(); }}\n\
+         globalThis.down = downK; /*{}*/\n",
+        "pad ".repeat(256)
+    );
+    register(&bundle);
+    let matched = spawn();
+    eval(&matched, "<eval>", &bundle).expect("the bundle loads");
+    let message = runtime_error(eval(
+        &matched,
+        "<eval>",
+        "Error.stackTraceLimit = Infinity; down(5000)",
+    ));
+    let lines: Vec<&str> = message.lines().collect();
+    assert!(lines.len() > 5_000, "{} lines", lines.len());
+    assert!(
+        lines[1].starts_with("    at UeK (webpack://app/./src/Header.jsx:11:"),
+        "{}",
+        lines[1]
+    );
+    for line in &lines[2..11] {
+        assert!(
+            line.starts_with("    at downK (webpack://app/./src/App.jsx:21:"),
+            "{line}"
+        );
+    }
+    assert!(
+        lines[11].starts_with("    at downK (<eval>:2:"),
+        "{}",
+        lines[11]
+    );
+    assert!(
+        lines[4_000].starts_with("    at downK (<eval>:2:"),
+        "{}",
+        lines[4_000]
+    );
+}
+
 #[test]
 fn refuses_a_map_that_does_not_parse_or_fit() {
     let maps = fork::current().source_maps();

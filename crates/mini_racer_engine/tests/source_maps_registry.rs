@@ -85,6 +85,9 @@ fn keeps_the_latest_16_scripts_of_a_context() {
         if n == 0 {
             eval(&context, "<eval>", "globalThis.first = render").expect("kept");
         }
+        if n == 1 {
+            eval(&context, "<eval>", "globalThis.second = render").expect("kept");
+        }
     }
     let newest = runtime_error(eval(&context, "<eval>", "render()"));
     assert!(newest.contains("(webpack://app/"), "{newest}");
@@ -94,6 +97,10 @@ fn keeps_the_latest_16_scripts_of_a_context() {
     assert!(oldest.contains("    at mapper (<eval>:4:"), "{oldest}");
     assert!(oldest.contains("    at renderI (<eval>:4:"), "{oldest}");
     assert!(oldest.contains("    at UeI (webpack://app/"), "{oldest}");
+    // The second script is the oldest of the 16 kept.
+    let kept = runtime_error(eval(&context, "<eval>", "second()"));
+    assert!(kept.contains("    at renderI (webpack://app/"), "{kept}");
+    assert!(kept.contains("    at mapper (webpack://app/"), "{kept}");
 }
 
 // The registry holds UTF-8 bundles, and an eval sent as Latin-1 or UTF-16

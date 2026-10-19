@@ -1385,9 +1385,6 @@ pub mod tests {
         assert!(matches!(error, Some(MapError::Mappings(2))), "{error:?}");
     }
 
-    // Names and sources arrive whole from the JSON, which costs what their
-    // bytes do, and the map keeps no more than one copy of each source and
-    // of the root.
     // Garbage after the first source past a cap shows the cap was found as
     // the sources arrived, before the rest was read.
     #[test]
@@ -1450,6 +1447,9 @@ pub mod tests {
         assert!(SourceMap::new(&bundle(1), fine.as_bytes()).is_ok());
     }
 
+    // Sources are read one by one and names only counted, so arrays far
+    // past what the mappings use stop at their caps, and the map keeps one
+    // copy of each source and of the root, joined only when one is printed.
     #[test]
     fn caps_names_and_sources_far_past_what_the_mappings_use() {
         let names = vec!["\"n\""; MAX_NAMES].join(",");
