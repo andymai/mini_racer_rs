@@ -157,9 +157,14 @@ impl<'a> Writer<'a> {
         }
         self.out.push(tag::TWO_BYTE_STRING);
         self.len(bytes);
-        self.out.reserve(bytes);
-        for unit in units {
-            self.out.extend_from_slice(&unit.to_le_bytes());
+        // Written into slots made for them at once, which the compiler turns
+        // into wide copies; a unit at a time ran ten times slower.
+        let start = self.out.len();
+        self.out.resize(start.saturating_add(bytes), 0);
+        if let Some(slots) = self.out.get_mut(start..) {
+            for (slot, unit) in slots.as_chunks_mut::<2>().0.iter_mut().zip(units) {
+                *slot = unit.to_le_bytes();
+            }
         }
     }
 

@@ -49,7 +49,8 @@ class CallTest < Minitest::Test
       globalThis.points = (...a) => a.map((s) => Array.from(s, (c) => c.codePointAt(0)))
       globalThis.valuePoints = (h) => points(...Object.values(h))
     JS
-    texts = ["", "hello", "a\0b", "café", "東京", "\u{1F600}", "a\xFFb", "the quick brown fox é"]
+    texts = ["", "hello", "a\0b", "café", "東京", "\u{1F600}", "a\xFFb", "the quick brown fox é",
+             "the quick brown fox 東京", "the quick brown fox \u{1F600}", "the quick brown fox \xE6\x9D",]
     expected = texts.map { |text| text.scrub("�").codepoints }
     states = %i[scanned unscanned]
     %w[UTF-8 US-ASCII ASCII-8BIT Windows-1252].each do |encoding|
@@ -129,9 +130,7 @@ class CallTest < Minitest::Test
 
   private
 
-  def scanned(text)
-    text.tap(&:valid_encoding?)
-  end
+  def scanned(text) = text.tap(&:valid_encoding?)
 
   # Setting a byte past ASCII and back leaves Ruby's coderange unknown.
   def unscanned(text)

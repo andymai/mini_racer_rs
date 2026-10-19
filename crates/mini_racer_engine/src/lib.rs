@@ -14,8 +14,10 @@ mod spin;
     reason = "the engine's only FFI fence: symbols the linker routes into V8"
 )]
 mod sys;
+mod text;
 
 pub use context::{ContextHandle, Host, Unparker, WaitHandle, WaitOutcome};
 pub use control::{CallRequest, CallbackReply, ContextConfig, JsText};
 pub use error::{EngineError, FlagError, InvalidSnapshot, JsError, JsErrorKind, TerminationCause};
 pub use snapshot::{SnapshotBlob, WeakSnapshotBlob};
+pub use text::{Decoded, Transcoder};

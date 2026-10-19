@@ -132,6 +132,32 @@ pub fn units(bytes: &[u8]) -> Option<&[u16]> {
     (head.is_empty() && tail.is_empty()).then_some(units)
 }
 
+/// Writes the Latin-1 bytes of `text` at the start of `out` when `text` is
+/// valid UTF-8 and every character in it is at most U+00FF, and returns how
+/// many; `None` otherwise, or when `out` is shorter than `text`.
+pub fn utf8_to_latin1(text: &[u8], out: &mut [u8]) -> Option<usize> {
+    if out.len() < text.len() {
+        return None;
+    }
+    // SAFETY: simdutf writes at most one byte per byte of `text`, which `out`
+    // has room for.
+    let converted = unsafe { v8::simdutf::convert_utf8_to_latin1_with_errors(text, out) };
+    converted.is_ok().then_some(converted.count)
+}
+
+/// Writes the UTF-16 units of `text` at the start of `out` when `text` is
+/// valid UTF-8, and returns how many; `None` otherwise, or when `out` is
+/// shorter than `text`.
+pub fn utf8_to_utf16(text: &[u8], out: &mut [u16]) -> Option<usize> {
+    if out.len() < text.len() {
+        return None;
+    }
+    // SAFETY: simdutf writes at most one unit per byte of `text`, which `out`
+    // has room for.
+    let converted = unsafe { v8::simdutf::convert_utf8_to_utf16le_with_errors(text, out) };
+    converted.is_ok().then_some(converted.count)
+}
+
 /// The address V8 names `isolate` by when it posts the isolate a task.
 #[must_use]
 pub fn isolate_key(isolate: &v8::Isolate) -> usize {
