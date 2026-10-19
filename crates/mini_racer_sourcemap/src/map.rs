@@ -1224,6 +1224,68 @@ pub mod tests {
     // Names and sources arrive whole from the JSON, which costs what their
     // bytes do, and the map keeps no more than one copy of each source and
     // of the root.
+    // Garbage after the first source past a cap shows the cap was found as
+    // the sources arrived, before the rest was read.
+    #[test]
+    fn refuses_sources_as_they_arrive() {
+        let long = "r".repeat(MAX_URL + 1);
+        let text = format!(r#"{{"version":3,"sources":["{long}", !garbage"#);
+        let error = SourceMap::new(&bundle(1), text.as_bytes()).err();
+        assert!(limited(error.as_ref(), MAX_URL), "{error:?}");
+        let nulls = vec!["null"; MAX_SOURCES + 1].join(",");
+        let text = format!(r#"{{"version":3,"sources":[{nulls}, !garbage"#);
+        let error = timed("too many sources", || {
+            SourceMap::new(&bundle(1), text.as_bytes()).err()
+        });
+        assert!(limited(error.as_ref(), MAX_SOURCES), "{error:?}");
+    }
+
+    #[test]
+    fn refuses_a_map_past_256_mib_before_reading_it() {
+        let mut text = br#"{"version":3,"sources":[],"mappings":""}"#.to_vec();
+        text.resize((256 << 20) + 1, b' ');
+        let error = timed("past the cap", || SourceMap::new(&bundle(1), &text).err());
+        assert!(limited(error.as_ref(), 256 << 20), "{error:?}");
+    }
+
+    // Each source and the root are printed into a backtrace line, where a
+    // line break would add entries and an escape or a bidi control would
+    // disguise one.
+    #[test]
+    fn refuses_control_characters_in_sources_and_the_root() {
+        for text in [
+            "x\r\u{1b}[2K/app/models/user.rb:42:in `save'",
+            "a\nb",
+            "a\tb",
+            "a\u{7f}b",
+            "a\u{85}b",
+            "a\u{2028}b",
+            "a\u{2029}b",
+            "a\u{202a}b",
+            "a\u{202e}b",
+            "a\u{2066}b",
+            "a\u{2069}b",
+        ] {
+            let quoted = serde_json::to_string(text).unwrap();
+            for json in [
+                format!(r#"{{"version":3,"sources":[{quoted}],"mappings":"AAAA"}}"#),
+                format!(
+                    r#"{{"version":3,"sourceRoot":{quoted},"sources":["a.js"],"mappings":"AAAA"}}"#
+                ),
+            ] {
+                let error = SourceMap::new(&bundle(1), json.as_bytes()).err();
+                assert!(
+                    error
+                        .as_ref()
+                        .is_some_and(|error| error.to_string().contains("control character")),
+                    "{text:?}: {error:?}"
+                );
+            }
+        }
+        let fine = r#"{"version":3,"sourceRoot":"webpack://app/","sources":["./src/Café ☕.jsx",null],"mappings":"AAAA"}"#;
+        assert!(SourceMap::new(&bundle(1), fine.as_bytes()).is_ok());
+    }
+
     #[test]
     fn caps_names_and_sources_far_past_what_the_mappings_use() {
         let names = vec!["\"n\""; MAX_NAMES].join(",");

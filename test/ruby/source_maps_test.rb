@@ -55,7 +55,7 @@ module SourceMapFixtures
       function Header#{tag}(props) { return Ue#{tag}(); }
       function render#{tag}() { return [1].map(function mapper() { return Header#{tag}({}); })[0]; }
       async function deep#{tag}() { await null; return Header#{tag}({}); } async function outer#{tag}() { return await deep#{tag}(); }
-      globalThis.render = render#{tag}; globalThis.outer = outer#{tag}; /*0*/
+      globalThis.render = render#{tag}; globalThis.outer = outer#{tag}; /*#{"pad " * 256}*/ /*0*/
     JS
   end
 
@@ -137,6 +137,9 @@ class SourceMapsTest < Minitest::Test
   end
 
   def test_keeps_what_javascript_reads
+    _, frames = raised { @matched.eval("render()") }
+
+    refute_empty frames.grep(/webpack:/)
     [
       "(() => { try { render() } catch (e) { return e.stack } })()",
       "(() => { const o = {}; Error.captureStackTrace(o); return o.stack })()",
@@ -160,6 +163,17 @@ class SourceMapsTest < Minitest::Test
 
     assert_empty frames.grep(/webpack:/)
   end
+end
+
+# What MiniRacerRs.register_source_map refuses, and how many bundles it keeps.
+class SourceMapRegistrationTest < Minitest::Test
+  include SourceMapFixtures
+  include RubyProcess
+
+  # Past the registry's 1 KiB minimum, on one line.
+  def padded(text)
+    "#{text}#{" " * 1024}"
+  end
 
   def test_refuses_a_map_that_does_not_parse_or_fit
     {
@@ -168,24 +182,59 @@ class SourceMapsTest < Minitest::Test
       %({"version":3,"sections":[]}) => /index source maps/,
       %({"version":3,"sources":["a.js"],"mappings":";;;AAAA"}) => /maps line 4, but the bundle has 2 lines/,
     }.each do |map, message|
-      error = assert_raises(ArgumentError) { MiniRacerRs.register_source_map("var x = 1;\n", map) }
+      error = assert_raises(ArgumentError) { MiniRacerRs.register_source_map(padded("var x = 1;\n"), map) }
       assert_match message, error.message
     end
-    assert_raises(ArgumentError) { MiniRacerRs.register_source_map("", map("x")) }
-    error = assert_raises(ArgumentError) { MiniRacerRs.register_source_map("\xFF".b, map("x")) }
+    error = assert_raises(ArgumentError) { MiniRacerRs.register_source_map("\xFF".b * 1024, map("x")) }
     assert_equal "the bundle is not valid UTF-8", error.message
     assert_raises(TypeError) { MiniRacerRs.register_source_map(1, map("x")) }
     assert_raises(TypeError) { MiniRacerRs.register_source_map("x", nil) }
+  end
+
+  # A bundle short enough to turn up in unrelated code is refused.
+  def test_refuses_a_bundle_shorter_than_1_kib
+    ["", "throw new Error(", "x" * 1023].each do |bundle|
+      error = assert_raises(ArgumentError) { MiniRacerRs.register_source_map(bundle, map(bundle)) }
+      assert_equal "the bundle is shorter than 1024 bytes", error.message
+    end
+  end
+
+  # Context#eval sends an ISO-8859-1 String as Latin-1 and a UTF-16LE one as
+  # UTF-16, which are never searched for a bundle.
+  def test_refuses_a_bundle_in_an_encoding_eval_does_not_send_as_utf8
+    bundle = padded("var x = 1;\n")
+    %w[ISO-8859-1 UTF-16LE].each do |encoding|
+      error = assert_raises(ArgumentError) do
+        MiniRacerRs.register_source_map(bundle.encode(encoding), map(bundle))
+      end
+      assert_equal "the bundle must be UTF-8, not #{encoding}", error.message
+    end
+  end
+
+  # A source or the root is printed into a backtrace line, where a control
+  # character could add a line or disguise one.
+  def test_refuses_control_characters_in_sources
+    bundle = padded("var x = 1;\n")
+    ["x\r\e[2K/app/models/user.rb:42:in `save'", "a\nb", "a\u2028b", "a\u202Eb"].each do |text|
+      [
+        JSON.generate("version" => 3, "sources" => [text], "mappings" => "AAAA"),
+        JSON.generate("version" => 3, "sourceRoot" => text, "sources" => ["a.js"], "mappings" => "AAAA"),
+      ].each do |map|
+        error = assert_raises(ArgumentError) { MiniRacerRs.register_source_map(bundle, map) }
+        assert_match(/control character/, error.message)
+      end
+    end
   end
 
   def test_maps_at_most_eight_bundles
     _, err, status = run_ruby(<<~RUBY)
       require "mini_racer"
       map = '{"version":3,"sources":["a.js"],"mappings":"AAAA"}'
-      8.times { |i| MiniRacerRs.register_source_map("var b\#{i} = 1;\\n", map) }
-      MiniRacerRs.register_source_map("var b0 = 1;\\n", map)
+      bundle = ->(i) { "var b\#{i} = 1;\#{" " * 1024}" }
+      8.times { |i| MiniRacerRs.register_source_map(bundle.(i), map) }
+      MiniRacerRs.register_source_map(bundle.(0), map)
       begin
-        MiniRacerRs.register_source_map("var b8 = 1;\\n", map)
+        MiniRacerRs.register_source_map(bundle.(8), map)
         abort "a ninth bundle was taken"
       rescue ArgumentError => e
         abort e.message unless e.message == "at most 8 bundles can have a source map"

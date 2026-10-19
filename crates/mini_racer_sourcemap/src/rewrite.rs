@@ -422,13 +422,34 @@ mod tests {
     // many lines that look like frames costs a pass per line, not the run.
     #[test]
     fn passes_over_a_long_message_of_frame_lines() {
-        let message = "    at x (native)\n    at y (<eval>:1:1)\n".repeat(50_000);
+        let message = "    at x (native)\n    at y (<eval>:1:1)\n".repeat(2_000);
         let text = format!("Error: log\n{message}    at Ue (<eval>:11:5)\n    at <eval>:12:1");
         let frames = [frame(EVAL, 11, 5), frame(EVAL, 12, 1)];
         assert_eq!(
             rewritten(&text, &frames, OWN_LINE),
             format!("Error: log\n{message}    at Ue ({HEADER}:41:13)\n    at {APP}:10:5")
         );
+    }
+
+    // V8 writes no more frames than `Error.stackTraceLimit`, so a run of
+    // frame lines past a few thousand is a message's, and stays as it is.
+    #[test]
+    fn leaves_a_run_of_too_many_frame_lines_alone() {
+        let text = format!("Error: x{}", "\n    at f (<eval>:11:5)".repeat(5_000));
+        unchanged(&text, &[frame(EVAL, 11, 5)]);
+    }
+
+    // The message before the frames is copied whole, however many lines.
+    #[test]
+    fn rewrites_after_a_message_of_many_lines() {
+        let message = "a log line\n".repeat(1_000_000);
+        let text = format!("Error: x\n{message}    at Ue (<eval>:11:5)");
+        let started = std::time::Instant::now();
+        assert_eq!(
+            rewritten(&text, &[frame(EVAL, 11, 5)], OWN_LINE),
+            format!("Error: x\n{message}    at Ue ({HEADER}:41:13)")
+        );
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
     }
 
     #[test]
