@@ -140,3 +140,32 @@ class CallTest < Minitest::Test
     text
   end
 end
+
+# The encoder decodes a value's UTF-8 ahead of V8 only up to 8 MiB
+# (`text::LONG`); longer text goes as UTF-8, as mini_racer sends it, and
+# arrives as the same characters either way, alone and in a hash V8 reads.
+class CallLongStringTest < Minitest::Test
+  LIMIT = 8 << 20
+
+  def setup
+    @context = MiniRacer::Context.new
+    @context.eval("globalThis.id = (...a) => [a.map((s) => s.length ?? s.v.length), a]")
+  end
+
+  def teardown
+    @context&.dispose
+  end
+
+  def test_values_either_side_of_the_decoding_limit_arrive_as_sent
+    texts = ["東#{"a" * (LIMIT - 7)}\u{1F600}", "東#{"a" * LIMIT}\u{1F600}", "é" * ((LIMIT / 2) + 1)]
+
+    assert_equal [LIMIT, LIMIT + 7, LIMIT + 2], texts.map(&:bytesize)
+    texts.each do |text|
+      units = text.encode("UTF-16LE").bytesize / 2
+      keyed = { "v" => text, "a" => 1, "b" => 2, "c" => 3, "d" => 4 }
+
+      assert_equal [[units], [text]], @context.call("id", text)
+      assert_equal [[units], [keyed]], @context.call("id", keyed)
+    end
+  end
+end

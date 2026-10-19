@@ -3,6 +3,12 @@ use crate::sys;
 // V8 decodes shorter UTF-8 faster than a conversion starts: converting all of
 // it made arrays of short BMP and emoji strings about a tenth slower to send.
 const SHORT: usize = 16;
+// UTF-8 longer than this goes to V8 as mini_racer sends it. Decoded here, it
+// takes a buffer of two bytes per byte and a request up to twice its length, both
+// under the GVL: a 100 MB String with one character past Latin-1 would peak
+// near 500 MB where its UTF-8 takes 200 MB. Below this, that extra memory
+// stays within 24 MiB, and the values measured, up to 1 MB, all gain.
+const LONG: usize = 8 << 20;
 const WIDE_LEAD: u8 = 0xC4;
 
 /// The characters of valid UTF-8 as V8 stores them once it has decoded it:
@@ -23,15 +29,15 @@ pub struct Transcoder {
 
 impl Transcoder {
     /// `text` as V8 would decode it; `None` when it is short enough for V8 to
-    /// decode as fast, or is not valid UTF-8, whose replacement characters
-    /// are V8's to choose.
+    /// decode as fast, past `LONG` bytes, or not valid UTF-8, whose
+    /// replacement characters are V8's to choose.
     #[expect(
         clippy::inline_always,
         reason = "the encoder calls it for each non-ASCII value; outlined, it slowed short ones 12%"
     )]
     #[inline(always)]
     pub fn decode(&mut self, text: &[u8]) -> Option<Decoded<'_>> {
-        if text.len() < SHORT {
+        if text.len() < SHORT || text.len() > LONG {
             return None;
         }
         self.decode_long(text)
@@ -64,7 +70,7 @@ fn grow<T: Copy + Default>(buffer: &mut Vec<T>, len: usize) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Decoded, SHORT, Transcoder};
+    use super::{Decoded, LONG, SHORT, Transcoder};
 
     // What V8 makes of valid UTF-8, worked out from its characters.
     fn expected(text: &str) -> (Option<Vec<u8>>, Vec<u16>) {
@@ -116,6 +122,37 @@ mod tests {
         let latin1: String = (0x80..0x100).filter_map(char::from_u32).collect();
         check(&mut transcoder, &latin1.repeat(9));
         check(&mut transcoder, &format!("{}\u{100}", latin1.repeat(9)));
+    }
+
+    // Values of a megabyte, the longest measured, are decoded; past `LONG`
+    // text goes as UTF-8.
+    #[test]
+    fn text_up_to_long_is_decoded_and_longer_is_left_to_v8() {
+        let mut transcoder = Transcoder::default();
+        let megabyte = "caf\u{e9} ".repeat((1 << 20) / 6);
+        assert!(matches!(
+            transcoder.decode(megabyte.as_bytes()),
+            Some(Decoded::OneByte(_))
+        ));
+        let megabyte = "\u{1f600} go ".repeat((1 << 20) / 8);
+        assert!(matches!(
+            transcoder.decode(megabyte.as_bytes()),
+            Some(Decoded::TwoByte(_))
+        ));
+        let wide = "\u{6771}";
+        let longest = format!("{wide}{}", "a".repeat(LONG - wide.len()));
+        assert_eq!(longest.len(), LONG);
+        match transcoder.decode(longest.as_bytes()) {
+            Some(Decoded::TwoByte(units)) => assert_eq!(units.len(), LONG - 2),
+            _ => panic!("text of `LONG` bytes is decoded"),
+        }
+        assert!(
+            transcoder
+                .decode(format!("{longest}a").as_bytes())
+                .is_none()
+        );
+        let latin1 = "\u{e9}".repeat(LONG / 2 + 1);
+        assert!(transcoder.decode(latin1.as_bytes()).is_none());
     }
 
     #[test]
