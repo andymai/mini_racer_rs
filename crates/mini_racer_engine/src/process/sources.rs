@@ -142,7 +142,7 @@ impl List {
     }
 
     // V8's release of a string touches only the count, so a copy whose last
-    // string has gone waits for the next call that takes the lock.
+    // string has gone waits for the next `Sources::units` call.
     fn sweep(&mut self) -> Vec<Kept> {
         let spent: Vec<Kept> = self.kept.extract_if(.., |kept| kept.spent()).collect();
         for kept in &spent {
@@ -222,8 +222,9 @@ impl Sources {
     /// context that asks for it, for the context `reader`. `None` leaves the
     /// context its own copy: the source is invalid UTF-8, or too large for
     /// what is kept and still read. Only a source that may fit is converted,
-    /// outside the lock. Every call first drops each copy that no string
-    /// reads and that one context alone ever read.
+    /// outside the lock. Every call looks up the requested source, then drops
+    /// each other copy that no string reads and that one context alone ever
+    /// read.
     pub(crate) fn units(&self, key: &Key, text: &JsText, reader: u64) -> Option<Units> {
         let mut list = lock(&self.list);
         // Found before the sweep, so a copy the context before this one left

@@ -59,7 +59,7 @@ module DiffConsumers
         "args" => [["hash", [[text("name"), text("world")], [text("items"), ["array", [text("a")]]]]]], },
     ],
     # The 8 MB bundle is two bytes a unit in V8. Loaded once per workload, it
-    # is read from one shared copy from the second on.
+    # is read from one shared copy in each of them, the first included.
     "mui-dashboard" => [
       load_bundle("mui"),
       evaluate("renderDashboard(2)"),
