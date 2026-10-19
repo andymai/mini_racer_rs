@@ -205,14 +205,15 @@ fn shared_sources() {
     assert_eq!((sources().made(), sources().reads()), (6, 17));
 
     // A script one context alone loaded goes once that context does, at the
-    // next large eval, so loading it again copies it again.
+    // next large eval, so loading it again copies it again; that copy, which
+    // a second context has now read, stays as any shared one does.
     let once = JsText::from(script(7));
-    let loaded = spawn();
-    eval(&loaded, &once).expect("eval");
-    loaded.begin_dispose();
-    loaded.dispose(&mut Parking).expect("dispose");
-    eval(&spawn(), &text).expect("eval");
-    assert_eq!((sources().made(), sources().reads()), (7, 19));
-    eval(&spawn(), &once).expect("eval");
-    assert_eq!((sources().made(), sources().reads()), (8, 20));
+    for (made, reads) in [(7, 19), (8, 21), (8, 23)] {
+        let loaded = spawn();
+        eval(&loaded, &once).expect("eval");
+        loaded.begin_dispose();
+        loaded.dispose(&mut Parking).expect("dispose");
+        eval(&spawn(), &text).expect("eval");
+        assert_eq!((sources().made(), sources().reads()), (made, reads));
+    }
 }

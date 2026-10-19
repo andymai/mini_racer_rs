@@ -9,6 +9,7 @@ use crate::process::code_cache::Key;
 const MAX_SOURCES: usize = 8;
 const MAX_BYTES: usize = 256 << 20;
 const MAX_REFUSED: usize = 8;
+const MAX_SWEPT: usize = 8;
 
 /// A large script's source as V8 stores a string of it: a byte a unit when
 /// every unit fits Latin-1, two otherwise. Never changed once made.
@@ -94,6 +95,9 @@ struct List {
     // left or, as invalid UTF-8, unbounded, so that while it is among the last
     // `MAX_REFUSED` refused it is not converted again without room for it.
     refused: Vec<(Key, usize)>,
+    // The last `MAX_SWEPT` sources swept, so one made again, which a second
+    // context has now read after all, is kept as such.
+    swept: Vec<Key>,
 }
 
 struct Kept {
@@ -140,7 +144,20 @@ impl List {
     // V8's release of a string touches only the count, so a copy whose last
     // string has gone waits for the next call that takes the lock.
     fn sweep(&mut self) -> Vec<Kept> {
-        self.kept.extract_if(.., |kept| kept.spent()).collect()
+        let spent: Vec<Kept> = self.kept.extract_if(.., |kept| kept.spent()).collect();
+        for kept in &spent {
+            if self.swept.len() >= MAX_SWEPT {
+                self.swept.remove(0);
+            }
+            self.swept.push(kept.key.clone());
+        }
+        spent
+    }
+
+    fn unswept(&mut self, key: &Key) -> bool {
+        let before = self.swept.len();
+        self.swept.retain(|swept| swept != key);
+        self.swept.len() < before
     }
 
     // Whether `bytes` more fit beside what strings still read, which nothing
@@ -250,11 +267,16 @@ impl Sources {
             };
             dropped.push(list.kept.remove(at));
         }
+        let readers = if list.unswept(key) {
+            Readers::Many
+        } else {
+            Readers::One(reader)
+        };
         list.kept.push(Kept {
             key: key.clone(),
             units: units.clone(),
             held: 1,
-            readers: Readers::One(reader),
+            readers,
         });
         drop(list);
         // Freed once the lock is released, as a large source takes a while,
@@ -287,6 +309,7 @@ impl Sources {
                     })
                     .collect(),
                 refused: list.refused.clone(),
+                swept: list.swept.clone(),
             })
             .unwrap_or_default();
         Self {
