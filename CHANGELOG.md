@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.4](https://github.com/andymai/mini_racer_rs/compare/v1.0.3...v1.0.4) (2026-10-19)
+
+
+### Performance
+
+* **engine:** share a large source from its first evaluation ([#91](https://github.com/andymai/mini_racer_rs/issues/91)) ([31425e1](https://github.com/andymai/mini_racer_rs/commit/31425e1fc72083fd1c6564d5f50d30b8e2d746aa))
+
 ## [1.0.3](https://github.com/andymai/mini_racer_rs/compare/v1.0.2...v1.0.3) (2026-10-18)
 
 
