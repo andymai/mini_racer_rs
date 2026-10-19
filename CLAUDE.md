@@ -23,6 +23,7 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 
 | Crate | Layer | Path | Role |
 |---|---|---|---|
+| `mini_racer_sourcemap` | L0 | `crates/mini_racer_sourcemap` | Source maps for stack traces: parsing, lookup, rewriting frame locations; `forbid(unsafe_code)` |
 | `mini_racer_sync` | L0 | `crates/mini_racer_sync` | Concurrency protocol types; `forbid(unsafe_code)` |
 | `mini_racer_wire` | L0 | `crates/mini_racer_wire` | V8 wire format codec; `forbid(unsafe_code)` |
 | `mini_racer_engine` | L1 | `crates/mini_racer_engine` | V8 process state, flags, runners; the only crate that names `v8` |
@@ -71,7 +72,8 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | The string that stands in for a function result | `crates/mini_racer_wire/src/marker.rs` |
 | What V8 writes for a corpus of expressions, and its reviewed decoding | `crates/mini_racer_wire/tests/golden/`, `crates/mini_racer_engine/examples/gen_wire_golden.rs` |
 | V8 reading what `Writer` writes | `crates/mini_racer_engine/tests/writer.rs` |
-| Wire fuzz targets | `crates/mini_racer_wire/fuzz/fuzz_targets/`, `scripts/fuzz-smoke.sh` |
+| Fuzz targets (the wire codec, source maps) | `crates/mini_racer_wire/fuzz/fuzz_targets/`, `scripts/fuzz-smoke.sh` |
+| Source maps: parsing a regular version 3 map (base64 VLQ, `sourceRoot`, refusing index maps and other versions, `sourcesContent` skipped unread), checking it against its bundle, V8's line breaks (LF, CRLF, lone CR, U+2028, U+2029) and the correction for those a map's generator does not count, UTF-16 columns, the lookup on one generated line, finding a bundle in an eval's source after a prefix, and rewriting the locations of frames paired with V8's detailed frames | `crates/mini_racer_sourcemap/src/map.rs`, `crates/mini_racer_sourcemap/src/vlq.rs`, `crates/mini_racer_sourcemap/src/rewrite.rs`, `crates/mini_racer_wire/fuzz/fuzz_targets/sourcemap.rs` |
 | Mutex poison policy | `crates/mini_racer_sync/src/lock.rs` |
 | Turn-taking channel between a Ruby thread and a runner, parking, notifiers for waiters that sleep elsewhere | `crates/mini_racer_sync/src/channel.rs`, `crates/mini_racer_sync/src/parker.rs` |
 | Termination causes, stop consumption, a stop whose one-shot V8 interrupt is spent (`spend`, `renew`, `relocked`), timeout scoping, and their tests against mini_racer's behavior | `crates/mini_racer_sync/src/termination.rs`, `test/ruby/pending_termination_test.rb`, `test/ruby/spent_termination_test.rb`, `test/ruby/leftover_microtasks_test.rb` |
@@ -181,6 +183,7 @@ bundle exec rake package:source    # the source gem, into pkg/
 
 - `crates/mini_racer_wire`: `cargo nextest run -p mini_racer_wire`, then `scripts/fuzz-smoke.sh 20`. A new corpus entry goes in `crates/mini_racer_wire/tests/golden/corpus.tsv`; generate its `.bin`, then its `.txt`, and read the `.txt` before committing.
 - `crates/mini_racer_sync`: `cargo nextest run -p mini_racer_sync`, then the loom command above.
+- `crates/mini_racer_sourcemap`: `cargo nextest run -p mini_racer_sourcemap`, then `scripts/fuzz-smoke.sh 20`.
 - `crates/mini_racer_engine`: `cargo nextest run -p mini_racer_engine`; for teardown or lifetime changes, `scripts/sanitizers.sh` or the `sanitizers` label. Flag-dependent assertions live in `crates/mini_racer_engine/tests/flags.rs`, one test per process.
 - `ext/` or `lib/`: `cargo test -p mini_racer_rs --lib` (the Ruby-free option rules and number classification), `bundle exec rake test`, then `scripts/check-exports.sh`, then `bundle exec ruby test/upstream/run.rb --strict` with and without `--suite execjs`, then `bundle exec ruby test/diff/run.rb --strict` with and without `--set consumers`, then `bundle exec rake compat:check`.
 - `compat.toml`: `bundle exec rake compat:render`, then `bundle exec rake compat:check`.

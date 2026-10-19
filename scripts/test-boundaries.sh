@@ -119,6 +119,9 @@ CASES = [
     ("engine static outside process", "check-statics.sh", "static", [
         append("crates/mini_racer_engine/src/context.rs", "\nstatic PLANTED: u8 = 0;\n"),
     ]),
+    ("static in an L0 crate", "check-statics.sh", "static", [
+        append("crates/mini_racer_sourcemap/src/map.rs", "\nstatic PLANTED: u8 = 0;\n"),
+    ]),
     ("extension still imports madvise", "check-exports.sh fake.so", "madvise", [
         cc("fake.so", "int madvise(void *, unsigned long, int);\nint Init_mini_racer_rs(void) { return madvise(0, 0, 0); }\n"),
     ]),

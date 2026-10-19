@@ -22,7 +22,7 @@ for lock in Gemfile.lock test/consumers/transitive/Gemfile.lock; do
   [ -z "$stale" ] || mismatch "$lock locks mini_racer_rs at $(xargs <<<"$stale"); run scripts/sync-release-locks.sh"
 done
 for lock in Cargo.lock crates/mini_racer_wire/fuzz/Cargo.lock; do
-  crates=$(awk '/^name = "mini_racer_(engine|rs|sync|wire)"$/ { getline; gsub(/version = |"/, ""); print }' "$lock" | sort -u | xargs)
+  crates=$(awk '/^name = "mini_racer_(engine|rs|sourcemap|sync|wire)"$/ { getline; gsub(/version = |"/, ""); print }' "$lock" | sort -u | xargs)
   [ "$crates" = "$workspace" ] || mismatch "$lock has workspace crates at $crates, not $workspace; run scripts/sync-release-locks.sh"
 done
 

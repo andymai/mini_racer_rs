@@ -5,7 +5,7 @@ description: Use when adding a dependency to any crate, deciding which crate new
 
 # Layer Boundaries
 
-The workspace is a strict DAG: L0 `mini_racer_wire` and `mini_racer_sync`, L1 `mini_racer_engine`, L2 `mini_racer_rs` (the Ruby extension). `layers.toml` holds the allowed dependencies and the fenced `unsafe` modules; the table in `CLAUDE.md` mirrors it.
+The workspace is a strict DAG: L0 `mini_racer_wire`, `mini_racer_sync` and `mini_racer_sourcemap`, L1 `mini_racer_engine`, L2 `mini_racer_rs` (the Ruby extension). `layers.toml` holds the allowed dependencies and the fenced `unsafe` modules; the table in `CLAUDE.md` mirrors it.
 
 ## Quick reference
 
@@ -24,6 +24,7 @@ scripts/test-boundaries.sh      # plants one violation per rule and expects each
 |---|---|
 | Parsing or writing V8's serialization format, Ruby-free | `mini_racer_wire` |
 | Channel, termination and fork protocol types, Ruby-free; each protocol gets a loom model beside it | `mini_racer_sync` |
+| Source maps: parsing a bundle's map, looking up original positions, rewriting the frames of stack text; Ruby-free and V8-free | `mini_racer_sourcemap` |
 | Anything that calls `v8`, owns isolates, threads, or process state | `mini_racer_engine` |
 | Anything that touches Ruby (magnus, rb-sys, VALUEs, the GVL) | `mini_racer_rs` |
 
