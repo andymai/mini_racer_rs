@@ -1,10 +1,23 @@
 use std::borrow::Cow;
+use std::sync::OnceLock;
 
 use memchr::memmem::Finder;
 use serde::Deserialize;
 use serde::de::{Deserializer, IgnoredAny};
 
 use crate::vlq;
+
+// A map is input from the application, so what it may hold is bounded: well
+// past the largest measured (MUI's 8 MB bundle maps 118 thousand lines with
+// 410 thousand segments), and short of letting a map of tens of megabytes
+// make one hold gigabytes. A segment kept takes 16 bytes.
+const MAX_LINES: usize = 1 << 22;
+const MAX_SEGMENTS: usize = 1 << 22;
+const MAX_SOURCES: usize = 1 << 20;
+const MAX_NAMES: usize = 1 << 22;
+// A source and the source root, each, in bytes: a rewritten frame prints one
+// of each.
+const MAX_URL: usize = 1 << 16;
 
 #[derive(Debug, thiserror::Error)]
 pub enum MapError {
@@ -40,6 +53,8 @@ pub enum MapError {
         column: u32,
         length: u32,
     },
+    #[error("there are more than {limit} {what}")]
+    Limit { what: &'static str, limit: usize },
     #[error("the bundle or its source map is too large")]
     TooLarge,
 }
@@ -100,10 +115,11 @@ pub struct Placement {
     pub column: u32,
 }
 
-/// A position in an original source; `line` and `column` are zero-based, as
-/// in the map.
+/// A position in an original source, whose name is `root` then `source`;
+/// `line` and `column` are zero-based, as in the map.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Original<'a> {
+    pub root: &'a str,
     pub source: &'a str,
     pub line: u32,
     pub column: u32,
@@ -112,7 +128,13 @@ pub struct Original<'a> {
 /// A bundle with its parsed source map, checked against each other.
 pub struct SourceMap {
     bundle: Box<str>,
-    finder: Finder<'static>,
+    // The bundle's first bytes, and the bundle whole for a search linear
+    // however it repeats itself, built the first time the first place those
+    // bytes occur is not where the bundle starts.
+    head: Finder<'static>,
+    whole: OnceLock<Finder<'static>>,
+    // Joined to each source when one is printed, so a long root costs once.
+    root: Box<str>,
     sources: Box<[Option<Box<str>>]>,
     // Where each generated line's segments start, then where the last ends.
     starts: Box<[u32]>,
@@ -124,13 +146,13 @@ pub struct SourceMap {
 
 // The bundle's first bytes, which a search looks for before comparing it
 // whole.
-const NEEDLE: usize = 64;
+const HEAD: usize = 64;
 
 impl SourceMap {
     /// Parses `map`, a regular version 3 source map, for `bundle`. Its
     /// generated lines are counted at each LF, as source map generators do;
     /// the lines V8 counts also at a lone CR, U+2028 and U+2029 are mapped
-    /// back to the map's.
+    /// back to the map's. The work is linear in the bytes of both.
     pub fn new(bundle: &str, map: &[u8]) -> Result<Self, MapError> {
         if bundle.is_empty() {
             return Err(MapError::EmptyBundle);
@@ -155,29 +177,40 @@ impl SourceMap {
         let Some(listed) = raw.sources else {
             return Err(MapError::Missing("sources"));
         };
+        within("sources in the source map", listed.len(), MAX_SOURCES)?;
+        within("names in the source map", raw.names.len(), MAX_NAMES)?;
+        let longest = listed
+            .iter()
+            .flatten()
+            .chain(&raw.source_root)
+            .map(String::len)
+            .max()
+            .unwrap_or(0);
+        within("bytes in a source or the source root", longest, MAX_URL)?;
         let (starts, segments) = decode(mappings.as_bytes(), listed.len(), raw.names.len())?;
-        let shape = Shape::of(bundle)?;
-        check(&starts, &segments, &shape.lengths)?;
+        let shape = Shape::of(bundle, starts.len().saturating_sub(1))?;
+        check(&starts, &segments, &shape)?;
         // Joined with a slash unless it ends in one, as ECMA-426 joins them,
         // but an empty root, which generators write for none, is none here
         // where ECMA-426 would still add the slash.
-        let prefix = match raw.source_root.as_deref() {
+        let root = match raw.source_root.as_deref() {
             None | Some("") => String::new(),
             Some(root) if root.ends_with('/') => root.to_owned(),
             Some(root) => format!("{root}/"),
         };
-        let sources = listed
-            .into_iter()
-            .map(|source| source.map(|source| format!("{prefix}{source}").into_boxed_str()))
-            .collect();
-        let needle = bundle
+        let head = bundle
             .as_bytes()
-            .get(..NEEDLE.min(bundle.len()))
+            .get(..HEAD.min(bundle.len()))
             .unwrap_or_default();
         Ok(Self {
             bundle: bundle.into(),
-            finder: Finder::new(needle).into_owned(),
-            sources,
+            head: Finder::new(head).into_owned(),
+            whole: OnceLock::new(),
+            root: root.into_boxed_str(),
+            sources: listed
+                .into_iter()
+                .map(|source| source.map(String::into_boxed_str))
+                .collect(),
             starts: starts.into_boxed_slice(),
             segments: segments.into_boxed_slice(),
             breaks: shape.breaks.into_boxed_slice(),
@@ -191,21 +224,21 @@ impl SourceMap {
     }
 
     /// Where the bundle first starts in `source`, if `source` holds it whole
-    /// after text that is valid UTF-8, as the bundle is.
+    /// after text that is valid UTF-8, as the bundle is. The search is linear
+    /// in both however the bundle repeats itself.
     #[must_use]
     pub fn find(&self, source: &[u8]) -> Option<Placement> {
         let bundle = self.bundle.as_bytes();
-        let latest = source.len().checked_sub(bundle.len())?;
-        // Only where the bundle could still start whole; past the first
-        // candidate one byte on, since its first bytes may overlap themselves.
-        let starts = source.get(..latest.saturating_add(self.finder.needle().len()))?;
-        let mut from = 0_usize;
-        let at = loop {
-            let found = from.checked_add(self.finder.find(starts.get(from..)?)?)?;
-            if source.get(found..)?.starts_with(bundle) {
-                break found;
+        let first = self.head.find(source)?;
+        let at = if source.get(first..)?.starts_with(bundle) {
+            first
+        } else {
+            let after = first.checked_add(1)?;
+            if source.len().saturating_sub(after) < bundle.len() {
+                return None;
             }
-            from = found.checked_add(1)?;
+            let whole = self.whole.get_or_init(|| Finder::new(bundle).into_owned());
+            after.checked_add(whole.find(source.get(after..)?)?)?
         };
         let prefix = std::str::from_utf8(source.get(..at)?).ok()?;
         Shape::end_of(prefix, bundle.first().copied())
@@ -214,8 +247,9 @@ impl SourceMap {
     /// The original position the map gives V8's one-based `line` and `column`
     /// in a script that holds the bundle at `placement`: that of the last
     /// segment at or before the column on the same generated line, or the
-    /// first of several at one column. `None` outside the bundle, before a
-    /// line's first segment, and at a segment that maps to no source.
+    /// first of several at one column, each found by binary search. `None`
+    /// outside the bundle, before a line's first segment, and at a segment
+    /// that maps to no source.
     #[must_use]
     pub fn original(&self, placement: Placement, line: u32, column: u32) -> Option<Original<'_>> {
         let line = line.checked_sub(1)?.checked_sub(placement.line)?;
@@ -249,11 +283,19 @@ impl SourceMap {
             .get(usize::try_from(segment.source).ok()?)?
             .as_deref()?;
         Some(Original {
+            root: &self.root,
             source,
             line: segment.line,
             column: segment.original_column,
         })
     }
+}
+
+const fn within(what: &'static str, count: usize, limit: usize) -> Result<(), MapError> {
+    if count > limit {
+        return Err(MapError::Limit { what, limit });
+    }
+    Ok(())
 }
 
 // Each generated line's segments, sorted by column, and where each line's
@@ -264,13 +306,17 @@ fn decode(
     names: usize,
 ) -> Result<(Vec<u32>, Vec<Segment>), MapError> {
     let count = |len: usize| u32::try_from(len).map_err(|_| MapError::TooLarge);
-    let lines = memchr::memchr_iter(b';', mappings).count();
+    let lines = memchr::memchr_iter(b';', mappings)
+        .count()
+        .saturating_add(1);
+    within("lines in the source map's mappings", lines, MAX_LINES)?;
+    // Each segment ends at a comma, a semicolon or the end of the mappings.
     let separators = memchr::memchr_iter(b',', mappings)
         .count()
         .saturating_add(lines);
-    let mut starts = Vec::with_capacity(lines.saturating_add(2));
+    let mut starts = Vec::with_capacity(lines.saturating_add(1));
     starts.push(0);
-    let mut segments: Vec<Segment> = Vec::with_capacity(separators.saturating_add(1));
+    let mut segments: Vec<Segment> = Vec::with_capacity(separators.min(MAX_SEGMENTS));
     // The generated column restarts on each line; the other fields carry on.
     let mut state = [0_i64; 5];
     let mut at = 0_usize;
@@ -300,6 +346,11 @@ fn decode(
             }
             Some(_) => {
                 after_comma = false;
+                within(
+                    "segments in the source map's mappings",
+                    segments.len().saturating_add(1),
+                    MAX_SEGMENTS,
+                )?;
                 let start = at;
                 let mut fields = [0_i64; 5];
                 let mut taken = 0_usize;
@@ -342,15 +393,16 @@ fn segment(
             original_column: 0,
         });
     }
-    let within = |index: i64, count: usize| usize::try_from(index).is_ok_and(|index| index < count);
-    if !within(source, sources) {
+    let indexes =
+        |index: i64, count: usize| usize::try_from(index).is_ok_and(|index| index < count);
+    if !indexes(source, sources) {
         return Err(MapError::Source {
             index: source,
             count: sources,
             at,
         });
     }
-    if fields == 5 && !within(name, names) {
+    if fields == 5 && !indexes(name, names) {
         return Err(MapError::Name {
             index: name,
             count: names,
@@ -370,7 +422,7 @@ fn segment(
 }
 
 // ECMA-426 sorts mappings by generated position. Generators write each line
-// in order, so this sorts only a line written out of order.
+// in order, so this sorts only a line written out of order, once.
 fn sort_line(segments: &mut [Segment], start: usize) {
     if let Some(line) = segments.get_mut(start..)
         && !line.is_sorted_by_key(|segment| segment.column)
@@ -379,23 +431,37 @@ fn sort_line(segments: &mut [Segment], start: usize) {
     }
 }
 
-// The bundle's lines as its map counts them, at each LF, with their lengths
-// in UTF-16 units; the breaks only V8 counts; and where its last V8 line ends.
+// The bundle's lines as its map counts them, at each LF: how many, and the
+// length in UTF-16 units of each the map has; the breaks only V8 counts; and
+// where its last V8 line ends.
 struct Shape {
+    lines: usize,
     lengths: Vec<u32>,
     breaks: Vec<Break>,
     end: Placement,
 }
 
 impl Shape {
-    fn of(bundle: &str) -> Result<Self, MapError> {
+    // Lengths only of the map's lines, so a bundle of many short lines costs
+    // no more than the map does.
+    fn of(bundle: &str, mapped: usize) -> Result<Self, MapError> {
         let too_large = || MapError::TooLarge;
-        let mut lengths = Vec::with_capacity(memchr::memchr_iter(b'\n', bundle.as_bytes()).count());
-        let mut breaks = Vec::new();
-        let mut end = Placement { line: 0, column: 0 };
+        let mut shape = Self {
+            lines: 0,
+            lengths: Vec::with_capacity(
+                mapped.min(
+                    memchr::memchr_iter(b'\n', bundle.as_bytes())
+                        .count()
+                        .saturating_add(1),
+                ),
+            ),
+            breaks: Vec::new(),
+            end: Placement { line: 0, column: 0 },
+        };
         let mut lines = bundle.split('\n').peekable();
         while let Some(text) = lines.next() {
             let last = lines.peek().is_none();
+            let end = &mut shape.end;
             let length = if plain(text) {
                 end.column = u32::try_from(text.len()).map_err(|_| too_large())?;
                 end.column
@@ -407,9 +473,14 @@ impl Shape {
                     let width = u32::try_from(c.len_utf16()).map_err(|_| too_large())?;
                     length = length.checked_add(width).ok_or_else(too_large)?;
                     if v8_only(c, chars.peek().is_some() || last) {
+                        within(
+                            "lone CR, U+2028 and U+2029 line breaks in the bundle",
+                            shape.breaks.len().saturating_add(1),
+                            MAX_LINES,
+                        )?;
                         end.line = end.line.checked_add(1).ok_or_else(too_large)?;
                         end.column = 0;
-                        breaks.push(Break {
+                        shape.breaks.push(Break {
                             line: end.line,
                             column: length,
                         });
@@ -419,17 +490,16 @@ impl Shape {
                 }
                 length
             };
-            lengths.push(length);
+            if shape.lines < mapped {
+                shape.lengths.push(length);
+            }
+            shape.lines = shape.lines.saturating_add(1);
             if !last {
-                end.line = end.line.checked_add(1).ok_or_else(too_large)?;
-                end.column = 0;
+                shape.end.line = shape.end.line.checked_add(1).ok_or_else(too_large)?;
+                shape.end.column = 0;
             }
         }
-        Ok(Self {
-            lengths,
-            breaks,
-            end,
-        })
+        Ok(shape)
     }
 
     // Where V8 counts the end of `text`, which a bundle starting with `next`
@@ -481,7 +551,7 @@ const fn v8_only(c: char, apart: bool) -> bool {
 }
 
 // A map made for another bundle maps lines or columns this one does not have.
-fn check(starts: &[u32], segments: &[Segment], lengths: &[u32]) -> Result<(), MapError> {
+fn check(starts: &[u32], segments: &[Segment], shape: &Shape) -> Result<(), MapError> {
     for (line, bounds) in starts.windows(2).enumerate() {
         let &[start, end] = bounds else {
             continue;
@@ -490,10 +560,10 @@ fn check(starts: &[u32], segments: &[Segment], lengths: &[u32]) -> Result<(), Ma
         let Some(last) = segments.get(range).and_then(<[Segment]>::last) else {
             continue;
         };
-        let Some(&length) = lengths.get(line) else {
+        let Some(&length) = shape.lengths.get(line) else {
             return Err(MapError::Lines {
                 line: line.saturating_add(1),
-                lines: lengths.len(),
+                lines: shape.lines,
             });
         };
         if last.column > length {
@@ -515,7 +585,12 @@ pub mod tests {
         reason = "test helpers"
     )]
 
-    use super::{MapError, Original, Placement, SourceMap};
+    use std::time::{Duration, Instant};
+
+    use super::{
+        MAX_LINES, MAX_NAMES, MAX_SEGMENTS, MAX_SOURCES, MAX_URL, MapError, Original, Placement,
+        Shape, SourceMap,
+    };
     use crate::vlq::tests::encode;
 
     /// A segment by its absolute fields: mapped, as generated column,
@@ -577,10 +652,15 @@ pub mod tests {
     )]
     fn original(source: &str, line: u32, column: u32) -> Option<Original<'_>> {
         Some(Original {
+            root: "",
             source,
             line,
             column,
         })
+    }
+
+    fn named(found: Original<'_>) -> String {
+        format!("{}{}", found.root, found.source)
     }
 
     const AT_START: Placement = Placement { line: 0, column: 0 };
@@ -851,11 +931,11 @@ pub mod tests {
             );
             let map = SourceMap::new(&bundle(1), json.as_bytes()).unwrap();
             assert_eq!(
-                map.original(AT_START, 1, 1).map(|at| at.source),
+                map.original(AT_START, 1, 1).map(named).as_deref(),
                 Some(a),
                 "{root}"
             );
-            let b = map.original(AT_START, 1, 6).map(|at| at.source).unwrap();
+            let b = map.original(AT_START, 1, 6).map(named).unwrap();
             assert!(b.ends_with("./b.js"), "{root}: {b}");
             assert_eq!(map.original(AT_START, 1, 10), None, "{root}");
         }
@@ -1050,6 +1130,174 @@ pub mod tests {
         assert!(
             SourceMap::new(&bundle(3), &json(";;;;;")).is_ok(),
             "empty lines past the bundle"
+        );
+    }
+
+    // Each worst case is linear, so it takes a fraction of a second even
+    // unoptimized; quadratic work at these sizes would take hours.
+    const BOUND: Duration = Duration::from_secs(5);
+
+    fn timed<T>(label: &str, work: impl FnOnce() -> T) -> T {
+        let started = Instant::now();
+        let out = work();
+        assert!(
+            started.elapsed() < BOUND,
+            "{label} took {:?}",
+            started.elapsed()
+        );
+        out
+    }
+
+    fn limited(error: Option<&MapError>, limit: usize) -> bool {
+        matches!(error, Some(MapError::Limit { limit: found, .. }) if *found == limit)
+    }
+
+    #[test]
+    fn reads_one_line_of_a_million_segments() {
+        let count = 1_000_000;
+        let mut text = String::from("AAAA");
+        text.push_str(&",CAAA".repeat(count - 1));
+        let bundle = format!("{}\n", "x".repeat(count));
+        let map = timed("ascending", || {
+            SourceMap::new(&bundle, &json(&text)).unwrap()
+        });
+        assert_eq!(map.segments.len(), count);
+        let found = timed("lookups", || {
+            (1..=1_000_u32)
+                .filter_map(|at| map.original(AT_START, 1, at * 997))
+                .count()
+        });
+        assert_eq!(found, 1_000);
+        // Written backwards, the line is sorted once.
+        let mut text = mappings(&[&[Seg::M(i64::try_from(count).unwrap() - 1, 0, 0, 0)]]);
+        text.push_str(&",DAAA".repeat(count - 1));
+        let map = timed("descending", || {
+            SourceMap::new(&bundle, &json(&text)).unwrap()
+        });
+        assert_eq!(map.original(AT_START, 1, 1), original("a.js", 0, 0));
+        // At one column, the first of them.
+        let mut text = String::from("AAAA");
+        text.push_str(&",AACA".repeat(count - 1));
+        let map = timed("one column", || {
+            SourceMap::new(&bundle, &json(&text)).unwrap()
+        });
+        assert_eq!(map.original(AT_START, 1, 1), original("a.js", 0, 0));
+    }
+
+    #[test]
+    fn caps_the_lines_of_the_mappings() {
+        let most = ";".repeat(MAX_LINES - 1);
+        let map = timed("most lines", || {
+            SourceMap::new(&bundle(1), &json(&most)).unwrap()
+        });
+        assert_eq!(map.starts.len(), MAX_LINES + 1);
+        let more = format!("{most};");
+        let error = timed("too many lines", || {
+            SourceMap::new(&bundle(1), &json(&more)).err()
+        });
+        assert!(limited(error.as_ref(), MAX_LINES));
+    }
+
+    #[test]
+    fn caps_the_segments_of_the_mappings() {
+        let most = format!("A{}", ",A".repeat(MAX_SEGMENTS - 1));
+        assert!(timed("most segments", || SourceMap::new(
+            &bundle(1),
+            &json(&most)
+        )
+        .is_ok()));
+        let error = timed("too many segments", || {
+            SourceMap::new(&bundle(1), &json(&format!("{most},A"))).err()
+        });
+        assert!(limited(error.as_ref(), MAX_SEGMENTS));
+    }
+
+    #[test]
+    fn refuses_a_long_run_of_continuation_digits() {
+        let text = format!("A,{}A", "g".repeat(5_000_000));
+        let error = timed("continuations", || {
+            SourceMap::new(&bundle(1), &json(&text)).err()
+        });
+        assert!(matches!(error, Some(MapError::Mappings(2))), "{error:?}");
+    }
+
+    // Names and sources arrive whole from the JSON, which costs what their
+    // bytes do, and the map keeps no more than one copy of each source and
+    // of the root.
+    #[test]
+    fn caps_names_and_sources_far_past_what_the_mappings_use() {
+        let names = vec!["\"n\""; MAX_NAMES].join(",");
+        let text =
+            format!(r#"{{"version":3,"sources":["a.js"],"names":[{names}],"mappings":"AAAAA"}}"#);
+        assert!(timed("most names", || SourceMap::new(
+            &bundle(1),
+            text.as_bytes()
+        )
+        .is_ok()));
+        let text = format!(
+            r#"{{"version":3,"sources":["a.js"],"names":[{names},"n"],"mappings":"AAAAA"}}"#
+        );
+        let error = timed("too many names", || {
+            SourceMap::new(&bundle(1), text.as_bytes()).err()
+        });
+        assert!(limited(error.as_ref(), MAX_NAMES));
+        let sources = vec!["null"; MAX_SOURCES + 1].join(",");
+        let text = format!(r#"{{"version":3,"sources":[{sources}],"mappings":""}}"#);
+        let error = timed("too many sources", || {
+            SourceMap::new(&bundle(1), text.as_bytes()).err()
+        });
+        assert!(limited(error.as_ref(), MAX_SOURCES));
+        // Joined to each of a million sources up front, this root would take
+        // 64 GiB.
+        let root = "r".repeat(MAX_URL);
+        let sources = vec!["\"\""; MAX_SOURCES].join(",");
+        let text = format!(
+            r#"{{"version":3,"sourceRoot":"{root}","sources":[{sources}],"mappings":"AAAA"}}"#
+        );
+        let map = timed("a long root", || {
+            SourceMap::new(&bundle(1), text.as_bytes()).unwrap()
+        });
+        assert_eq!(
+            map.original(AT_START, 1, 1).map(|at| at.root.len()),
+            Some(MAX_URL + 1)
+        );
+        for text in [
+            format!(r#"{{"version":3,"sourceRoot":"{root}r","sources":[],"mappings":""}}"#),
+            format!(r#"{{"version":3,"sources":["{root}r"],"mappings":""}}"#),
+        ] {
+            let error = SourceMap::new(&bundle(1), text.as_bytes()).err();
+            assert!(limited(error.as_ref(), MAX_URL));
+        }
+    }
+
+    #[test]
+    fn keeps_line_lengths_only_for_the_maps_lines() {
+        let bundle = "\n".repeat(10_000_000);
+        let shape = timed("shape", || Shape::of(&bundle, 3).unwrap());
+        assert_eq!((shape.lengths.len(), shape.lines), (3, 10_000_001));
+        let error =
+            SourceMap::new(&bundle, &json(&format!("{}AAAA", ";".repeat(10_000_000)))).err();
+        assert!(limited(error.as_ref(), MAX_LINES));
+        let breaks = "\r".repeat(MAX_LINES + 1);
+        let error = timed("breaks", || SourceMap::new(&breaks, &json("")).err());
+        assert!(limited(error.as_ref(), MAX_LINES));
+    }
+
+    // A bundle that repeats itself, found or not in text that nearly holds
+    // it at every offset.
+    #[test]
+    fn finds_a_repetitive_bundle_in_linear_time() {
+        let bundle = format!("{}b", "a".repeat(100_000));
+        let map = SourceMap::new(&bundle, &json("")).unwrap();
+        let near = "a".repeat(2_000_000);
+        assert_eq!(timed("absent", || map.find(near.as_bytes())), None);
+        let source = format!("{near}{bundle}");
+        assert_eq!(
+            timed("found", || map.find(source.as_bytes())),
+            Some(Placement {
+                line: 0,
+                column: 2_000_000
+            })
         );
     }
 }

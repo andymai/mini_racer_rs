@@ -23,6 +23,9 @@ pub struct Match<'a> {
 }
 
 const FRAME: &str = "    at ";
+// Past V8's frame limit for a detailed trace, which the engine sets, and so
+// past any trace it hands over; pairing costs this much for each line at most.
+const FRAMES: usize = 256;
 
 // One line of V8's default stack format: a frame located by line and column,
 // which V8's detailed trace has a frame for; an async frame, where that trace
@@ -80,6 +83,7 @@ fn number(text: &str) -> Option<u32> {
 /// its script as `Match::name`, the text comes back as it was.
 #[must_use]
 pub fn rewrite<'t>(text: &'t str, frames: &[Frame], matches: &[Match<'_>]) -> Cow<'t, str> {
+    let frames = frames.get(..FRAMES).unwrap_or(frames);
     let lines: Vec<&str> = text.split('\n').collect();
     let run = lines
         .iter()
@@ -188,7 +192,8 @@ fn relocate(line: &str, frame: Frame, matches: &[Match<'_>]) -> Relocated {
     out.push_str(head);
     let _ = write!(
         out,
-        "{}:{}:{}{close}",
+        "{}{}:{}:{}{close}",
+        original.root,
         original.source,
         original.line.saturating_add(1),
         original.column.saturating_add(1)
@@ -398,6 +403,19 @@ mod tests {
         let text =
             "Error: x\n    at a (<eval>:30:1)\n    at b (<eval>:11:5)\n    at c (<eval>:11:5)";
         unchanged(text, &[frame(EVAL, 11, 5)]);
+    }
+
+    // Every start pairs until its last frame and then disagrees, which costs
+    // each line at most the frames' cap however many frames come in.
+    #[test]
+    #[expect(clippy::indexing_slicing, reason = "a test's fixed layout")]
+    fn caps_the_frames_a_pairing_walks() {
+        let text = format!("Error: x{}", "\n    at f (<eval>:11:5)".repeat(100_000));
+        let mut frames = vec![frame(EVAL, 11, 5); 1_000_000];
+        frames[super::FRAMES - 1] = frame(EVAL, 11, 6);
+        let started = std::time::Instant::now();
+        unchanged(&text, &frames);
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
     }
 
     // Each start is tried against the detailed frames alone, so a message of

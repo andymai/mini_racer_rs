@@ -1,4 +1,8 @@
 const CONTINUE: u8 = 0b10_0000;
+// Five bits a digit: seven hold the 32 bits ECMA-426 allows. Its grammar
+// allows any number of digits, but a run of zeros past these only makes a
+// map longer.
+const DIGITS: usize = 7;
 
 const fn digit(byte: u8) -> Option<u8> {
     match byte {
@@ -13,28 +17,19 @@ const fn digit(byte: u8) -> Option<u8> {
 
 /// The base64 VLQ that starts `input`, as ECMA-426 section 6 reads it, and
 /// how many bytes it takes; `None` for a byte outside base64, a VLQ cut
-/// short, or a value past 32 bits.
+/// short or longer than seven digits, or a value past 32 bits.
 pub fn decode(input: &[u8]) -> Option<(i32, usize)> {
     let mut unsigned: u64 = 0;
-    let mut shift: u32 = 0;
-    for (at, &byte) in input.iter().enumerate() {
+    for (at, &byte) in input.iter().take(DIGITS).enumerate() {
         let digit = digit(byte)?;
-        let bits = u64::from(digit & !CONTINUE);
-        // The grammar allows any number of digits; one of zeros adds nothing
-        // however far along it comes.
-        if bits != 0 {
-            if shift >= 32 {
-                return None;
-            }
-            unsigned |= bits << shift;
-            if unsigned >> 32 != 0 {
-                return None;
-            }
+        let shift = u32::try_from(at).ok()?.checked_mul(5)?;
+        unsigned |= u64::from(digit & !CONTINUE).checked_shl(shift)?;
+        if unsigned >> 32 != 0 {
+            return None;
         }
         if digit & CONTINUE == 0 {
             return Some((signed(unsigned), at.saturating_add(1)));
         }
-        shift = shift.saturating_add(5);
     }
     None
 }
@@ -143,9 +138,14 @@ pub mod tests {
     }
 
     #[test]
-    fn reads_any_number_of_trailing_zero_digits() {
-        assert_eq!(decode(b"ggggggggggA"), Some((0, 11)));
-        assert_eq!(decode(b"iggggggggA"), Some((1, 10)));
+    fn reads_up_to_seven_digits() {
+        assert_eq!(decode(b"ggggggA"), Some((0, 7)));
+        assert_eq!(decode(b"iggggggA"), None);
+        assert_eq!(decode(b"igggggA"), Some((1, 7)));
+        let long = format!("{}A", "g".repeat(10_000_000));
+        let started = std::time::Instant::now();
+        assert_eq!(decode(long.as_bytes()), None);
+        assert!(started.elapsed() < std::time::Duration::from_millis(50));
     }
 
     #[test]
