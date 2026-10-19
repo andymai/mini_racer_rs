@@ -18,6 +18,8 @@ mod text;
 
 pub use context::{ContextHandle, Host, Unparker, WaitHandle, WaitOutcome};
 pub use control::{CallRequest, CallbackReply, ContextConfig, JsText};
-pub use error::{EngineError, FlagError, InvalidSnapshot, JsError, JsErrorKind, TerminationCause};
+pub use error::{
+    EngineError, FlagError, InvalidSnapshot, JsError, JsErrorKind, SourceMapError, TerminationCause,
+};
 pub use snapshot::{SnapshotBlob, WeakSnapshotBlob};
 pub use text::{Decoded, Transcoder};

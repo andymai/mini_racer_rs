@@ -10,6 +10,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4.13"
+mini_racer_sourcemap = {path = "../../mini_racer_sourcemap"}
 mini_racer_wire = {path = ".."}
 
 # Its own workspace root, with its own Cargo.lock; cargo rejects it as a stray
@@ -21,6 +22,13 @@ bench = false
 doc = false
 name = "decode_arbitrary"
 path = "fuzz_targets/decode_arbitrary.rs"
+test = false
+
+[[bin]]
+bench = false
+doc = false
+name = "sourcemap"
+path = "fuzz_targets/sourcemap.rs"
 test = false
 
 [[bin]]

@@ -1,0 +1,18 @@
+[package]
+description = "Source maps for mini_racer_rs stack traces: parsing a bundle's map and rewriting V8's frames"
+edition.workspace = true
+license.workspace = true
+name = "mini_racer_sourcemap"
+publish.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+memchr.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

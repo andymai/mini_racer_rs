@@ -24,6 +24,17 @@ pub enum InvalidSnapshot {
     Empty,
 }
 
+/// Why `SourceMaps::register` refused a map.
+#[derive(Debug, thiserror::Error)]
+pub enum SourceMapError {
+    #[error(transparent)]
+    Map(#[from] mini_racer_sourcemap::MapError),
+    #[error("at most {0} bundles can have a source map")]
+    Full(usize),
+    #[error("the bundle is shorter than {0} bytes")]
+    Short(usize),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JsErrorKind {
     Parse,

@@ -73,12 +73,13 @@ jobs:
         if: ${{ !cancelled() }}
         run: bundle exec ruby -Ilib test/stress/churn.rb multi 8 600
 
-  # Every wire fuzz target for 15 minutes on the pinned nightly.
+  # Every fuzz target for 15 minutes on the pinned nightly: three, 45 minutes,
+  # with room for setup and the nightly's build.
   fuzz:
     name: Fuzz
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
     permissions:
       contents: read
     steps:

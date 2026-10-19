@@ -4,7 +4,7 @@
 
 | Engine | Done | Planned | Deviation |
 |---|---|---|---|
-| CRuby | 54 | 0 | 27 |
+| CRuby | 54 | 0 | 28 |
 | TruffleRuby | 58 | 0 | 0 |
 
 ## Surface
@@ -191,6 +191,12 @@ Approved 2026-10-18.
 mini_racer_rs returns the same filtered results from a snapshot-based context as from a context without a snapshot. In a context made from `MiniRacer::Snapshot.new("Object.getOwnPropertyDescriptors = () => ({})")`, `({a: 1, f() {}})` returns `{"a" => 1}`, and `[1, function() {}]` returns `[1]`. mini_racer 0.22.1 returns `nil` for both. Both gems copy results that V8 refuses to serialize as is through a filter in a separate safe context. mini_racer_rs keeps an untouched context in each snapshot blob and uses it for that filter, while mini_racer 0.22.1 builds the safe context from the snapshot, exposing the filter's built-ins to snapshot code. User code still sees the replacement in both gems: `Object.getOwnPropertyDescriptors({a: 1})` returns `{}`.
 
 Approved 2026-10-16.
+
+### `behavior:source-maps@ruby`
+
+After a source map is registered with `MiniRacerRs.register_source_map(bundle, map)`, `MiniRacer::RuntimeError` backtraces for contexts that evaluate a UTF-8 source containing the bundle show the mapped original file, line, and column for covered frames inside that bundle, while preserving V8's function name. mini_racer 0.22.1 has no source map support, so its runtime backtraces always show V8 positions. mini_racer_rs keeps V8 positions for async frames, frames after the tenth, `eval` and `new Function` code, frames outside the bundle, uncovered positions, and every frame when the reported frames do not align with V8's stack trace. `MiniRacer::ParseError` and `MiniRacer::ScriptError` messages are unchanged, as are JavaScript-visible values such as `Error.prototype.stack`. Latin-1 and UTF-16 sources and bundles in startup snapshots do not match. With no registered map, behavior is exactly that of mini_racer 0.22.1. Maps are process wide and limited to eight bundles. Affected contexts collect detailed stacks, increasing the measured cost of a 20-frame `new Error` from about 0.8 to 1.5 microseconds and a caught `throw {}` 20 frames deep from about 0.2 to 1.2 microseconds; measured React and MUI server renders were unchanged.
+
+Approved 2026-10-18.
 
 ### `behavior:stack-exhaustion@ruby`
 

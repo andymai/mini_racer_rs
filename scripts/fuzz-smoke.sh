@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs every wire fuzz target for N seconds (default 60) on the nightly pinned
+# Runs every fuzz target for N seconds (default 60) on the nightly pinned
 # as toolchains.fuzz in tools/versions.toml, installing it when missing.
 set -euo pipefail
 cd "$(dirname "$0")/.."

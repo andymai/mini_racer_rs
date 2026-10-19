@@ -8,6 +8,12 @@ normal = ["thiserror"]
 path = "crates/mini_racer_wire"
 unsafe = "forbid"
 
+[crates.mini_racer_sourcemap]
+layer = 0
+normal = ["memchr", "serde", "serde_json", "thiserror"]
+path = "crates/mini_racer_sourcemap"
+unsafe = "forbid"
+
 [crates.mini_racer_sync]
 layer = 0
 normal = ["thiserror"]
@@ -17,7 +23,15 @@ unsafe = "forbid"
 
 [crates.mini_racer_engine]
 layer = 1
-normal = ["deno_core_icudata", "libc", "mini_racer_sync", "mini_racer_wire", "thiserror", "v8"]
+normal = [
+  "deno_core_icudata",
+  "libc",
+  "mini_racer_sourcemap",
+  "mini_racer_sync",
+  "mini_racer_wire",
+  "thiserror",
+  "v8",
+]
 path = "crates/mini_racer_engine"
 unsafe = "fenced"
 unsafe_modules = ["sys"]

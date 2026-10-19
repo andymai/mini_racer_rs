@@ -18,6 +18,7 @@ mod platform;
 )]
 mod rb_raw;
 mod snapshot;
+mod source_maps;
 
 use magnus::{Error, Module, Ruby};
 
@@ -45,6 +46,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     platform::init(ruby, racer)?;
     context::init(ruby, racer)?;
     snapshot::init(ruby, racer)?;
+    source_maps::init(rs)?;
     fork::init(ruby, rs)?;
     Ok(())
 }

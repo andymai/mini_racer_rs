@@ -21,7 +21,7 @@
 | Clippy | `cargo clippy --workspace --all-targets -- -D warnings` |
 | Rust Tests | nextest and doctests, without the extension crate, then regenerates the wire golden bytes from V8 and fails on any difference |
 | Loom | the loom models in `crates/mini_racer_sync/tests/loom.rs`, under `--cfg loom` |
-| Fuzz Smoke | `scripts/fuzz-smoke.sh 60`: every wire fuzz target for 60 s on the pinned nightly; crash inputs are uploaded on failure |
+| Fuzz Smoke | `scripts/fuzz-smoke.sh 60`: every fuzz target for 60 s on the pinned nightly; crash inputs are uploaded on failure |
 | Gem Contents | Builds both gemspecs, checks the file list, resolves the unpacked source gem with `--locked` |
 | Ruby (3.3, 3.4 and 4.0 on ubuntu-24.04 and macos-15; 3.4 on ubuntu-24.04-arm and macos-15-intel) | `rake compile`, `scripts/check-exports.sh`, `rake test`, the upstream suite in strict mode, upstream's scripts, and a source gem install into an empty `GEM_HOME` |
 | TruffleRuby | the harness guard tests and the upstream suite in strict mode against the vendored backend |
