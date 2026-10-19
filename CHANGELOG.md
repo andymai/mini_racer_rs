@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.5](https://github.com/andymai/mini_racer_rs/compare/v1.0.4...v1.0.5) (2026-10-19)
+
+
+### Performance
+
+* **encode:** send Ruby strings to V8 in the form V8 stores them ([#93](https://github.com/andymai/mini_racer_rs/issues/93)) ([62f9c85](https://github.com/andymai/mini_racer_rs/commit/62f9c851917cb0ce7d760b5fc545aa014df0a53b))
+
 ## [1.0.4](https://github.com/andymai/mini_racer_rs/compare/v1.0.3...v1.0.4) (2026-10-19)
 
 
