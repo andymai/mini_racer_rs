@@ -5,7 +5,7 @@ description: Use when making or measuring a performance change in mini_racer_rs,
 
 # Profiling
 
-`bench/run.rb` measures this gem against the real mini_racer 0.22.1 on the same machine and reports medians and ratios. The numbers are informational: CI's Ruby job runs `--quick` as a smoke test, `.github/workflows/bench.yml` runs the full set weekly on a shared hosted runner, and nothing fails on either. A CI perf gate lands after the first release. Measure before changing anything, on a release build, and quote a number only from a full pinned run, with its row's note beside it.
+`bench/run.rb` measures this gem against the real mini_racer 0.22.1 on the same machine and reports medians and ratios. CI's Ruby job runs `--quick` as a smoke test, and nothing fails on it. `.github/workflows/bench.yml` runs the full set weekly on a shared hosted runner and fails only when a row `bench/floors.rb` gates is below its floor in that run and in a second run it starts to confirm: the four round-trip p50 rows at 2x, every serde case and every other row of the first table but its p99 and p99.9 ones at 0.8x. `bundle exec ruby bench/floors.rb tmp/bench/<result>.json` checks a local result the same way. The workload and memory tables are not gated. Measure before changing anything, on a release build, and quote a number only from a full pinned run, with its row's note beside it.
 
 ## Setup
 
