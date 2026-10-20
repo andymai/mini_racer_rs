@@ -34,27 +34,34 @@ done = true
 title = "Fork protocol"
 
 [milestones.M1]
+done = true
 title = "eval and JS to Ruby types"
 
 [milestones.M2]
+done = true
 title = "call, attach, callbacks, Ruby to JS"
 
 [milestones.M3]
+done = true
 title = "Lifecycle, limits, interrupts, heap"
 
 [milestones.M4]
+done = true
 title = "async, platform tasks, wasm, microtasks"
 
 [milestones.M5]
+done = true
 title = "Snapshots and flags"
 
 [milestones.M6]
+done = true
 title = "Single-threaded mode, fork, exit"
 
 [milestones.M7]
 title = "Fiber scheduler hardening"
 
 [milestones.M8]
+done = true
 title = "TruffleRuby, packaging, ExecJS, shim"
 
 [milestones.M9]
