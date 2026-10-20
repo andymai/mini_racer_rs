@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
-# Informational comparison of mini_racer_rs with the real mini_racer 0.22.1:
-# each implementation runs bench/measure.rb in its own process, alternating, and
-# the medians across runs are compared. The reference must support every
-# metric; a candidate metric it cannot run yet is reported, not failed.
+# mini_racer_rs against the real mini_racer 0.22.1: each implementation runs
+# bench/measure.rb in its own process, alternating, and the medians across runs
+# are compared; bench/floors.rb checks the ratios. The reference must support
+# every metric; a candidate metric it cannot run yet is reported, not failed.
 
 require "fileutils"
 require "json"
