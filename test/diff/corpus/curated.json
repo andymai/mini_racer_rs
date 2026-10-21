@@ -191,6 +191,16 @@
     ]
   },
   {
+    "id": "curated-uncloneable-after-filter-symbol-map-key",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "new Map([[Symbol('s'), 1]])"
+      }
+    ]
+  },
+  {
     "id": "curated-view-at-offset",
     "kind": "program",
     "steps": [

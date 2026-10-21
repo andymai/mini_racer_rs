@@ -324,6 +324,9 @@ status = "accepted:uncloneable-after-filter"
 [cases."curated-uncloneable-after-filter-symbol"]
 status = "accepted:uncloneable-after-filter"
 
+[cases."curated-uncloneable-after-filter-symbol-map-key"]
+status = "accepted:uncloneable-after-filter"
+
 [cases."curated-view-at-offset"]
 status = "accepted:view-at-an-offset"
 
