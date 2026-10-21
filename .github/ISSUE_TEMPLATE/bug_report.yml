@@ -1,0 +1,86 @@
+name: Bug report
+description: Report a reproducible problem and compare it with mini_racer 0.22.1.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: For a security issue, use GitHub private vulnerability reporting instead of filing a public issue.
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior, including the complete error message and backtrace.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      description: Describe the expected behavior and why you expected it.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Provide the smallest complete Ruby and JavaScript example that reproduces the problem. Remove application-specific code and dependencies where possible.
+      value: |
+        ```ruby
+        # Ruby code
+        ```
+
+        ```javascript
+        // JavaScript code
+        ```
+    validations:
+      required: true
+  - type: textarea
+    id: comparison
+    attributes:
+      label: mini_racer 0.22.1 comparison
+      description: Run the same reproduction with mini_racer 0.22.1. Does it behave the same? Include its output, error, and backtrace. Deliberate differences are documented in `COMPATIBILITY.md`.
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: |
+        ## Versions and environment
+
+        Paste exact values. Do not summarize or round version numbers.
+  - type: input
+    id: ruby
+    attributes:
+      label: "`ruby -v`"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: "`MiniRacerRs::VERSION`"
+    validations:
+      required: true
+  - type: input
+    id: v8
+    attributes:
+      label: "`MiniRacerRs::V8_VERSION`"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS
+    validations:
+      required: true
+  - type: input
+    id: cpu
+    attributes:
+      label: CPU
+  - type: textarea
+    id: flags
+    attributes:
+      label: Is `MiniRacer::Platform.set_flags!` used? If yes, list the exact flags
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add any other details needed to reproduce the problem.

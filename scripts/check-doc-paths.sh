@@ -33,7 +33,7 @@ case_name='^(callback|js_to_ruby|ruby_to_js)/[A-Za-z0-9_]+$'
 # These are kept verbatim or generated from commits, so a path in them is not
 # ours to fix.
 docs=()
-for doc in *.md .claude/skills/*/*.md .github/*.md .github/ISSUE_TEMPLATE/*.md; do
+for doc in *.md .claude/skills/*/*.md .github/*.md .github/ISSUE_TEMPLATE/*.md .github/ISSUE_TEMPLATE/*.yml; do
   case "$doc" in
     CODE_OF_CONDUCT.md | THIRD_PARTY_NOTICES.md | AI-DISCLOSURE.md | CHANGELOG.md) ;;
     *) [ -f "$doc" ] && docs+=("$doc") ;;
