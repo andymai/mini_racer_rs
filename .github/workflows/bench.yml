@@ -50,6 +50,7 @@ jobs:
             echo '```'
           } >>"$GITHUB_STEP_SUMMARY"
       - name: Wire codec benches (not gated)
+        continue-on-error: true
         run: |
           set -o pipefail
           cargo bench -p mini_racer_wire --locked --bench wire | tee tmp/wire-bench.txt

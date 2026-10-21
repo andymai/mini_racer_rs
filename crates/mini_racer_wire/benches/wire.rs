@@ -13,6 +13,8 @@ const WORDS: [&str; 12] = [
     "omega", "omicron",
 ];
 const INTL: [&str; 5] = ["café", "naïve", "Zürich", "東京", "😀 party"];
+// The words of INTL that V8 keeps one byte a character.
+const LATIN1: [&str; 3] = ["café", "naïve", "Zürich"];
 
 /// Reads every value and keeps nothing, so the decoder's own work is what
 /// is measured.
@@ -139,10 +141,14 @@ impl Seeded {
     }
 
     fn words(&mut self, count: usize) -> Node {
+        self.words_from(count, &INTL)
+    }
+
+    fn words_from(&mut self, count: usize, intl: &[&str]) -> Node {
         let words: Vec<&str> = (0..count)
             .map(|_| {
                 if self.below(10) == 0 {
-                    INTL[self.below(INTL.len())]
+                    intl[self.below(intl.len())]
                 } else {
                     WORDS[self.below(WORDS.len())]
                 }
@@ -208,7 +214,7 @@ fn numbers() -> Node {
 
 fn latin1_strings() -> Node {
     let mut seeded = Seeded(9);
-    Node::Array((0..10_000).map(|_| seeded.words(2)).collect())
+    Node::Array((0..10_000).map(|_| seeded.words_from(2, &LATIN1)).collect())
 }
 
 fn two_byte_strings() -> Node {
