@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.1](https://github.com/andymai/mini_racer_rs/compare/v1.1.0...v1.1.1) (2026-10-21)
+
+
+### Performance
+
+* **ext:** park at once for contexts whose answers outlast the spin budget ([#105](https://github.com/andymai/mini_racer_rs/issues/105)) ([66af89b](https://github.com/andymai/mini_racer_rs/commit/66af89b8d22ebe0c4dd28c877155131e3d7e5738))
+* **wire:** add criterion benches for decoding, writing and transcoding ([#106](https://github.com/andymai/mini_racer_rs/issues/106)) ([42fc2b5](https://github.com/andymai/mini_racer_rs/commit/42fc2b50dba2a4a6437456293fbe61aa5d29aef8))
+
 ## [1.1.0](https://github.com/andymai/mini_racer_rs/compare/v1.0.6...v1.1.0) (2026-10-19)
 
 
