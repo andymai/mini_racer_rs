@@ -19,7 +19,7 @@ Each `MiniRacer::Context` owns a runner thread implemented in `crates/mini_racer
 
 One dispatch at a time enters a context through a per-context Ruby `Mutex`. The extension encodes the request into a byte buffer and sends it over the channel in `crates/mini_racer_sync/src/channel.rs`. The Ruby thread and runner then take turns: the runner receives the request, operates on V8, and returns either a response or a callback request.
 
-While waiting, the Ruby side first spins for 20 microseconds with the GVL held, then for up to 50 more without it, and finally parks with the GVL released. This logic lives in `ext/mini_racer_rs/src/host.rs`. `MINI_RACER_RS_SPIN_US` is an unstable knob for these budgets.
+While waiting, the Ruby side first spins for 20 microseconds with the GVL held, then for up to 50 more without it, and finally parks with the GVL released. Each context counts consecutive waits whose answers arrive after the spin budget. After 3 in a row, it skips spinning and parks at once, releasing the GVL right away, because longer answers make spinning burn the caller's CPU and initially hold the GVL before parking anyway. A skipped wait times itself, and spinning resumes when an answer arrives within the budget. The budgets and rule live in `ext/mini_racer_rs/src/spin.rs`; waiting stays in `ext/mini_racer_rs/src/host.rs`. `MINI_RACER_RS_SPIN_US` is an unstable knob for these budgets.
 
 A signal trap wakes the park and waiting continues. If a Ruby interrupt raises an exception, the extension cancels the dispatch, terminates it, waits for the runner to answer, and then raises the exception.
 

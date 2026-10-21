@@ -237,7 +237,7 @@ mini_racer_rs uses the `v8` crate, rusty_v8 152.2.0, with magnus and rb-sys Ruby
  result
 ```
 
-A waiting Ruby thread spins with the GVL held, then without it. It then parks with the GVL released. Under a fiber scheduler, only the waiting fiber parks. Values use V8's serialization format and decode directly into Ruby objects. There is no intermediate tree. Repeated objects keep their identity.
+A waiting Ruby thread spins with the GVL held, then without it. It then parks with the GVL released. After enough consecutive answers arrive beyond the spin budget, that context skips spinning and parks at once until an answer arrives within the budget. Under a fiber scheduler, only the waiting fiber parks. Values use V8's serialization format and decode directly into Ruby objects. There is no intermediate tree. Repeated objects keep their identity.
 
 One watchdog thread per process enforces every context's `timeout:`. In `:single_threaded` mode, forks quiesce runners. Children take over idle contexts; contexts in use raise there. mini_racer_rs gives V8 a copied platform vtable in each process. Worker-thread slots post to its own pool. V8's platform has one worker thread, which receives no tasks. Forking pauses the pool. The parent resumes it afterward. Default multi-threaded children reject inherited contexts.
 

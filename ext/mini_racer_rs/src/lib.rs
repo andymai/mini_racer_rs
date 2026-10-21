@@ -19,6 +19,7 @@ mod platform;
 mod rb_raw;
 mod snapshot;
 mod source_maps;
+mod spin;
 
 use magnus::{Error, Module, Ruby};
 

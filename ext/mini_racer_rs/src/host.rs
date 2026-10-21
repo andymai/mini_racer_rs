@@ -1,7 +1,6 @@
 use std::cell::Cell;
 use std::os::fd::{AsRawFd, IntoRawFd};
-use std::sync::OnceLock;
-use std::time::Duration;
+use std::time::Instant;
 
 use magnus::error::ErrorType;
 use magnus::gc::Marker;
@@ -14,31 +13,8 @@ use mini_racer_engine::{
 
 use crate::encode;
 use crate::gc_root::OwnedRoot;
+use crate::spin::{self, History};
 use crate::{context, decode, errors, rb_raw};
-
-struct SpinBudget {
-    gvl: Duration,
-    nogvl: Duration,
-}
-
-// Unstable tuning knob: MINI_RACER_RS_SPIN_US=<with GVL>,<without GVL>.
-fn budget() -> &'static SpinBudget {
-    static BUDGET: OnceLock<SpinBudget> = OnceLock::new();
-    BUDGET.get_or_init(|| {
-        let setting = std::env::var("MINI_RACER_RS_SPIN_US").unwrap_or_default();
-        let parts: Vec<Option<u64>> = setting
-            .split(',')
-            .map(|part| part.trim().parse().ok())
-            .collect();
-        let at = |i: usize, default: u64| {
-            Duration::from_micros(parts.get(i).copied().flatten().unwrap_or(default))
-        };
-        SpinBudget {
-            gvl: at(0, 20),
-            nogvl: at(1, 50),
-        }
-    })
-}
 
 /// What a context's callbacks run: its attached callables by id, and where
 /// the exception the latest callback raised is kept, as `mini_racer` keeps one
@@ -69,6 +45,7 @@ pub struct RubyHost<'r> {
 pub struct Waiter {
     io: OwnedRoot<Value>,
     epoch: Cell<u64>,
+    history: History,
 }
 
 impl Waiter {
@@ -268,28 +245,44 @@ fn message(ruby: &Ruby, exception: Exception) -> JsText {
 
 impl Host for RubyHost<'_> {
     fn wait(&mut self, wait: &WaitHandle<'_>) -> WaitOutcome {
-        let budget = budget();
-        if wait.spin(budget.gvl) {
-            return WaitOutcome::Ready;
+        let budget = spin::budget();
+        let history = self.waiter.map(|waiter| &waiter.history);
+        let spins = history.is_none_or(History::spins);
+        // A wait that does not spin times itself to tell whether spinning
+        // would have caught the answer.
+        let started = (!spins).then(Instant::now);
+        let answered = |spun: bool| {
+            if let Some(history) = history {
+                history.record(started.map_or(spun, |at| at.elapsed() <= budget.total()));
+            }
+            WaitOutcome::Ready
+        };
+        if spins && wait.spin(budget.gvl) {
+            return answered(true);
         }
         if rb_raw::fiber_scheduler(self.ruby)
             && let Some(outcome) = self.wait_in_fiber(wait)
         {
-            return outcome;
+            return match outcome {
+                WaitOutcome::Ready => answered(false),
+                WaitOutcome::Cancel => outcome,
+            };
         }
         let unparker = wait.unparker();
         loop {
             let parked = rb_raw::nogvl(
                 self.ruby,
                 || {
-                    if !wait.spin(budget.nogvl) {
+                    let spun = spins && wait.spin(budget.nogvl);
+                    if !spun {
                         wait.park();
                     }
+                    spun
                 },
                 &move || unparker.unpark(),
             );
             if wait.ready() {
-                return WaitOutcome::Ready;
+                return answered(matches!(parked, Some(Ok(true))));
             }
             if parked.as_ref().is_some_and(Result::is_err) {
                 self.pending = Some(errors::internal(self.ruby, "panic while waiting"));
