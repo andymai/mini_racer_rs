@@ -37,7 +37,7 @@ Each run starts the reference, then the candidate, as separate `bundle exec` pro
 | Change touches | Watch first | Then |
 |---|---|---|
 | Dispatch, the channel, spinning and parking, GVL release, the watchdog | eval, call and callback round trip p50 and p99, call with timeout | `bundle exec ruby -Ilib test/stress/round_trips.rb multi` (microseconds per eval, and RSS) |
-| Wire decode or write, encode, text transcoding | JS to Ruby and Ruby to JS MB/s | the serde rows for the value type that changed |
+| Wire decode or write, encode, text transcoding | `cargo bench -p mini_racer_wire --bench wire` (the codec alone, with criterion's change against the last run), then JS to Ruby and Ruby to JS MB/s | the serde rows for the value type that changed |
 | Context creation, dispose, snapshots, isolate teardown | startup p50, Babel snapshot startup and size, and RSS per context from one Babel snapshot (`babel_snapshot_contexts`) | `bundle exec ruby -Ilib test/stress/churn.rb multi 8 60` (contexts churned, bytes per context) |
 | What a context keeps allocated: buffers, isolate setup, what V8 or malloc holds after a load | the memory rows (each scenario in its own process; per-context rows leave out a first context) | the same rows with `--runs 3` or more, since resident memory moves with the allocator |
 | Anything on the hot path | the round trips above | the workloads: they spend most of their time inside V8, so they confirm real use does not regress rather than show small wins |

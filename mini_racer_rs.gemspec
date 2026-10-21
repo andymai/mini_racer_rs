@@ -33,6 +33,7 @@ Gem::Specification.new do |spec|
     "README.md",
     "THIRD_PARTY_NOTICES.md",
     "crates/*/Cargo.toml",
+    "crates/*/benches/*.rs",
     "crates/*/build.rs",
     "crates/*/src/**/*.rs",
     "ext/mini_racer_rs/Cargo.toml",
