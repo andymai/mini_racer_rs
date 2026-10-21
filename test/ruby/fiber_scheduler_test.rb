@@ -12,9 +12,11 @@ end
 # Under a fiber scheduler, waiting for a context parks only the waiting fiber,
 # so other fibers of the same thread keep running.
 module SchedulerContexts
-  # `busy` spins the runner's core; `nap` blocks the runner without using one.
+  # `busy` spins the runner's core; `nap` blocks the runner without using one;
+  # `span` naps and returns when the nap started and ended.
   BUSY = "globalThis.busy = (ms) => { const end = Date.now() + ms; while (Date.now() < end) {} return ms };" \
-         "globalThis.nap = (ms) => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); return ms }"
+         "globalThis.nap = (ms) => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); return ms };" \
+         "globalThis.span = (ms) => { const start = Date.now(); nap(ms); return [start, Date.now()] }"
 
   def setup
     skip "needs CRuby and the async gem" unless RUBY_ENGINE == "ruby" && defined?(Async)
@@ -49,22 +51,20 @@ class FiberSchedulerTest < Minitest::Test
   include SchedulerContexts
 
   # The runners nap rather than spin, so they leave the CPU to the Ruby thread
-  # and the ticker on any number of cores. Run one after another, the calls
-  # would take count * 100 ms and the ticker would tick about once between
-  # each.
+  # and the ticker on any number of cores. Run one after another, each nap
+  # would start after the one before it ended, and the ticker would tick about
+  # once between each. The calls' wall time would tell the two apart too, but
+  # a stalled CI machine adds hundreds of milliseconds to it.
   def test_contexts_run_concurrently_from_fibers_of_one_thread
-    count = 4
-    contexts = Array.new(count) { busy_context }
-    elapsed = nil
+    contexts = Array.new(4) { busy_context }
+    spans = nil
     Sync do |task|
       ticking = ticker(task, 0.01)
-      started = now
-      contexts.map { |context| task.async { context.call("nap", 100) } }.each(&:wait)
-      elapsed = now - started
+      spans = contexts.map { |context| task.async { context.call("span", 100) } }.map(&:wait)
       ticking.stop
     end
 
-    assert_operator elapsed, :<, 0.07 * count
+    assert_operator spans.map(&:first).max, :<, spans.map(&:last).min
     assert_operator @ticks, :>=, 5
   end
 
