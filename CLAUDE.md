@@ -83,6 +83,7 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | Loom models | `crates/mini_racer_sync/tests/loom.rs` |
 | `MiniRacer::Context` methods, per-context lock | `ext/mini_racer_rs/src/context.rs` |
 | Waiting from a Ruby thread (spin, fiber scheduler, GVL release, park, interrupts) and running attached callables | `ext/mini_racer_rs/src/host.rs` |
+| The spin budgets (`MINI_RACER_RS_SPIN_US`) and each context's record of waits that outlasted them, after 3 in a row of which its waits park at once until one is answered within the budget | `ext/mini_racer_rs/src/spin.rs`, `test/ruby/spin_test.rb` |
 | Waiting for contexts from fibers under a scheduler (the `async` gem) | `test/ruby/fiber_scheduler_test.rb` |
 | `Context.new` option rules (Ruby-free) | `ext/mini_racer_rs/src/options.rs` |
 | `MiniRacer::Snapshot`, the blob it shares with its contexts, and the blobs `Snapshot.load`, `Context.new` and `#warmup!` refuse | `ext/mini_racer_rs/src/snapshot.rs`, `test/ruby/snapshot_test.rb`, `test/ruby/snapshot_blob_test.rb` |
