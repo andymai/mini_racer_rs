@@ -1,8 +1,9 @@
 name: Bench
 
 # mini_racer_rs against the real mini_racer 0.22.1 on a hosted runner, weekly
-# and on demand. Informational: hosted runners are shared and noisy, so the
-# numbers are kept for trends and nothing fails on them.
+# and on demand. Hosted runners are shared and noisy, so the run fails only when
+# a row bench/floors.rb gates is below its floor in this run and again in a
+# second one; the rest of the table is kept for trends.
 
 on:
   schedule:
@@ -19,7 +20,7 @@ jobs:
   bench:
     name: Bench
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 150
     permissions:
       contents: read
     env:
@@ -48,10 +49,33 @@ jobs:
             cat tmp/bench-output.txt
             echo '```'
           } >>"$GITHUB_STEP_SUMMARY"
+      - name: Floors
+        id: floors
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          bundle exec ruby bench/floors.rb tmp/bench/*.json | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Benchmark again to confirm a miss
+        if: steps.floors.outcome == 'failure'
+        run: |
+          set -o pipefail
+          bundle exec ruby bench/run.rb | tee tmp/bench-confirm.txt
+          {
+            echo '```'
+            cat tmp/bench-confirm.txt
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+      - name: Floors, in both runs
+        if: steps.floors.outcome == 'failure'
+        run: |
+          set -o pipefail
+          bundle exec ruby bench/floors.rb tmp/bench/*.json | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
         with:
           name: bench
           path: |
             tmp/bench
             tmp/bench-output.txt
+            tmp/bench-confirm.txt
           retention-days: 90
