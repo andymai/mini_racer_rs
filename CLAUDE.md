@@ -70,6 +70,7 @@ Rust replacement for the `mini_racer` gem 0.22.1: same `MiniRacer` API, V8 from 
 | `madvise` wrapper (fork safety), and the fixture showing a child crashes without it | `crates/mini_racer_engine/src/sys.rs`, `crates/mini_racer_engine/build.rs`, `scripts/madvise-fixture.sh`, `test/stress/madvise_fixture.rb` |
 | Wire decoding, writing and text transcoding, with Latin-1 and UTF-16 written into a slice (`latin1_to_utf8_into`, `utf16le_to_utf8_into`) that the extension's decoder keeps one of for a decode (`RubyVisitor::scratch`), or past 64 KiB gives the text's measured size (`latin1_utf8_len`, `utf16le_utf8_len`) | `crates/mini_racer_wire/src/decode.rs`, `crates/mini_racer_wire/src/write.rs`, `crates/mini_racer_wire/src/text.rs`, `ext/mini_racer_rs/src/decode.rs`, `test/ruby/result_strings_test.rb` |
 | The string that stands in for a function result | `crates/mini_racer_wire/src/marker.rs` |
+| Criterion benches of the wire codec without V8 or Ruby: decoding about 1 MB of seeded server rendering props, runs of numbers, Latin-1 and two-byte strings, writing the props, and the Latin-1 and UTF-16 transcoders (run weekly in `bench.yml`, not gated) | `crates/mini_racer_wire/benches/wire.rs` |
 | What V8 writes for a corpus of expressions, and its reviewed decoding | `crates/mini_racer_wire/tests/golden/`, `crates/mini_racer_engine/examples/gen_wire_golden.rs` |
 | V8 reading what `Writer` writes | `crates/mini_racer_engine/tests/writer.rs` |
 | Fuzz targets (the wire codec, source maps) | `crates/mini_racer_wire/fuzz/fuzz_targets/`, `scripts/fuzz-smoke.sh` |
@@ -165,6 +166,7 @@ bundle exec ruby test/diff/run.rb --explore --shrink --seed 42 --js 1500 --ruby 
 BUNDLE_GEMFILE=$PWD/test/consumers/transitive/Gemfile bundle exec ruby test/consumers/transitive/check.rb
 bundle exec ruby bench/run.rb     # medians against the real gem (needs the consumer bundles); --quick for a smoke run; MINI_RACER_RS_BENCH_SSR_BUNDLE, _PRELUDE and _CALL add a private bundle
 bundle exec ruby bench/floors.rb tmp/bench/<result>.json...   # the rows below their floors in every result given
+cargo bench -p mini_racer_wire --bench wire   # the wire codec's own decode, write and transcode throughput, without V8 or Ruby
 bundle exec ruby -Ilib test/stress/round_trips.rb multi   # 1M evals after a 500k warm-up; fails on RSS growth over 5% (also: single)
 bundle exec ruby -Ilib test/stress/churn.rb multi 8 600   # 8 threads churning contexts for 10 min; fails over 256 bytes of RSS per context plus 32 MB (also: single)
 bundle exec ruby -Ilib test/stress/fork_loop.rb    # 500 forks with idle contexts, 100 during an eval loop, single-threaded
@@ -183,7 +185,7 @@ bundle exec rake package:source    # the source gem, into pkg/
 
 ## Which tests to run
 
-- `crates/mini_racer_wire`: `cargo nextest run -p mini_racer_wire`, then `scripts/fuzz-smoke.sh 20`. A new corpus entry goes in `crates/mini_racer_wire/tests/golden/corpus.tsv`; generate its `.bin`, then its `.txt`, and read the `.txt` before committing.
+- `crates/mini_racer_wire`: `cargo nextest run -p mini_racer_wire`, then `scripts/fuzz-smoke.sh 20`; for a decode, write or transcode change, `cargo bench -p mini_racer_wire --bench wire` before and after. A new corpus entry goes in `crates/mini_racer_wire/tests/golden/corpus.tsv`; generate its `.bin`, then its `.txt`, and read the `.txt` before committing.
 - `crates/mini_racer_sync`: `cargo nextest run -p mini_racer_sync`, then the loom command above.
 - `crates/mini_racer_sourcemap`: `cargo nextest run -p mini_racer_sourcemap`, then `scripts/fuzz-smoke.sh 20`.
 - `crates/mini_racer_engine`: `cargo nextest run -p mini_racer_engine`; for teardown or lifetime changes, `scripts/sanitizers.sh` or the `sanitizers` label. Flag-dependent assertions live in `crates/mini_racer_engine/tests/flags.rs`, one test per process.
