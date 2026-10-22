@@ -397,9 +397,11 @@ jobs:
         working-directory: pkg
         run: sha256sum -c SHA256SUMS
       - uses: rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a # v2.1.0
-      - run: scripts/publish-gems.sh pkg
+      - run: scripts/publish-gems.sh --sign pkg
       - name: Attach the gems to the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
-        run: gh release upload "$TAG" pkg/*.gem pkg/SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"
+        run: |
+          shopt -s nullglob
+          gh release upload "$TAG" pkg/*.gem pkg/*.sigstore.json pkg/SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"

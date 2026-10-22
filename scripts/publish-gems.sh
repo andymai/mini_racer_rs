@@ -3,17 +3,26 @@
 # source gem last, so no install meets a version that has only the source
 # gem. A gem RubyGems.org already has at this version and platform is
 # skipped, so a rerun after a partial publish finishes it. Expects the
-# credentials the trusted publishing step exports.
-# Usage: publish-gems.sh [--dry-run] <dir with .gem files>
+# credentials the trusted publishing step exports. With --sign, each gem is
+# signed through Sigstore with the job's OIDC identity and pushed with that
+# attestation, as rubygems/release-gem does; a gem that fails to sign, or
+# whose signed push fails, is pushed without one so a release never waits
+# on Sigstore.
+# Usage: publish-gems.sh [--dry-run] [--sign] <dir with .gem files>
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 dry_run=false
-if [ "${1:-}" = --dry-run ]; then
-  dry_run=true
+sign=false
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run) dry_run=true ;;
+    --sign) sign=true ;;
+    *) break ;;
+  esac
   shift
-fi
-dir=${1:?usage: publish-gems.sh [--dry-run] <dir with .gem files>}
+done
+dir=${1:?usage: publish-gems.sh [--dry-run] [--sign] <dir with .gem files>}
 platforms="aarch64-linux-gnu arm64-darwin x86_64-darwin x86_64-linux-gnu"
 version=$(sed -nE 's/^ *VERSION = "([^"]+)"$/\1/p' lib/mini_racer_rs/version.rb)
 
@@ -50,7 +59,16 @@ for entry in "${order[@]}"; do
   fi
   if [ "$dry_run" = true ]; then
     echo "would push $(basename "$gem")"
-  else
-    gem push "$gem"
+    continue
   fi
+  if [ "$sign" = true ]; then
+    if gem exec sigstore-cli:0.2.3 sign "$gem" --bundle "$gem.sigstore.json"; then
+      gem push --attestation "$gem.sigstore.json" "$gem" && continue
+      echo "::warning::pushing $(basename "$gem") with its attestation failed; pushing it without one"
+    else
+      echo "::warning::signing $(basename "$gem") failed; pushing it without an attestation"
+    fi
+    rm -f "$gem.sigstore.json"
+  fi
+  gem push "$gem"
 done
