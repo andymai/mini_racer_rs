@@ -23,6 +23,18 @@ jobs:
     env:
       HAS_APP: ${{ secrets.RELEASE_KUN_APP_ID != '' && secrets.RELEASE_KUN_APP_PRIVATE_KEY != '' }}
     steps:
+      # Dependabot can refresh a grouped PR with an update that needs review after
+      # an earlier run queued it, so each run starts unqueued and a failure later
+      # in the job leaves the PR for review.
+      - name: Unqueue the PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          queued=$(gh pr view "$PR_URL" --json autoMergeRequest --jq '.autoMergeRequest != null')
+          if [ "$queued" = true ]; then
+            gh pr merge "$PR_URL" --disable-auto
+          fi
       - uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
         id: metadata
       # A merge made with GITHUB_TOKEN starts no workflows, so main's CI and the
@@ -36,14 +48,30 @@ jobs:
         with:
           app-id: ${{ secrets.RELEASE_KUN_APP_ID }}
           private-key: ${{ secrets.RELEASE_KUN_APP_PRIVATE_KEY }}
+      # Actions in release.yml, or in the setup action it runs, execute in the
+      # jobs that build, sign and publish the gems.
+      - name: Check for release workflow changes
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          files=$(gh pr diff "$PR_URL" --name-only)
+          if grep -Eq '^\.github/(workflows/release\.yml|actions/)' <<<"$files"; then
+            echo "touches=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "touches=false" >> "$GITHUB_OUTPUT"
+          fi
       # --auto waits for the required checks; majors stay manual, and so do
       # release/sign, whose gems run in the release workflow with an OIDC token,
-      # and the Alpine images the release builds and tests the musl gems in.
+      # the Alpine images the release builds and tests the musl gems in, and
+      # anything the release workflow runs.
       - name: Queue patch and minor updates for merge
         if: >-
           steps.metadata.outputs.update-type != 'version-update:semver-major' &&
           steps.metadata.outputs.directory != '/release/sign' &&
-          steps.metadata.outputs.package-ecosystem != 'docker'
+          steps.metadata.outputs.package-ecosystem != 'docker' &&
+          steps.release.outputs.touches == 'false'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
           PR_URL: ${{ github.event.pull_request.html_url }}
