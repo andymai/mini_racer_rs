@@ -6,10 +6,11 @@ use magnus::encoding::{EncodingCapable, RbEncoding};
 use magnus::gc::Marker;
 use magnus::r_hash::ForEach;
 use magnus::scan_args::scan_args;
+use magnus::typed_data::Obj;
 use magnus::value::{LazyId, ReprValue};
 use magnus::{
     Class, DataTypeFunctions, Error, Fixnum, Module, RArray, RHash, RModule, RString, Ruby, Symbol,
-    TypedData, Value,
+    TryConvert, TypedData, Value,
 };
 use mini_racer_engine::{ContextConfig, ContextHandle, EngineError, JsText};
 
@@ -144,7 +145,7 @@ fn resolve_date_time(ruby: &Ruby) -> Result<(), Error> {
     Ok(())
 }
 
-fn option_value(ruby: &Ruby, value: Value) -> OptionValue {
+pub fn option_value(ruby: &Ruby, value: Value) -> OptionValue {
     let other = || {
         if value.is_nil() {
             OptionValue::Nil
@@ -184,7 +185,11 @@ fn config(ruby: &Ruby, keywords: RHash) -> Result<ContextConfig, Error> {
         pairs.push((key, value));
         Ok(ForEach::Continue)
     })?;
-    options::configure(pairs.into_iter()).map_err(|error| match error {
+    options::configure(pairs.into_iter()).map_err(|error| option_error(ruby, &error))
+}
+
+pub fn option_error(ruby: &Ruby, error: &OptionError) -> Error {
+    match error {
         OptionError::Type(_) | OptionError::SnapshotType(_) => {
             errors::raised(ruby, ruby.exception_type_error(), error.to_string())
         }
@@ -192,8 +197,18 @@ fn config(ruby: &Ruby, keywords: RHash) -> Result<ContextConfig, Error> {
             errors::raised(ruby, ruby.exception_arg_error(), error.to_string())
         }
         OptionError::Keyword(_) => errors::runtime(ruby, error.to_string()),
-        OptionError::InvalidSnapshot(invalid) => errors::engine(ruby, invalid.into()),
-    })
+        OptionError::InvalidSnapshot(invalid) => errors::engine(ruby, (*invalid).into()),
+    }
+}
+
+/// Whether `value` is a `MiniRacer::Context` that can no longer run anything.
+/// Makes no Ruby call.
+pub fn is_disposed(ruby: &Ruby, value: Value) -> bool {
+    // Matched by name first, since a failed conversion builds its message
+    // through Ruby calls.
+    rb_raw::typed_data_name(ruby, value).as_deref() == Some("mini_racer/context")
+        && Obj::<Context>::try_convert(value)
+            .is_ok_and(|context| context.handle.get().is_none_or(ContextHandle::is_disposed))
 }
 
 impl Context {

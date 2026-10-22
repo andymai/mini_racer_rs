@@ -1,5 +1,7 @@
 use magnus::value::ReprValue;
-use magnus::{Class, Error, ExceptionClass, Module, Object, RModule, RObject, Ruby, Value};
+use magnus::{
+    Class, Error, Exception, ExceptionClass, Module, Object, RModule, RObject, Ruby, Value,
+};
 use mini_racer_engine::{EngineError, FlagError, JsErrorKind, TerminationCause};
 
 use crate::export;
@@ -109,6 +111,12 @@ pub fn flag(ruby: &Ruby, error: FlagError) -> Error {
 // mini_racer, rather than in the cause Ruby gives a raised exception.
 fn cause(_ruby: &Ruby, rb_self: RObject) -> Result<Value, Error> {
     rb_self.ivar_get("@cause")
+}
+
+/// Whether a context that raised `exception` is spent: out of memory, or
+/// disposed.
+pub fn spends_context(ruby: &Ruby, exception: Exception) -> bool {
+    exception.is_kind_of(OUT_OF_MEMORY.get(ruby)) || exception.is_kind_of(DISPOSED.get(ruby))
 }
 
 pub fn script_error(ruby: &Ruby) -> ExceptionClass {

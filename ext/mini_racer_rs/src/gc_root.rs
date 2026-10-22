@@ -5,7 +5,9 @@ use std::sync::OnceLock;
 use magnus::gc::Marker;
 use magnus::typed_data::Obj;
 use magnus::value::{Lazy, Opaque, ReprValue};
-use magnus::{Class, DataTypeFunctions, Error, Module, RModule, Ruby, TypedData, Value};
+use magnus::{Class, DataTypeFunctions, Error, Module, Object, RModule, Ruby, TypedData, Value};
+
+use crate::rb_raw;
 
 pub struct StaticRoot<T: ReprValue>(Lazy<T>);
 
@@ -171,6 +173,27 @@ impl Spill {
             unsafe { std::slice::from_raw_parts(held.as_ptr().cast::<Value>(), held.len()) };
         read(slice)
     }
+}
+
+// A hidden instance variable, which Ruby code cannot read or change.
+const SPAWNED: &str = "spawned_with";
+
+/// Starts a Ruby thread that runs `run` with `value`, which the thread object
+/// keeps alive until the thread ends. `run` must handle whatever its Ruby
+/// calls raise.
+pub fn spawn<T: ReprValue + 'static>(
+    ruby: &Ruby,
+    value: T,
+    run: impl FnOnce(&Ruby, T) + Send + 'static,
+) -> Result<(), Error> {
+    let held = Opaque::from(value);
+    // The new thread waits for the GVL this one holds until the variable is
+    // set, and `value` lives on this stack until then.
+    let thread = rb_raw::thread_create(
+        ruby,
+        Box::new(move |ruby: &Ruby| run(ruby, ruby.get_inner(held))),
+    )?;
+    thread.ivar_set(SPAWNED, value.as_value())
 }
 
 // Each holder's class is looked up once, by a Ruby call whose failure panics;

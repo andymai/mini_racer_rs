@@ -43,6 +43,7 @@ Each script runs alone with `bundle exec ruby -Ilib test/stress/<script>.rb`, ta
 |---|---|---|
 | `test/stress/round_trips.rb single\|multi [count] [warmup] [max_growth]` | RSS grows over 5% after the warm-up | Nightly and PRs labeled `stress`: 10,000,000 evals per mode |
 | `test/stress/churn.rb single\|multi [threads] [seconds] [max_bytes_per_context]` | RSS grows over 256 bytes per context plus 32 MB | Nightly and `stress`: 8 threads for 600 s per mode |
+| `test/stress/pool_churn.rb single\|multi [threads] [seconds] [max_bytes_per_context]` | a checkout gets a wrong result or a context past its use limit, or RSS grows over 256 bytes per context the pool builds plus 32 MB | Nightly and `stress`: 8 threads for 300 s per mode |
 | `test/stress/fork_loop.rb [quiet] [busy]` | a child fails or hangs past 3 s | every CI Ruby leg |
 | `test/stress/fork_busy.rb [forks] [threads]` | a child of a multi-threaded parent, forked while other threads evaluate, fails or hangs past 3 s | every CI Ruby leg: 300 forks, 4 threads |
 | `test/stress/fork_child_memory.rb [evals] [margin_mib]` | a child of a multi-threaded parent grows more than the margin (8 MiB) past its parent over the same allocating loop in a new context | every CI Ruby leg on Linux: 20,000 evals each |

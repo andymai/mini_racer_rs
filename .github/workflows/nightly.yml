@@ -72,6 +72,12 @@ jobs:
       - name: Context churn from 8 threads, multi-threaded platform
         if: ${{ !cancelled() }}
         run: bundle exec ruby -Ilib test/stress/churn.rb multi 8 600
+      - name: Pool replacements under 8 threads, single-threaded platform
+        if: ${{ !cancelled() }}
+        run: bundle exec ruby -Ilib test/stress/pool_churn.rb single 8 300
+      - name: Pool replacements under 8 threads, multi-threaded platform
+        if: ${{ !cancelled() }}
+        run: bundle exec ruby -Ilib test/stress/pool_churn.rb multi 8 300
 
   # Every fuzz target for 15 minutes on the pinned nightly: three, 45 minutes,
   # with room for setup and the nightly's build.

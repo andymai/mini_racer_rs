@@ -3,7 +3,7 @@ use std::ffi::{c_int, c_long, c_void};
 use magnus::encoding::Coderange;
 use magnus::rb_sys::{AsRawId, AsRawValue, FromRawValue, protect};
 use magnus::value::{IntoId, LazyId, ReprValue};
-use magnus::{Error, RArray, RHash, RString, Ruby, Value};
+use magnus::{Error, Exception, RArray, RHash, RString, Ruby, Value};
 
 static CALL: LazyId = LazyId::new("call");
 
@@ -60,6 +60,109 @@ where
         );
     }
     call.result
+}
+
+struct Ensure<'a> {
+    ruby: &'a Ruby,
+    before: rb_sys::VALUE,
+    after: &'a mut dyn FnMut(&Ruby, Option<Exception>),
+}
+
+unsafe extern "C" fn run_after(data: rb_sys::VALUE) -> rb_sys::VALUE {
+    let _ = guard(|| {
+        // VALUE is as wide as a pointer, which rb-sys checks as it builds.
+        let Ok(address) = usize::try_from(data) else {
+            return;
+        };
+        let ensure = std::ptr::with_exposed_provenance_mut::<Ensure<'_>>(address);
+        // SAFETY: `data` is the address of the `Ensure` that `yield_ensuring`
+        // keeps on its stack for the whole rb_ensure call, which runs this once.
+        let ensure = unsafe { &mut *ensure };
+        // SAFETY: rb_ensure runs this holding the GVL, and rb_errinfo only
+        // reads the current execution context.
+        let now = unsafe { rb_sys::rb_errinfo() };
+        // rb_ensure leaves an exception the block raised in place for this
+        // call and clears what a break, a throw or Thread#kill carries, so an
+        // exception that was not there before the block is the one it raised.
+        let raised = if now == ensure.before {
+            None
+        } else {
+            // SAFETY: `now` is the live value the execution context holds.
+            Exception::from_value(unsafe { Value::from_raw(now) })
+        };
+        (ensure.after)(ensure.ruby, raised);
+    });
+    rb_sys::Qnil as rb_sys::VALUE
+}
+
+/// Yields `value` to the block of the method Ruby is running, then runs
+/// `after` however the block ends: a return, an exception, `break`, `throw`
+/// or `Thread#kill`, as `File.open` closes its file. `after` gets the
+/// exception the block raised, if it raised one. It must not call a Ruby
+/// method: `rb_funcall` runs pending interrupts as it returns, and an
+/// exception one raised there could not be raised from `after`.
+pub fn yield_ensuring(
+    ruby: &Ruby,
+    value: Value,
+    after: &mut dyn FnMut(&Ruby, Option<Exception>),
+) -> Result<Value, Error> {
+    // SAFETY: the `&Ruby` argument proves this thread holds the GVL, and
+    // rb_errinfo only reads the current execution context.
+    let before = unsafe { rb_sys::rb_errinfo() };
+    let mut ensure = Ensure {
+        ruby,
+        before,
+        after,
+    };
+    let data = std::ptr::addr_of_mut!(ensure).expose_provenance() as rb_sys::VALUE;
+    let raw = value.as_raw();
+    let result = protect(|| {
+        // SAFETY: the GVL is held; rb_yield is C, so a jump out of the block
+        // reaches rb_ensure's handler without crossing a Rust frame;
+        // `ensure` outlives the call, and `protect` catches whatever rb_ensure
+        // resumes once `run_after` has returned.
+        unsafe { rb_sys::rb_ensure(Some(rb_sys::rb_yield), raw, Some(run_after), data) }
+    })?;
+    // SAFETY: `result` is the live value the block returned.
+    Ok(unsafe { Value::from_raw(result) })
+}
+
+unsafe extern "C" fn thread_body(data: *mut c_void) -> rb_sys::VALUE {
+    // SAFETY: `data` is the box `thread_create` leaked for this thread, and
+    // Ruby calls a thread's function once.
+    let run = unsafe { Box::from_raw(data.cast::<Box<dyn FnOnce(&Ruby) + Send>>()) };
+    let _ = guard(move || {
+        // SAFETY: Ruby runs a thread's function holding the GVL.
+        let ruby = unsafe { Ruby::get_unchecked() };
+        run(&ruby);
+    });
+    rb_sys::Qnil as rb_sys::VALUE
+}
+
+/// A new Ruby thread running `run`, which must handle whatever its Ruby calls
+/// raise. Ruby values `run` uses must be kept alive by the caller, as
+/// `gc_root::spawn` does.
+pub fn thread_create(
+    ruby: &Ruby,
+    run: Box<dyn FnOnce(&Ruby) + Send>,
+) -> Result<magnus::Thread, Error> {
+    let data = Box::into_raw(Box::new(run));
+    let created = protect(|| {
+        // SAFETY: the `&Ruby` argument proves this thread holds the GVL;
+        // `thread_body` takes `data` back, and `protect` catches the
+        // ThreadError Ruby raises when it cannot start a thread.
+        unsafe { rb_sys::rb_thread_create(Some(thread_body), data.cast()) }
+    });
+    match created {
+        // SAFETY: `raw` is the live Thread rb_thread_create returned.
+        Ok(raw) => magnus::Thread::from_value(unsafe { Value::from_raw(raw) })
+            .ok_or_else(|| Error::new(ruby.exception_type_error(), "expected Thread")),
+        Err(error) => {
+            // SAFETY: no thread started, so nothing else took the box back.
+            drop(unsafe { Box::from_raw(data) });
+            Err(error)
+        }
+    }
 }
 
 // Runs pending interrupts: signal traps return Ok, while Thread#raise, #kill,

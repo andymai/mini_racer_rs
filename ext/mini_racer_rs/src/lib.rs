@@ -12,6 +12,7 @@ mod guard;
 mod host;
 mod options;
 mod platform;
+mod pool;
 #[allow(
     unsafe_code,
     reason = "the only module that calls rb-sys directly (invariant I6)"
@@ -48,6 +49,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     context::init(ruby, racer)?;
     snapshot::init(ruby, racer)?;
     source_maps::init(rs)?;
+    pool::init(ruby, rs)?;
     fork::init(ruby, rs)?;
     Ok(())
 }
