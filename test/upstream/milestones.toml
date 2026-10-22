@@ -58,6 +58,7 @@ done = true
 title = "Single-threaded mode, fork, exit"
 
 [milestones.M7]
+done = true
 title = "Fiber scheduler hardening"
 
 [milestones.M8]
@@ -65,4 +66,5 @@ done = true
 title = "TruffleRuby, packaging, ExecJS, shim"
 
 [milestones.M9]
+done = true
 title = "Hardening"
