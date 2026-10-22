@@ -22,6 +22,7 @@ on:
       - release/**
       # Its own CI job installs and checks it; a dry run never signs.
       - "!release/sign/**"
+      - scripts/alpine-image.sh
       - scripts/alpine.sh
       - scripts/check-exports.sh
       - scripts/check-gem-sizes.sh
@@ -60,7 +61,6 @@ jobs:
       version: ${{ steps.release.outputs.version }}
       rubies: ${{ steps.release.outputs.rubies }}
       macos: ${{ steps.release.outputs.macos }}
-      alpine: ${{ steps.release.outputs.alpine }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -84,7 +84,6 @@ jobs:
             echo "version=$version"
             echo "rubies=$(taplo get -f tools/versions.toml -o json release.rubies | jq -c .)"
             echo "macos=$(taplo get -f tools/versions.toml release.macos)"
-            echo "alpine=$(taplo get -f tools/versions.toml release.alpine)"
           } >>"$GITHUB_OUTPUT"
       - run: scripts/check-versions.sh
       - run: scripts/check-platforms.sh
@@ -146,12 +145,12 @@ jobs:
       - name: Compile, smoke-test and stage in Alpine
         if: endsWith(matrix.platform, '-linux-musl')
         env:
-          IMAGE: ruby:${{ matrix.ruby }}-alpine
+          MINOR: ${{ matrix.ruby }}
           PLATFORM: ${{ matrix.platform }}
         run: |
           docker run --rm --init -v "$GITHUB_WORKSPACE:/mini_racer_rs" -w /mini_racer_rs \
             -e CI -e RB_SYS_CARGO_PROFILE -e CARGO_PROFILE_RELEASE_DEBUG -e CARGO_PROFILE_RELEASE_STRIP -e CARGO_TERM_COLOR \
-            "$IMAGE" scripts/alpine.sh compile "$PLATFORM"
+            "$(scripts/alpine-image.sh "ruby-$MINOR")" scripts/alpine.sh compile "$PLATFORM"
       - name: Check exports and the platform floor
         env:
           PLATFORM: ${{ matrix.platform }}
@@ -304,12 +303,12 @@ jobs:
       - name: Install, smoke-test and run the suites in Alpine
         if: endsWith(matrix.platform, '-linux-musl')
         env:
-          IMAGE: ruby:${{ matrix.ruby }}-alpine
+          MINOR: ${{ matrix.ruby }}
           PLATFORM: ${{ matrix.platform }}
           SEED: ${{ github.run_number }}
         run: |
           docker run --rm --init -v "$GITHUB_WORKSPACE:/mini_racer_rs" -w /mini_racer_rs -e SEED \
-            "$IMAGE" scripts/alpine.sh install "$PLATFORM"
+            "$(scripts/alpine-image.sh "ruby-$MINOR")" scripts/alpine.sh install "$PLATFORM"
       - name: Keep the suites' results
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -321,7 +320,7 @@ jobs:
   # The musl legs build on the newest Alpine, so a smoke test on the oldest one
   # the gems support is what catches an extension that needs a newer musl.
   install-musl-floor:
-    name: Install ${{ matrix.platform }} (Alpine ${{ needs.verify.outputs.alpine }})
+    name: Install ${{ matrix.platform }} (oldest Alpine)
     needs: [verify, package]
     strategy:
       fail-fast: false
@@ -345,11 +344,10 @@ jobs:
           path: pkg
       - name: Install into an empty GEM_HOME and smoke-test
         env:
-          IMAGE: ruby:3.4-alpine${{ needs.verify.outputs.alpine }}
           PLATFORM: ${{ matrix.platform }}
         run: |
           docker run --rm --init -v "$GITHUB_WORKSPACE:/mini_racer_rs" -w /mini_racer_rs \
-            "$IMAGE" scripts/alpine.sh install "$PLATFORM" --smoke-only
+            "$(scripts/alpine-image.sh floor)" scripts/alpine.sh install "$PLATFORM" --smoke-only
 
   install-truffleruby:
     name: Install the source gem (TruffleRuby)

@@ -586,7 +586,7 @@ jobs:
             -v "$cache/v8:/cache/v8" -v "$cache/alpine/registry:/usr/local/cargo/registry" -v "$cache/alpine/target:/cache/target" \
             -e MINI_RACER_RS_V8_CACHE=/cache/v8 -e CARGO_TARGET_DIR=/cache/target -e RB_SYS_CARGO_TARGET_DIR=/cache/target \
             -e CARGO_INCREMENTAL=0 -e CARGO_TERM_COLOR -e RUSTFLAGS -e SEED \
-            ruby:3.4-alpine scripts/alpine.sh test
+            "$(scripts/alpine-image.sh ruby-3.4)" scripts/alpine.sh test
       - name: Save the cargo registry and target directory
         if: github.ref == 'refs/heads/main' && steps.cargo.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

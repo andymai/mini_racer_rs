@@ -143,6 +143,15 @@ CASES = [
     ("action pinned by tag", "check-action-pins.sh", "pin", [
         write(".github/workflows/planted.yml", "on: push\njobs:\n  x:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n"),
     ]),
+    ("job container by tag", "check-action-pins.sh", "image", [
+        write(".github/workflows/planted.yml", "on: push\njobs:\n  x:\n    runs-on: ubuntu-latest\n    container: ruby:3.4-alpine\n    steps:\n      - run: true\n"),
+    ]),
+    ("docker run by tag", "check-action-pins.sh", "image", [
+        write(".github/workflows/planted.yml", "on: push\njobs:\n  x:\n    runs-on: ubuntu-latest\n    steps:\n      - run: |\n          docker run --rm \\\n            ruby:3.4-alpine true\n"),
+    ]),
+    ("Dockerfile stage by tag", "check-action-pins.sh", "image", [
+        append("release/alpine/Dockerfile", "FROM ruby:3.4-alpine AS planted\n"),
+    ]),
     ("gem and Cargo versions disagree", "check-versions.sh", "version", [
         replace("lib/mini_racer_rs/version.rb", f'VERSION = "{version}"', 'VERSION = "9.9.9"'),
     ]),
