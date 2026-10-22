@@ -174,6 +174,95 @@ pub struct ContextConfig {
     /// Has V8 report each exception that escapes a script, as `mini_racer`'s
     /// verbose `TryCatch` does: it prints where it happened to stdout.
     pub verbose_exceptions: bool,
+    /// Spike: a hard heap cap from `CreateParams::heap_limits(0, limit)` and a
+    /// near-heap-limit callback.
+    pub heap_cap: Option<HeapCap>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Headroom {
+    Bytes(usize),
+    Percent(usize),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HeapCap {
+    pub limit: usize,
+    pub headroom: Headroom,
+    /// How many times one hit may raise the limit by the headroom before the
+    /// callback refuses and V8 aborts.
+    pub extensions: usize,
+    /// Refuse every later script when a full collection after a hit leaves
+    /// the heap over the cap, rather than restoring the limit anyway.
+    pub poison: bool,
+    pub log: bool,
+}
+
+impl HeapCap {
+    /// Spike knobs, read by the extension at `Context.new`.
+    #[must_use]
+    pub fn from_env() -> Option<Self> {
+        let limit = parse_size(&std::env::var("MINI_RACER_RS_HEAP_LIMIT").ok()?)?;
+        let headroom = std::env::var("MINI_RACER_RS_HEAP_HEADROOM")
+            .ok()
+            .and_then(|text| {
+                text.strip_suffix('%').map_or_else(
+                    || parse_size(&text).map(Headroom::Bytes),
+                    |percent| percent.parse().ok().map(Headroom::Percent),
+                )
+            })
+            .unwrap_or(Headroom::Bytes(16 << 20));
+        let extensions = std::env::var("MINI_RACER_RS_HEAP_EXTENSIONS")
+            .ok()
+            .and_then(|text| text.parse().ok())
+            .unwrap_or(1);
+        let poison = std::env::var_os("MINI_RACER_RS_HEAP_POISON").is_none_or(|v| v != "0");
+        let log = std::env::var_os("MINI_RACER_RS_HEAP_LOG").is_some_and(|v| v == "1");
+        Some(Self {
+            limit,
+            headroom,
+            extensions,
+            poison,
+            log,
+        })
+    }
+
+    #[must_use]
+    pub const fn headroom_for(&self, initial: usize) -> usize {
+        match self.headroom {
+            Headroom::Bytes(bytes) => bytes,
+            Headroom::Percent(percent) => initial / 100 * percent,
+        }
+    }
+}
+
+fn parse_size(text: &str) -> Option<usize> {
+    let text = text.trim().to_ascii_lowercase();
+    let (digits, shift) = match text.as_bytes().last()? {
+        b'k' => (&text[..text.len() - 1], 10),
+        b'm' => (&text[..text.len() - 1], 20),
+        b'g' => (&text[..text.len() - 1], 30),
+        _ => (text.as_str(), 0),
+    };
+    digits.parse::<usize>().ok().map(|n| n << shift)
+}
+
+/// Spike: what the near-heap-limit callback and the runner share.
+#[derive(Default)]
+pub struct CapState {
+    /// Callback invocations over the context's life.
+    pub calls: std::sync::atomic::AtomicUsize,
+    /// Callback invocations since the last restore.
+    pub episode: std::sync::atomic::AtomicUsize,
+    /// The old generation limit V8 started the isolate with.
+    pub initial: std::sync::atomic::AtomicUsize,
+    /// `process::thread_token` of the runner, and of the callback's last call.
+    pub runner_thread: std::sync::atomic::AtomicU64,
+    pub callback_thread: std::sync::atomic::AtomicU64,
+    pub off_thread_calls: std::sync::atomic::AtomicUsize,
+    /// The runner is collecting after a hit, with no dispatch armed.
+    pub collecting: AtomicBool,
+    pub poisoned: AtomicBool,
 }
 
 /// The context's pending timeout and the earliest deadline the watchdog holds
@@ -205,6 +294,7 @@ pub struct ControlBlock {
     // An idle single-threaded runner leaves its isolate here, its only owner
     // then, so a forked child can hand it to a runner of its own.
     pub custody: Mutex<Option<v8::SharedIsolate>>,
+    pub cap: CapState,
 }
 
 impl Drop for ControlBlock {
@@ -255,6 +345,7 @@ impl ControlBlock {
             isolate: OnceLock::new(),
             building: Mutex::new(None),
             custody: Mutex::new(None),
+            cap: CapState::default(),
         }
     }
 }

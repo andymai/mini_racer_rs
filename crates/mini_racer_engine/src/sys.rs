@@ -208,6 +208,30 @@ unsafe extern "C" fn after_gc(
     }
 }
 
+/// Spike: has V8 ask the runner before it aborts at its heap limit.
+/// `block` must outlive the isolate's registration.
+pub fn watch_heap_limit(isolate: &mut v8::Isolate, block: &crate::control::ControlBlock) {
+    let data = std::ptr::from_ref(block).cast_mut().cast::<c_void>();
+    isolate.add_near_heap_limit_callback(near_heap_limit, data);
+}
+
+/// Spike: drops the callback, restoring the limit to `limit` unless it is 0
+/// (V8 keeps it no lower than the live size and a quarter).
+pub fn unwatch_heap_limit(isolate: &mut v8::Isolate, limit: usize) {
+    isolate.remove_near_heap_limit_callback(near_heap_limit, limit);
+}
+
+unsafe extern "C" fn near_heap_limit(data: *mut c_void, current: usize, initial: usize) -> usize {
+    let raised = std::panic::catch_unwind(|| {
+        // SAFETY: `data` is the control block `watch_heap_limit` registered,
+        // which the runner holds until the isolate is gone or the callback is
+        // registered again with another block.
+        let block = unsafe { &*data.cast::<crate::control::ControlBlock>() };
+        crate::runner::near_heap_limit(block, current, initial)
+    });
+    raised.unwrap_or_else(|_| std::process::abort())
+}
+
 /// Asks the isolate's runner to park for a pending fork the next time V8
 /// checks for interrupts, where JavaScript may be running for a long time.
 pub fn interrupt_for_fork(handle: &v8::IsolateHandle) {

@@ -234,6 +234,87 @@ pub fn check_heap(isolate: &mut v8::Isolate) {
     }
 }
 
+// Spike: V8 is about to abort at its heap limit. The running script is ended
+// out of memory and V8 gets the headroom to unwind it, up to `extensions`
+// times a hit; past that V8 aborts.
+pub fn near_heap_limit(block: &ControlBlock, current: usize, initial: usize) -> usize {
+    let Some(config) = block.config.heap_cap else {
+        return current;
+    };
+    let cap = &block.cap;
+    let calls = cap.calls.fetch_add(1, Ordering::Relaxed) + 1;
+    let episode = cap.episode.fetch_add(1, Ordering::Relaxed) + 1;
+    cap.initial.store(initial, Ordering::Relaxed);
+    let me = crate::process::thread_token();
+    cap.callback_thread.store(me, Ordering::Relaxed);
+    let runner = cap.runner_thread.load(Ordering::Relaxed);
+    if me != runner {
+        cap.off_thread_calls.fetch_add(1, Ordering::Relaxed);
+    }
+    let headroom = config.headroom_for(initial);
+    let ceiling = initial.saturating_add(headroom.saturating_mul(config.extensions));
+    let next = if current < ceiling {
+        current.saturating_add(headroom).min(ceiling)
+    } else {
+        current
+    };
+    let collecting = cap.collecting.load(Ordering::Relaxed);
+    if !collecting {
+        block.term.request(Interrupt::HeapExhausted);
+    }
+    if config.log {
+        heap_log(format_args!(
+            "HEAPCAP callback calls={calls} episode={episode} current={current} initial={initial} next={next} refused={} collecting={collecting} thread={me} runner={runner} name={:?}",
+            next <= current,
+            std::thread::current().name()
+        ));
+    }
+    next
+}
+
+// Spike: after a dispatch that hit the cap, a full collection, then the
+// limit back to the cap if the heap fits under it again; otherwise, with
+// `poison`, every later script is refused.
+fn after_hit(isolate: &mut v8::Isolate, block: &ControlBlock) {
+    let Some(config) = block.config.heap_cap else {
+        return;
+    };
+    let cap = &block.cap;
+    if cap.episode.load(Ordering::Relaxed) == 0 || cap.poisoned.load(Ordering::Relaxed) {
+        return;
+    }
+    let started = std::time::Instant::now();
+    let before = isolate.get_heap_statistics().used_heap_size();
+    cap.collecting.store(true, Ordering::Relaxed);
+    isolate.low_memory_notification();
+    cap.collecting.store(false, Ordering::Relaxed);
+    let stats = isolate.get_heap_statistics();
+    let used = stats.used_heap_size();
+    let initial = cap.initial.load(Ordering::Relaxed);
+    let under = used.saturating_add(used / 4) <= initial;
+    let restored = under || !config.poison;
+    if restored {
+        sys::unwatch_heap_limit(isolate, initial);
+        sys::watch_heap_limit(isolate, block);
+    } else {
+        cap.poisoned.store(true, Ordering::Relaxed);
+    }
+    let episode = cap.episode.swap(0, Ordering::Relaxed);
+    if config.log {
+        heap_log(format_args!(
+            "HEAPCAP after episode={episode} used_before={before} used_after={used} total_after={} limit_after={} initial={initial} under={under} restored={restored} gc_ms={:.1}",
+            stats.total_heap_size(),
+            stats.heap_size_limit(),
+            started.elapsed().as_secs_f64() * 1000.0
+        ));
+    }
+}
+
+#[allow(clippy::print_stderr, reason = "spike instrumentation")]
+fn heap_log(line: std::fmt::Arguments<'_>) {
+    eprintln!("{line}");
+}
+
 pub fn park_for_fork(isolate: &v8::Isolate) {
     if let Some(runtime) = isolate.get_slot::<Arc<Runtime>>() {
         runtime.generation.pause(&runtime.block);
@@ -263,9 +344,36 @@ fn serve(block: &Arc<ControlBlock>, generation: &'static Generation) -> bool {
         Some(blob) => params.snapshot_blob(sys::startup_data(blob)),
         None => params,
     };
+    let params = match block.config.heap_cap {
+        Some(cap) => {
+            let params = params.heap_limits(0, cap.limit);
+            block
+                .cap
+                .initial
+                .store(params.max_old_generation_size_in_bytes(), Ordering::Relaxed);
+            params
+        }
+        None => params,
+    };
     let mut isolate = v8::Isolate::new(params);
     if block.config.max_memory.is_some() {
         sys::watch_heap(&mut isolate);
+    }
+    if let Some(cap) = block.config.heap_cap {
+        block
+            .cap
+            .runner_thread
+            .store(crate::process::thread_token(), Ordering::Relaxed);
+        sys::watch_heap_limit(&mut isolate, block);
+        if cap.log {
+            heap_log(format_args!(
+                "HEAPCAP start limit={} old_generation={} young_generation_max={}",
+                cap.limit,
+                block.cap.initial.load(Ordering::Relaxed),
+                cap.limit
+                    .saturating_sub(block.cap.initial.load(Ordering::Relaxed))
+            ));
+        }
     }
     let key = sys::isolate_key(&isolate);
     generation.tasks().register(key, &block.tasks);
@@ -327,6 +435,29 @@ fn adopt(
         // A child only try-locks what it inherited.
         if let Ok(matched) = inherited.matched.try_lock() {
             lock(&runtime.matched).clone_from(&matched);
+        }
+        // The inherited isolate still hands V8's callback the parent's block.
+        if let Some(cap) = block.config.heap_cap {
+            let parent = &inherited.block.cap;
+            block
+                .cap
+                .initial
+                .store(parent.initial.load(Ordering::Relaxed), Ordering::Relaxed);
+            block
+                .cap
+                .poisoned
+                .store(parent.poisoned.load(Ordering::Relaxed), Ordering::Relaxed);
+            block
+                .cap
+                .runner_thread
+                .store(crate::process::thread_token(), Ordering::Relaxed);
+            if std::env::var_os("MINI_RACER_RS_HEAP_NO_READOPT").is_none() {
+                sys::unwatch_heap_limit(&mut locker, 0);
+                sys::watch_heap_limit(&mut locker, block);
+            }
+            if cap.log {
+                heap_log(format_args!("HEAPCAP adopt pid={}", std::process::id()));
+            }
         }
         locker.set_slot(Arc::clone(&runtime));
         runtime
@@ -486,6 +617,7 @@ fn serve_one(
         v8::scope_with_context!(let scope, isolate, &runtime.context);
         handle(scope, runtime, request)
     };
+    after_hit(isolate, block);
     // Before the response, so a fork that follows finds this runner idle.
     cache_uncached(isolate, runtime);
     let served = respond(block, response);
@@ -683,6 +815,10 @@ fn script(
     tc.set_verbose(runtime.block.config.verbose_exceptions);
     let result = if let Err(error) = arm_timeout(runtime, depth, kind) {
         Err(error)
+    } else if kind == DispatchKind::Script && runtime.block.cap.poisoned.load(Ordering::Relaxed) {
+        Err(EngineError::from(JsError::terminated(
+            TerminationCause::HeapExhausted,
+        )))
     } else if term.refuses(kind) {
         Err(EngineError::Internal("halted without a cause".to_owned()))
     } else {

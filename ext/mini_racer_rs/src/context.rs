@@ -184,7 +184,11 @@ fn config(ruby: &Ruby, keywords: RHash) -> Result<ContextConfig, Error> {
         pairs.push((key, value));
         Ok(ForEach::Continue)
     })?;
-    options::configure(pairs.into_iter()).map_err(|error| match error {
+    let configured = options::configure(pairs.into_iter()).map(|mut config| {
+        config.heap_cap = mini_racer_engine::HeapCap::from_env();
+        config
+    });
+    configured.map_err(|error| match error {
         OptionError::Type(_) | OptionError::SnapshotType(_) => {
             errors::raised(ruby, ruby.exception_type_error(), error.to_string())
         }
