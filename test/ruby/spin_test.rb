@@ -7,7 +7,7 @@ class SpinTest < Minitest::Test
   include RubyProcess
 
   # A 5 ms budget without the GVL makes a spinning wait cost the calling
-  # thread at least 5,000 us of CPU per call, while parking cost about 35 us on
+  # thread about 5,000 us of CPU per call, while parking cost about 35 us on
   # a Linux workstation and about 300 us on a loaded macos-15-intel runner. The
   # budget is read once per process, hence the child.
   def test_a_context_whose_answers_outlast_the_spin_budget_stops_spinning
