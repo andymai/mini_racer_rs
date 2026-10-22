@@ -17,7 +17,13 @@ warmup = Integer(ARGV.fetch(2, 500_000))
 max_growth = Float(ARGV.fetch(3, 0.05))
 MiniRacer::Platform.set_flags!(:single_threaded) if mode == "single"
 
-def rss_kb = Integer(`ps -o rss= -p #{Process.pid}`.strip)
+def rss_kb
+  if File.exist?("/proc/self/status")
+    File.read("/proc/self/status")[/VmRSS:\s+(\d+)/, 1].to_i
+  else
+    Integer(`ps -o rss= -p #{Process.pid}`.strip)
+  end
+end
 
 context = MiniRacer::Context.new
 warmup.times { context.eval("1+1") }
