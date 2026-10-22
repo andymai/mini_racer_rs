@@ -1,0 +1,157 @@
+# matrix (matrix.jsonl)
+| tag | workload | cap MB | policy | attempts | cap hits | error | abort | hang | completed | other | later-hit errors | usable after | restored | s to error (median/max) | peak limit MB | abort message |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| matrix | arraybuffer | 64 | f16 | 3 | 0 | 0 | 0 | 0 | 3 | 0 | 0 | 3 | 0 | - | 0 |  |
+| matrix | arraybuffer | 256 | f16 | 3 | 0 | 0 | 0 | 0 | 3 | 0 | 0 | 3 | 0 | - | 0 |  |
+| matrix | arraybuffer | 512 | f16 | 3 | 0 | 0 | 0 | 0 | 3 | 0 | 0 | 3 | 0 | - | 0 |  |
+| matrix | concat | 64 | e50x4 | 12 | 12 | 10 | 2 | 0 | 0 | 0 | 8 | 10 | 10 | 0.13/0.14 | 86 | CALL_AND_RETRY_LAST |
+| matrix | concat | 64 | f16 | 4 | 4 | 0 | 4 | 0 | 0 | 0 | 0 | 0 | 0 | - | 74 | CALL_AND_RETRY_LAST |
+| matrix | concat | 64 | f64 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.14/0.16 | 122 |  |
+| matrix | concat | 64 | p25 | 8 | 8 | 5 | 3 | 0 | 0 | 0 | 4 | 5 | 5 | 0.13/0.15 | 72 | CALL_AND_RETRY_LAST |
+| matrix | concat | 256 | e50x4 | 11 | 11 | 8 | 3 | 0 | 0 | 0 | 4 | 8 | 8 | 0.59/0.63 | 347 | CALL_AND_RETRY_LAST |
+| matrix | concat | 256 | f16 | 4 | 4 | 0 | 4 | 0 | 0 | 0 | 0 | 0 | 0 | - | 248 | Reached heap limit |
+| matrix | concat | 256 | f64 | 13 | 13 | 11 | 2 | 0 | 0 | 0 | 8 | 11 | 11 | 0.59/0.61 | 296 | CALL_AND_RETRY_LAST |
+| matrix | concat | 256 | p25 | 12 | 12 | 9 | 3 | 0 | 0 | 0 | 7 | 9 | 9 | 0.59/0.65 | 289 | CALL_AND_RETRY_LAST |
+| matrix | concat | 512 | e50x4 | 8 | 3 | 0 | 3 | 0 | 0 | 5 | 0 | 5 | 0 | - | 695 | CALL_AND_RETRY_LAST; MiniRacer::RuntimeError: RangeError: Invalid string length |
+| matrix | concat | 512 | f16 | 12 | 2 | 0 | 2 | 0 | 0 | 10 | 0 | 10 | 0 | - | 480 | CALL_AND_RETRY_LAST; MiniRacer::RuntimeError: RangeError: Invalid string length |
+| matrix | concat | 512 | f64 | 16 | 2 | 1 | 1 | 0 | 0 | 14 | 0 | 15 | 1 | 0.54/0.54 | 528 | CALL_AND_RETRY_LAST; MiniRacer::RuntimeError: RangeError: Invalid string length |
+| matrix | concat | 512 | p25 | 16 | 2 | 1 | 1 | 0 | 0 | 14 | 0 | 15 | 1 | 0.56/0.56 | 579 | CALL_AND_RETRY_LAST; MiniRacer::RuntimeError: RangeError: Invalid string length |
+| matrix | json | 64 | e50x4 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.66/0.73 | 144 |  |
+| matrix | json | 64 | f16 | 4 | 4 | 0 | 4 | 0 | 0 | 0 | 0 | 0 | 0 | - | 74 | Reached heap limit |
+| matrix | json | 64 | f64 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.42/0.48 | 122 |  |
+| matrix | json | 64 | p25 | 4 | 4 | 0 | 4 | 0 | 0 | 0 | 0 | 0 | 0 | - | 72 | Reached heap limit |
+| matrix | json | 256 | e50x4 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 4.61/4.84 | 579 |  |
+| matrix | json | 256 | f16 | 4 | 4 | 0 | 4 | 0 | 0 | 0 | 0 | 0 | 0 | - | 248 | Reached heap limit |
+| matrix | json | 256 | f64 | 4 | 4 | 0 | 4 | 0 | 0 | 0 | 0 | 0 | 0 | - | 296 | Reached heap limit |
+| matrix | json | 256 | p25 | 4 | 4 | 0 | 4 | 0 | 0 | 0 | 0 | 0 | 0 | - | 289 | Reached heap limit |
+| matrix | json | 512 | e50x4 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 8.57/9.99 | 1159 |  |
+| matrix | json | 512 | f16 | 4 | 4 | 0 | 4 | 0 | 0 | 0 | 0 | 0 | 0 | - | 480 | Reached heap limit |
+| matrix | json | 512 | f64 | 4 | 4 | 0 | 4 | 0 | 0 | 0 | 0 | 0 | 0 | - | 528 | Reached heap limit |
+| matrix | json | 512 | p25 | 4 | 4 | 0 | 4 | 0 | 0 | 0 | 0 | 0 | 0 | - | 579 | Reached heap limit |
+| matrix | literal | 64 | e50x4 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.23/0.29 | 86 |  |
+| matrix | literal | 64 | f16 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.23/0.36 | 74 |  |
+| matrix | literal | 64 | f64 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.23/0.28 | 122 |  |
+| matrix | literal | 64 | p25 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.22/0.30 | 72 |  |
+| matrix | literal | 256 | e50x4 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 1.24/1.44 | 347 |  |
+| matrix | literal | 256 | f16 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 1.04/1.51 | 248 |  |
+| matrix | literal | 256 | f64 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 1.07/1.33 | 296 |  |
+| matrix | literal | 256 | p25 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 1.07/1.47 | 289 |  |
+| matrix | literal | 512 | e50x4 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 1.87/2.47 | 695 |  |
+| matrix | literal | 512 | f16 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 1.97/3.35 | 480 |  |
+| matrix | literal | 512 | f64 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 3.56/3.78 | 528 |  |
+| matrix | literal | 512 | p25 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 3.55/4.07 | 579 |  |
+| matrix | literal_single | 64 | e50x4 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.58/0.69 | 115 |  |
+| matrix | literal_single | 64 | f16 | 4 | 4 | 0 | 4 | 0 | 0 | 0 | 0 | 0 | 0 | - | 74 | Reached heap limit |
+| matrix | literal_single | 64 | f64 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.48/0.53 | 122 |  |
+| matrix | literal_single | 64 | p25 | 4 | 4 | 0 | 4 | 0 | 0 | 0 | 0 | 0 | 0 | - | 72 | Reached heap limit |
+| matrix | literal_single | 256 | e50x4 | 6 | 6 | 6 | 0 | 0 | 0 | 0 | 4 | 6 | 6 | 2.40/2.84 | 463 |  |
+| matrix | literal_single | 256 | f16 | 2 | 2 | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | - | 248 | Reached heap limit |
+| matrix | literal_single | 256 | f64 | 2 | 2 | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | - | 296 | Reached heap limit |
+| matrix | literal_single | 256 | p25 | 2 | 2 | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | - | 289 | Reached heap limit |
+| matrix | literal_single | 512 | e50x4 | 6 | 6 | 6 | 0 | 0 | 0 | 0 | 4 | 6 | 6 | 3.90/4.35 | 927 |  |
+| matrix | literal_single | 512 | f16 | 2 | 2 | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | - | 480 | Ineffective mark-compacts near heap limit |
+| matrix | literal_single | 512 | f64 | 2 | 2 | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | - | 528 | Reached heap limit |
+| matrix | literal_single | 512 | p25 | 2 | 2 | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | - | 579 | Reached heap limit |
+| matrix | map | 64 | e50x4 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.10/0.13 | 86 |  |
+| matrix | map | 64 | f16 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.10/0.13 | 74 |  |
+| matrix | map | 64 | f64 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.09/0.12 | 122 |  |
+| matrix | map | 64 | p25 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.09/0.11 | 72 |  |
+| matrix | map | 256 | e50x4 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.54/1.60 | 347 |  |
+| matrix | map | 256 | f16 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.66/1.52 | 248 |  |
+| matrix | map | 256 | f64 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.44/1.47 | 296 |  |
+| matrix | map | 256 | p25 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.62/1.74 | 289 |  |
+| matrix | map | 512 | e50x4 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 1.20/1.41 | 695 |  |
+| matrix | map | 512 | f16 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 1.07/1.41 | 480 |  |
+| matrix | map | 512 | f64 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 1.12/1.26 | 528 |  |
+| matrix | map | 512 | p25 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 1.01/1.27 | 579 |  |
+| matrix | objects | 64 | e50x4 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.16/0.19 | 86 |  |
+| matrix | objects | 64 | f16 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.16/0.21 | 74 |  |
+| matrix | objects | 64 | f64 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.16/0.20 | 122 |  |
+| matrix | objects | 64 | p25 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.16/0.19 | 72 |  |
+| matrix | objects | 256 | e50x4 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.89/1.02 | 347 |  |
+| matrix | objects | 256 | f16 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.89/1.04 | 248 |  |
+| matrix | objects | 256 | f64 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.87/0.96 | 296 |  |
+| matrix | objects | 256 | p25 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.89/1.00 | 289 |  |
+| matrix | objects | 512 | e50x4 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 1.52/1.82 | 695 |  |
+| matrix | objects | 512 | f16 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 1.56/2.18 | 480 |  |
+| matrix | objects | 512 | f64 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 1.65/1.96 | 528 |  |
+| matrix | objects | 512 | p25 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 1.56/1.83 | 579 |  |
+| matrix | recursion | 64 | e50x4 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.04/0.05 | 86 |  |
+| matrix | recursion | 64 | f16 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.04/0.06 | 74 |  |
+| matrix | recursion | 64 | f64 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.05/0.06 | 122 |  |
+| matrix | recursion | 64 | p25 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.05/0.05 | 72 |  |
+| matrix | recursion | 256 | e50x4 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.27/0.32 | 347 |  |
+| matrix | recursion | 256 | f16 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.25/0.31 | 248 |  |
+| matrix | recursion | 256 | f64 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.28/0.33 | 296 |  |
+| matrix | recursion | 256 | p25 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.28/0.33 | 289 |  |
+| matrix | recursion | 512 | e50x4 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.51/0.61 | 695 |  |
+| matrix | recursion | 512 | f16 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.46/0.60 | 480 |  |
+| matrix | recursion | 512 | f64 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.55/0.64 | 528 |  |
+| matrix | recursion | 512 | p25 | 20 | 20 | 20 | 0 | 0 | 0 | 0 | 16 | 20 | 20 | 0.54/0.60 | 579 |  |
+
+totals: {'completed': 9, 'hits': 1237, 'attempts': 1289, 'abort': 80, 'error': 1157, 'other': 43}; callbacks=1495, off-runner-thread callbacks=0
+processes: 323, ended without done: 80, hung: 0
+later-script outcomes per process: {('2', '2', '2', '2', '2'): 243}
+
+# extras (extras.jsonl)
+| tag | workload | cap MB | policy | attempts | cap hits | error | abort | hang | completed | other | later-hit errors | usable after | restored | s to error (median/max) | peak limit MB | abort message |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| flag_max_old_space_128 | objects | 64 | f16 | 6 | 6 | 6 | 0 | 0 | 0 | 0 | 4 | 6 | 6 | 0.51/0.66 | 144 |  |
+| flag_max_old_space_32 | objects | 64 | f16 | 6 | 6 | 6 | 0 | 0 | 0 | 0 | 4 | 6 | 6 | 0.14/0.19 | 48 |  |
+| fork | objects | 64 | f16 | 12 | 12 | 12 | 0 | 0 | 0 | 0 | 9 | 12 | 12 | 0.32/0.38 | 74 |  |
+| fork | objects | 256 | f16 | 12 | 12 | 12 | 0 | 0 | 0 | 0 | 9 | 12 | 12 | 1.40/1.62 | 248 |  |
+| fork_noreadopt | objects | 64 | f16 | 4 | 4 | 2 | 2 | 0 | 0 | 0 | 2 | 2 | 2 | 0.26/0.26 | 74 | CALL_AND_RETRY_LAST |
+| fork_noreadopt | objects | 256 | f16 | 4 | 4 | 2 | 2 | 0 | 0 | 0 | 2 | 2 | 2 | 1.64/1.73 | 248 | Reached heap limit |
+| json_mild | json_mild | 64 | e50x4 | 6 | 6 | 6 | 0 | 0 | 0 | 0 | 4 | 6 | 6 | 0.31/0.32 | 86 |  |
+| json_mild | json_mild | 64 | f16 | 2 | 2 | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | - | 74 | Reached heap limit |
+| json_mild | json_mild | 64 | f64 | 6 | 6 | 6 | 0 | 0 | 0 | 0 | 4 | 6 | 6 | 0.29/0.34 | 122 |  |
+| json_mild | json_mild | 64 | p25 | 2 | 2 | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | - | 72 | Reached heap limit |
+| json_mild | json_mild | 256 | e50x4 | 6 | 6 | 6 | 0 | 0 | 0 | 0 | 4 | 6 | 6 | 1.24/1.51 | 347 |  |
+| json_mild | json_mild | 256 | f16 | 2 | 2 | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | - | 248 | Reached heap limit |
+| json_mild | json_mild | 256 | f64 | 6 | 6 | 6 | 0 | 0 | 0 | 0 | 4 | 6 | 6 | 1.53/1.64 | 296 |  |
+| json_mild | json_mild | 256 | p25 | 2 | 2 | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | - | 289 | Reached heap limit |
+| json_mild | json_mild | 512 | e50x4 | 6 | 6 | 6 | 0 | 0 | 0 | 0 | 4 | 6 | 6 | 2.78/3.22 | 695 |  |
+| json_mild | json_mild | 512 | f16 | 2 | 2 | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | - | 480 | Reached heap limit |
+| json_mild | json_mild | 512 | f64 | 2 | 2 | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | - | 528 | Reached heap limit |
+| json_mild | json_mild | 512 | p25 | 2 | 2 | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | - | 579 | Reached heap limit |
+| many_hits | json | 64 | e50x4 | 100 | 100 | 100 | 0 | 0 | 0 | 0 | 99 | 100 | 100 | 0.61/1.43 | 144 |  |
+| many_hits | objects | 64 | f16 | 300 | 300 | 300 | 0 | 0 | 0 | 0 | 299 | 300 | 300 | 0.15/0.56 | 74 |  |
+| many_hits | objects | 256 | f16 | 60 | 60 | 60 | 0 | 0 | 0 | 0 | 59 | 60 | 60 | 0.86/1.38 | 248 |  |
+| maxmem_above | objects | 256 | f16 | 10 | 10 | 10 | 0 | 0 | 0 | 0 | 8 | 10 | 10 | 0.87/0.95 | 248 |  |
+| maxmem_below | json | 256 | f16 | 2 | 2 | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | - | 248 | Reached heap limit |
+| maxmem_below | objects | 256 | f16 | 10 | 0 | 10 | 0 | 0 | 0 | 0 | 8 | 10 | 0 | 0.06/0.11 | 0 |  |
+| maxmem_unshared | big_source | 64 | f16 | 2 | 2 | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | - | 74 | Reached heap limit |
+| maxmem_unshared | big_source | 256 | f16 | 2 | 2 | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | - | 248 | Reached heap limit |
+| nopoison | objects_global | 64 | f16 | 4 | 4 | 2 | 2 | 0 | 0 | 0 | 0 | 2 | 4 | 0.13/0.13 | 74 | Ineffective mark-compacts near heap limit; Reached heap limit |
+| nopoison | objects_global | 256 | f16 | 2 | 2 | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 2 | - | 248 | Ineffective mark-compacts near heap limit |
+| nopoison | objects_global | 512 | f16 | 2 | 2 | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 2 | - | 480 | Ineffective mark-compacts near heap limit |
+| poison | objects_global | 64 | f16 | 2 | 2 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0.12/0.13 | 74 |  |
+| poison | objects_global | 256 | f16 | 2 | 2 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0.56/0.58 | 248 |  |
+| poison | objects_global | 512 | f16 | 2 | 2 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1.39/1.45 | 480 |  |
+| race_timeout | objects | 256 | f16 | 40 | 10 | 10 | 0 | 0 | 0 | 30 | 9 | 40 | 10 | 0.89/0.97 | 248 | MiniRacer::ScriptTerminatedError: terminated |
+| shared | big_source | 64 | f16 | 4 | 0 | 0 | 0 | 0 | 4 | 0 | 0 | 4 | 0 | - | 0 |  |
+| shared | big_source | 256 | f16 | 2 | 2 | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | - | 248 | Reached heap limit |
+| single | json | 64 | e50x4 | 10 | 10 | 10 | 0 | 0 | 0 | 0 | 8 | 10 | 10 | 1.11/1.19 | 144 |  |
+| single | json | 512 | e50x4 | 10 | 10 | 10 | 0 | 0 | 0 | 0 | 8 | 10 | 10 | 12.09/14.26 | 1159 |  |
+| single | objects | 64 | f16 | 10 | 10 | 10 | 0 | 0 | 0 | 0 | 8 | 10 | 10 | 0.36/0.38 | 74 |  |
+| single | objects | 512 | f16 | 10 | 10 | 10 | 0 | 0 | 0 | 0 | 8 | 10 | 10 | 2.26/2.47 | 480 |  |
+| unshared | big_source | 64 | e50x4 | 4 | 2 | 2 | 0 | 0 | 2 | 0 | 2 | 2 | 0 | 0.04/0.05 | 86 |  |
+| unshared | big_source | 64 | f16 | 2 | 2 | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | - | 74 | Reached heap limit |
+| unshared | big_source | 256 | e50x4 | 4 | 2 | 2 | 0 | 0 | 2 | 0 | 2 | 2 | 0 | 0.17/0.17 | 347 |  |
+| unshared | big_source | 256 | f16 | 2 | 2 | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | - | 248 | Reached heap limit |
+| unwind | catch_retry | 64 | e50x4 | 6 | 6 | 6 | 0 | 0 | 0 | 0 | 4 | 6 | 6 | 0.16/0.47 | 86 |  |
+| unwind | catch_retry | 64 | f16 | 6 | 6 | 6 | 0 | 0 | 0 | 0 | 4 | 6 | 6 | 0.17/0.19 | 74 |  |
+| unwind | catch_retry | 256 | e50x4 | 6 | 6 | 6 | 0 | 0 | 0 | 0 | 4 | 6 | 6 | 0.93/0.98 | 347 |  |
+| unwind | catch_retry | 256 | f16 | 6 | 6 | 6 | 0 | 0 | 0 | 0 | 4 | 6 | 6 | 0.90/0.96 | 248 |  |
+| unwind | finally_alloc | 64 | e50x4 | 6 | 6 | 6 | 0 | 0 | 0 | 0 | 4 | 6 | 6 | 0.15/0.18 | 86 |  |
+| unwind | finally_alloc | 64 | f16 | 6 | 6 | 6 | 0 | 0 | 0 | 0 | 4 | 6 | 6 | 0.16/0.16 | 74 |  |
+| unwind | finally_alloc | 256 | e50x4 | 6 | 6 | 6 | 0 | 0 | 0 | 0 | 4 | 6 | 6 | 0.91/0.96 | 347 |  |
+| unwind | finally_alloc | 256 | f16 | 6 | 6 | 6 | 0 | 0 | 0 | 0 | 4 | 6 | 6 | 0.92/0.94 | 248 |  |
+| unwind | microtask_after | 64 | e50x4 | 2 | 2 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 2 | 0.43/0.45 | 115 |  |
+| unwind | microtask_after | 64 | f16 | 4 | 4 | 0 | 4 | 0 | 0 | 0 | 0 | 0 | 0 | - | 74 | Ineffective mark-compacts near heap limit |
+| unwind | microtask_after | 256 | e50x4 | 2 | 2 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 2 | 2.16/2.19 | 463 |  |
+| unwind | microtask_after | 256 | f16 | 2 | 2 | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | - | 248 | Ineffective mark-compacts near heap limit |
+
+totals: {'error': 664, 'hits': 696, 'attempts': 744, 'abort': 42, 'other': 30, 'completed': 8}; callbacks=992, off-runner-thread callbacks=11
+processes: 117, ended without done: 38, hung: 0
+later-script outcomes per process: {('MiniRacer::V8OutOfMemoryError', 'MiniRacer::V8OutOfMemoryError', 'MiniRacer::V8OutOfMemoryError', 'MiniRacer::V8OutOfMemoryError', 'MiniRacer::V8OutOfMemoryError'): 10, ('2', '2', '2', '2', '2'): 59, ('2',): 10}
