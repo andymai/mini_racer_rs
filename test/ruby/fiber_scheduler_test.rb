@@ -88,13 +88,19 @@ class FiberSchedulerTest < Minitest::Test
     assert_operator elapsed, :>=, 0.055
   end
 
+  # The ticker's next tick is due before the callback's sleep ends, so the
+  # scheduler runs it first however long a stalled machine holds both up; a
+  # sleep that blocked the thread would let it run only after the callback.
   def test_a_callback_can_wait_on_the_scheduler_and_reenter_its_context
     context = busy_context
     result = nil
+    ticks_during_sleep = nil
     Sync do |task|
       ticking = ticker(task, 0.005)
       context.attach("pause", proc {
+        before = @ticks
         sleep 0.05
+        ticks_during_sleep = @ticks - before
         context.eval("1 + 1")
       },)
       result = context.eval("pause() + 1")
@@ -102,7 +108,7 @@ class FiberSchedulerTest < Minitest::Test
     end
 
     assert_equal 3, result
-    assert_operator @ticks, :>=, 3
+    assert_operator ticks_during_sleep, :>=, 1
   end
 end
 
