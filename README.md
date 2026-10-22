@@ -27,7 +27,7 @@ mini_racer_rs implements the `MiniRacer` API from mini_racer 0.22.1. It defines 
 - **Memory:** A context holding the MUI bundle uses 44 MB vs 110 MB.
 - **Forks:** After loading and rendering React: 20 of 20 clean mini_racer_rs exits vs 20 of 20 mini_racer aborts.
 - **V8:** V8 15.2.124.1 vs V8 13.6.233.17 in mini_racer 0.22.1.
-- **No compiler:** Native gems cover glibc Linux and macOS, both architectures, with Ruby 3.3, 3.4 and 4.0 extensions.
+- **No compiler:** Native gems cover glibc and musl Linux, including Alpine, and macOS, on both architectures, with Ruby 3.3, 3.4 and 4.0 extensions.
 - **Fiber scheduler:** Three 100 ms loops in separate contexts and fibers finish in 100 ms vs 300 ms.
 - **Upstream suites:** mini_racer passes 171 of 174 with 3 skipped by itself; ExecJS passes 197 of 198 with 1 skipped.
 - **Difficult values:** A `Map` with a function key returns an error Hash instead of aborting with SIGABRT.
@@ -46,7 +46,7 @@ Switch packages with one Gemfile line:
 
 Run `bundle install`. Bundler is required because RubyGems may activate the original `mini_racer` first. Loading both gems raises a `LoadError` naming the conflict. Reverse the Gemfile change to switch back.
 
-On x86_64-linux-gnu, aarch64-linux-gnu, arm64-darwin, and x86_64-darwin, `bundle install` installs a native gem without compiling. Elsewhere, the source gem requires Rust 1.91 or newer and libclang to build the extension. For a checkout, follow [CONTRIBUTING.md](CONTRIBUTING.md) and run `bin/setup`.
+On x86_64-linux-gnu, aarch64-linux-gnu, x86_64-linux-musl, aarch64-linux-musl, arm64-darwin, and x86_64-darwin, `bundle install` installs a native gem without compiling. Elsewhere, the source gem requires Rust 1.91 or newer and libclang to build the extension. For a checkout, follow [CONTRIBUTING.md](CONTRIBUTING.md) and run `bin/setup`.
 
 ## Quick start
 
@@ -147,8 +147,6 @@ The public API and require path stay the same. Changes include native installati
 See [COMPATIBILITY.md](COMPATIBILITY.md) for every difference.
 
 ### Stay on mini_racer if
-
-- You deploy on musl-based Linux such as Alpine. mini_racer supports it through libv8-node's musl gems; mini_racer_rs does not. Neither supports Windows.
 
 - Download size matters more than compile time. The largest native gem is 65.6 MB because it contains three Ruby extensions. mini_racer downloads 47.1 MB on x86_64 Linux, then compiles.
 
@@ -256,7 +254,7 @@ The release pipeline runs the full suites for every released extension.
 
 mini_racer_rs does not:
 
-- Run on Windows or musl-based Linux such as Alpine. It supports glibc Linux on x86_64 and aarch64, and macOS on arm64 and x86_64.
+- Run on Windows. It supports glibc and musl Linux, including Alpine, on x86_64 and aarch64, and macOS on arm64 and x86_64.
 
 - Provide Node.js APIs. JavaScript runs in plain V8 without file system, network, or process access. It can reach only Ruby callables you `attach`.
 

@@ -10,7 +10,7 @@ Security fixes land only in the latest release.
 
 The gem follows semantic versioning, so a breaking change increments the major version. The V8 version changes only in a minor release, never a patch, and the release notes call out the change and any message wording it changes.
 
-Supported Ruby implementations are CRuby 3.3, 3.4 and 4.0, plus TruffleRuby. Supported CRuby versions follow CRuby's maintained releases. Supported platforms are Linux with glibc on x86_64 and aarch64, and macOS on arm64 and x86_64.
+Supported Ruby implementations are CRuby 3.3, 3.4 and 4.0, plus TruffleRuby. Supported CRuby versions follow CRuby's maintained releases. Supported platforms are Linux with glibc or musl on x86_64 and aarch64, and macOS on arm64 and x86_64.
 
 ## Running untrusted JavaScript
 
