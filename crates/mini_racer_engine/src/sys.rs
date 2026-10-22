@@ -33,7 +33,7 @@ pub extern "C" fn __wrap_madvise(
 pub fn share(isolate: v8::OwnedIsolate) -> Result<v8::SharedIsolate, v8::OwnedIsolate> {
     // SAFETY: the runner calls this on the thread that created `isolate`, with
     // no reference from `Global::open` live, and the only slots it sets, an
-    // `Arc<Runtime>` and the `Collections` its counters keep, are Send.
+    // `Arc<Runtime>` and its `Collections`, are Send.
     let shared = unsafe { isolate.try_into_shared() };
     shared.map_err(v8::IntoSharedError::into_isolate)
 }

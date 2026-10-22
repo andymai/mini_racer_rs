@@ -4,12 +4,14 @@ use std::time::Duration;
 use crate::control::CallbackReply;
 use crate::{EngineError, JsError, JsErrorKind, TerminationCause};
 
-/// What a context has done since it was made, a forked child's takeover
-/// included.
+/// What a context has done since it was made; a forked child that takes it
+/// over counts on from its parent's counts.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Counts {
-    /// Requests the caller sent the runner, nested ones included: every
-    /// operation but the context's own setup and dispose.
+    /// Requests sent to the runner, nested ones included: evals, calls and
+    /// their await forms, attaches, heap statistics and snapshots, low memory
+    /// notifications, microtask checkpoints and pumps; not the context's own
+    /// setup or dispose.
     pub dispatches: u64,
     /// Attached Ruby callables run for JavaScript.
     pub callbacks: u64,
@@ -23,7 +25,8 @@ pub struct Counts {
     /// pumps, short of its waits for Ruby callbacks and for a task an await
     /// needs.
     pub js_ns: u64,
-    /// V8's scavenges, minor mark-sweeps and mark-compacts.
+    /// V8's scavenges, minor mark-sweeps and mark-compacts on the context's
+    /// isolate, in a dispatch or not.
     pub gc_count: u64,
     /// The runner's time inside them, from V8's prologue to its epilogue.
     pub gc_ns: u64,
