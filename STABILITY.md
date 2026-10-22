@@ -28,9 +28,9 @@ The internal Rust crates are unstable. Files under `lib/mini_racer_rs/` are unst
 
 ## Deprecation
 
-Anything under `MiniRacerRs` and the `MINI_RACER_RS_SPIN_US` environment variable receive one minor release of notice before removal. The deprecating release keeps the affected interface working and warns when it is used. Removal occurs no earlier than the next minor release.
+Covered interfaces are removed or changed incompatibly only in a major release. Before removal, at least one minor release deprecates the interface while keeping it working and warning when it is used. The `MiniRacer` namespace follows mini_racer 0.22.1.
 
-This guarantee covers removal only. `MINI_RACER_RS_SPIN_US` remains an unstable tuning interface, and its effect on timing can change in any release. The `MiniRacer` namespace continues to follow mini_racer 0.22.1.
+The environment variables `MINI_RACER_RS_SPIN_US`, `MINI_RACER_RS_CODE_CACHE`, and `MINI_RACER_RS_FAST_CALLS` receive one minor release of notice before removal. The deprecating release keeps the variable working and warns when it is set. Removal comes no earlier than the next minor release. This notice covers removal only. What these variables do to timing may change in any release.
 
 ## Platforms, Rubies and V8
 
