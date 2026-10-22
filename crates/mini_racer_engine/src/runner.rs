@@ -84,9 +84,9 @@ struct Runtime {
 const STOPPED: u64 = u64::MAX;
 
 // Times the runner's JavaScript: started for a request that runs scripts,
-// and paused while a callback waits for Ruby or an await sleeps until a task
-// is due. Each restores what it found, so a request nested in a callback is
-// timed inside the pause.
+// and paused while a callback waits for Ruby, an await sleeps until a task is
+// due or a script waits out a fork. Each restores what it found, so a request
+// nested in a callback is timed inside the pause.
 struct Timing<'a> {
     runtime: &'a Runtime,
     was_running: bool,
@@ -313,6 +313,7 @@ pub fn check_heap(isolate: &mut v8::Isolate) {
 
 pub fn park_for_fork(isolate: &v8::Isolate) {
     if let Some(runtime) = isolate.get_slot::<Arc<Runtime>>() {
+        let _paused = runtime.timing(false);
         runtime.generation.pause(&runtime.block);
     }
 }
