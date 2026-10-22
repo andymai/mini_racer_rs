@@ -8,10 +8,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use mini_racer_engine::{
-    ContextConfig, ContextHandle, EngineError, Host, JsErrorKind, JsText, SnapshotBlob,
-    TerminationCause, WaitHandle, WaitOutcome,
+    CallRequest, ContextConfig, ContextHandle, EngineError, Host, JsErrorKind, JsText,
+    ScriptOptions, SnapshotBlob, TerminationCause, WaitHandle, WaitOutcome,
 };
-use mini_racer_wire::{Begun, Container, Limits, Scalar, Visitor, decode_value};
+use mini_racer_wire::{Begun, Container, Limits, Scalar, Visitor, Writer, decode_value};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Out {
@@ -228,6 +228,127 @@ fn a_timeout_terminates_only_its_own_script() {
     }
 }
 
+const fn within(timeout: Duration) -> ScriptOptions {
+    ScriptOptions {
+        awaited: false,
+        timeout: Some(timeout),
+    }
+}
+
+fn eval_within(
+    context: &ContextHandle,
+    source: &str,
+    options: ScriptOptions,
+) -> Result<Out, EngineError> {
+    let bytes = context.evaluate("<eval>", source.to_owned(), options, &mut Parking)?;
+    Ok(decode_value(&bytes, Limits::default(), &mut Shape).expect("V8 output decodes"))
+}
+
+fn timed(timeout: Duration) -> ContextHandle {
+    ContextHandle::spawn(
+        ContextConfig {
+            timeout: Some(timeout),
+            ..ContextConfig::default()
+        },
+        &mut Parking,
+    )
+    .expect("spawn")
+}
+
+const SPIN_150_MS: &str = "const end = Date.now() + 150; while (Date.now() < end) {} 1";
+
+#[test]
+fn a_scripts_own_timeout_terminates_only_that_script() {
+    let context = spawn();
+    let started = Instant::now();
+    assert_eq!(
+        terminated_by(eval_within(
+            &context,
+            "while (true) {}",
+            within(Duration::from_millis(50))
+        )),
+        TerminationCause::Timeout
+    );
+    assert!(started.elapsed() < Duration::from_secs(10));
+    assert_eq!(eval(&context, SPIN_150_MS).ok(), Some(Out::Int(1)));
+    for n in 0..200 {
+        let options = within(Duration::from_secs(60));
+        assert_eq!(
+            eval_within(&context, &n.to_string(), options).ok(),
+            Some(Out::Int(n))
+        );
+    }
+}
+
+#[test]
+fn a_scripts_own_timeout_only_tightens_the_contexts() {
+    let context = timed(Duration::from_millis(50));
+    let started = Instant::now();
+    assert_eq!(
+        terminated_by(eval_within(
+            &context,
+            "while (true) {}",
+            within(Duration::from_secs(60))
+        )),
+        TerminationCause::Timeout
+    );
+    assert!(started.elapsed() < Duration::from_secs(10));
+
+    let context = timed(Duration::from_secs(60));
+    let started = Instant::now();
+    assert_eq!(
+        terminated_by(eval_within(
+            &context,
+            "while (true) {}",
+            within(Duration::from_millis(50))
+        )),
+        TerminationCause::Timeout
+    );
+    assert!(started.elapsed() < Duration::from_secs(10));
+    assert_eq!(eval(&context, SPIN_150_MS).ok(), Some(Out::Int(1)));
+}
+
+#[test]
+fn a_scripts_own_timeout_bounds_the_microtasks_it_leaves() {
+    let context = spawn();
+    let started = Instant::now();
+    assert_eq!(
+        terminated_by(eval_within(
+            &context,
+            "Promise.resolve().then(() => { while (true) {} }); while (true) {}",
+            within(Duration::from_millis(50)),
+        )),
+        TerminationCause::Timeout
+    );
+    assert!(started.elapsed() < Duration::from_secs(10));
+    assert_eq!(eval(&context, "1 + 1").ok(), Some(Out::Int(2)));
+}
+
+#[test]
+fn a_calls_own_timeout_terminates_only_that_call() {
+    let context = spawn();
+    eval(&context, "globalThis.spin = () => { while (true) {} }").expect("defines spin");
+    let call = || {
+        let mut bytes = Vec::new();
+        let mut writer = Writer::new(&mut bytes);
+        writer.begin_array(1);
+        writer.utf8(b"spin");
+        writer.end_array(1);
+        CallRequest {
+            bytes,
+            objects: 0,
+            properties: 0,
+        }
+    };
+    let started = Instant::now();
+    let result = context
+        .invoke(call(), within(Duration::from_millis(50)), &mut Parking)
+        .map(|_| Out::Nil);
+    assert_eq!(terminated_by(result), TerminationCause::Timeout);
+    assert!(started.elapsed() < Duration::from_secs(10));
+    assert_eq!(eval(&context, SPIN_150_MS).ok(), Some(Out::Int(1)));
+}
+
 #[test]
 // Creating an isolate and its two contexts takes well over a millisecond, so a
 // timed creation would fail here.
@@ -400,6 +521,21 @@ fn a_timeout_ends_an_await_and_only_that_one() {
         TerminationCause::Timeout
     );
     assert_eq!(eval(&context, "1 + 1").expect("usable"), Out::Int(2));
+}
+
+#[test]
+fn an_awaits_own_timeout_ends_it_and_only_it() {
+    let context = spawn();
+    let options = ScriptOptions {
+        awaited: true,
+        timeout: Some(Duration::from_millis(50)),
+    };
+    assert_eq!(
+        terminated_by(eval_within(&context, NEVER, options)),
+        TerminationCause::Timeout
+    );
+    let later = DELAYED.replace(", 30)", ", 150)");
+    assert_eq!(eval_await(&context, &later).expect("settles"), Out::Text);
 }
 
 #[test]

@@ -16,7 +16,7 @@ mod spin;
 mod sys;
 mod text;
 
-pub use context::{ContextHandle, Host, Unparker, WaitHandle, WaitOutcome};
+pub use context::{ContextHandle, Host, ScriptOptions, Unparker, WaitHandle, WaitOutcome};
 pub use control::{CallRequest, CallbackReply, ContextConfig, JsText};
 pub use error::{
     EngineError, FlagError, InvalidSnapshot, JsError, JsErrorKind, SourceMapError, TerminationCause,
