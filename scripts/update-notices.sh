@@ -106,6 +106,7 @@ if ! $check; then
           *) url="$base/+/$commit/$file" ;;
         esac
         ;;
+      *\?*) url="${source%%\?*}/$file?${source#*\?}" ;;
       *) url="$source/$file" ;;
     esac
     fetch "$url" "$work/licenses/v8/$component/${file##*/}"
