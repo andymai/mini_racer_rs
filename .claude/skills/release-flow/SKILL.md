@@ -18,6 +18,8 @@ A release is a merged release-please PR. Merging it tags `vX.Y.Z` and publishes 
 | Release | `gh variable set RELEASE_HOLD --body false`, then `gh workflow run "Release Please"`; approve the `rubygems` deployment when the publish job waits |
 | Publish a tag by hand | `gh workflow run Release --ref vX.Y.Z -f publish=true` |
 | Native gem locally | `bundle exec rake compile`, `bundle exec rake package:stage PLATFORM=<platform>` per Ruby, then `bundle exec rake package:native PLATFORM=<platform>` |
+| musl native gem locally | per Ruby, in the image `scripts/alpine-image.sh ruby-<minor>` prints, with the compile job's release environment: `scripts/alpine.sh compile <platform>`; then `bundle exec rake package:native PLATFORM=<platform>`, and `scripts/alpine.sh install <platform>` in a fresh container |
+| New Alpine image digests | Dependabot's docker PR for `release/alpine/Dockerfile`, never auto-merged; review it and let its release dry run pass. By hand: `skopeo inspect --raw docker://docker.io/library/ruby:<tag> \| sha256sum` gives a tag's multi-arch index digest |
 | Source gem locally | `SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) bundle exec rake package:source` |
 | What a publish would push | `scripts/publish-gems.sh --dry-run <dir>` |
 | Lockfiles after a version bump | `scripts/sync-release-locks.sh` |
@@ -37,6 +39,7 @@ A release is a merged release-please PR. Merging it tags `vX.Y.Z` and publishes 
 | Verify: "version.rb is at X but the tag is Y" | The tag does not match the version file | Never retag by hand; let release-please make the tag |
 | check-versions: "locks mini_racer_rs at ..." | A release PR whose lockfiles were not synced | `scripts/sync-release-locks.sh` on the PR branch, commit, push |
 | `VIOLATION [glibc]` | The extension needs a newer glibc than `[release] glibc` | Find the symbol in the message; the Linux legs must build on `ubuntu-22.04` |
+| A musl floor install fails to load the extension | The extension needs a newer musl than the `floor` image in `release/alpine/Dockerfile` | The musl legs build on the newest Alpine; find the missing symbol in the error and what calls it |
 | `VIOLATION [macos]` | The bundle's minimum macOS is above `[release] macos` | `MACOSX_DEPLOYMENT_TARGET` comes from that floor; a dependency built for a newer macOS raises it |
 | One install leg fails | That platform and Ruby cannot load its gem, or a suite fails on the released build | Reproduce with "Native gem locally" and `release/smoke.rb`; for a suite, copy the installed extension into `lib/mini_racer_rs/<minor>/`, run the failing suite, then delete that directory |
 | A size violation | A gem is over the budget in release/size-budget.toml | Find what grew; raising the budget, or passing 75 MB, is the owner's decision |
