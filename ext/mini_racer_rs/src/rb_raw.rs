@@ -80,6 +80,13 @@ pub fn mutex_lock(_ruby: &Ruby, mutex: magnus::Mutex) -> Result<(), Error> {
     mutex.lock()
 }
 
+// magnus yields under rb_protect, so a break, return or throw out of the block
+// comes back as the Err, which magnus resumes at the method entry once the
+// Rust frames below it have returned (I6).
+pub fn yield_block(ruby: &Ruby) -> Result<Value, Error> {
+    ruby.yield_values(())
+}
+
 // Ruby's GC cannot see an isolate's native memory, so it is reported here;
 // without it, contexts left to finalizers pile up between collections.
 pub fn adjust_memory(_ruby: &Ruby, bytes: isize) {
