@@ -354,9 +354,12 @@ fn a_nested_await_under_a_pending_stop_reports_the_refusal_as_terminated() {
 
 // mini_racer's last termination check for a script nested in a callback also
 // comes before its result is serialized: the outer script's timeout firing
-// while a large nested result is copied out leaves that result. The callback
-// starts about 5 ms before the timeout; copying 128 MiB took about 20 ms on
-// the fastest CI runner measured.
+// while a large nested result is copied out leaves that result. Copying 128 MiB
+// took about 20 ms on the fastest CI runner measured, and where the callback
+// starts against the timeout depends on how much a loaded machine stalls, so
+// attempts start it at several leads: one whose timeout comes before or after
+// the copy proves nothing and the next lead is tried, one that loses the
+// nested result fails at once, and one must land.
 #[test]
 fn a_timeout_while_a_nested_result_serializes_leaves_the_result() {
     let length = 128 << 20;
@@ -366,44 +369,53 @@ fn a_timeout_while_a_nested_result_serializes_leaves_the_result() {
         &mut adding(),
     )
     .expect("snapshot");
-    let context = ContextHandle::spawn(
-        ContextConfig {
-            timeout: Some(Duration::from_millis(50)),
-            snapshot: Some(SnapshotBlob::new(&blob).expect("a blob V8 wrote")),
-            ..ContextConfig::default()
-        },
-        &mut adding(),
-    )
-    .expect("spawn");
-    context
-        .attach(name_and_id("grab", 0), &mut adding())
-        .expect("attach");
-    let mut nested = None;
-    let mut host = Answering(|_args: &[i64], _id| {
-        nested = Some(
-            context
-                .eval("<eval>", "value", &mut adding())
-                .map(|bytes| bytes.len()),
-        );
-        CallbackReply::Value(integer(0))
-    });
-
-    let outer = eval(
-        &context,
-        "const end = Date.now() + 45; while (Date.now() < end) {} grab(); 1",
-        &mut host,
-    );
-    assert!(
-        matches!(nested, Some(Ok(bytes)) if bytes > length),
-        "{nested:?}"
-    );
-    assert!(
+    let timed_out = |outer: &Result<Vec<i64>, EngineError>| {
         matches!(
             outer,
-            Err(EngineError::Js(ref js)) if js.kind == JsErrorKind::Terminated(TerminationCause::Timeout)
-        ),
-        "{outer:?}"
-    );
+            Err(EngineError::Js(js)) if js.kind == JsErrorKind::Terminated(TerminationCause::Timeout)
+        )
+    };
+    let mut misses = Vec::new();
+    for lead_ms in [5, 10, 15, 3, 20, 25, 30, 8] {
+        let context = ContextHandle::spawn(
+            ContextConfig {
+                timeout: Some(Duration::from_millis(50)),
+                snapshot: Some(SnapshotBlob::new(&blob).expect("a blob V8 wrote")),
+                ..ContextConfig::default()
+            },
+            &mut adding(),
+        )
+        .expect("spawn");
+        context
+            .attach(name_and_id("grab", 0), &mut adding())
+            .expect("attach");
+        let mut nested = None;
+        let mut host = Answering(|_args: &[i64], _id| {
+            nested = Some(
+                context
+                    .eval("<eval>", "value", &mut adding())
+                    .map(|bytes| bytes.len()),
+            );
+            CallbackReply::Value(integer(0))
+        });
+        let outer = eval(
+            &context,
+            &format!(
+                "const end = Date.now() + {}; while (Date.now() < end) {{}} grab(); 1",
+                50 - lead_ms
+            ),
+            &mut host,
+        );
+        match nested {
+            Some(Ok(bytes)) if bytes > length && timed_out(&outer) => return,
+            None if timed_out(&outer) => misses.push((lead_ms, "before the callback")),
+            Some(Ok(bytes)) if bytes > length && outer.is_ok() => {
+                misses.push((lead_ms, "after the callback"));
+            }
+            other => panic!("lead {lead_ms} ms: nested {other:?}, outer {outer:?}"),
+        }
+    }
+    panic!("no timeout landed while the nested result was copied: {misses:?}");
 }
 
 // A dispose cancels mini_racer's wait for a nested script, so one landing
