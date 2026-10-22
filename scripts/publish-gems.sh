@@ -3,7 +3,10 @@
 # source gem last, so no install meets a version that has only the source
 # gem. A gem RubyGems.org already has at this version and platform is
 # skipped, so a rerun after a partial publish finishes it. Expects the
-# credentials the trusted publishing step exports.
+# credentials the trusted publishing step exports. A gem with the bundle
+# scripts/sign-gems.sh writes next to it is pushed with that attestation;
+# if that push fails, it is pushed without one so a release never waits on
+# Sigstore.
 # Usage: publish-gems.sh [--dry-run] <dir with .gem files>
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -50,7 +53,12 @@ for entry in "${order[@]}"; do
   fi
   if [ "$dry_run" = true ]; then
     echo "would push $(basename "$gem")"
-  else
-    gem push "$gem"
+    continue
   fi
+  if [ -f "$gem.sigstore.json" ]; then
+    gem push --attestation "$gem.sigstore.json" "$gem" && continue
+    echo "::warning::pushing $(basename "$gem") with its attestation failed; pushing it without one"
+    rm -f "$gem.sigstore.json"
+  fi
+  gem push "$gem"
 done

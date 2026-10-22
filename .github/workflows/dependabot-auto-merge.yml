@@ -36,9 +36,12 @@ jobs:
         with:
           app-id: ${{ secrets.RELEASE_KUN_APP_ID }}
           private-key: ${{ secrets.RELEASE_KUN_APP_PRIVATE_KEY }}
-      # --auto waits for the required checks; majors stay manual.
+      # --auto waits for the required checks; majors stay manual, and so does
+      # release/sign, whose gems run in the release workflow with an OIDC token.
       - name: Queue patch and minor updates for merge
-        if: steps.metadata.outputs.update-type != 'version-update:semver-major'
+        if: >-
+          steps.metadata.outputs.update-type != 'version-update:semver-major' &&
+          steps.metadata.outputs.directory != '/release/sign'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
           PR_URL: ${{ github.event.pull_request.html_url }}

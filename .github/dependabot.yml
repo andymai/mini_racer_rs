@@ -40,6 +40,20 @@ updates:
         update-types: [version-update:semver-major]
     open-pull-requests-limit: 5
 
+  # The release workflow signs gems with this bundle under an OIDC token, so
+  # dependabot-auto-merge.yml leaves its updates for review.
+  - package-ecosystem: bundler
+    directory: /release/sign
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+    groups:
+      sign:
+        update-types: [minor, patch]
+    open-pull-requests-limit: 2
+
   # The reference bundle is the parity baseline: mini_racer and its libv8-node
   # stay at the release the suite and the differential run compare against.
   - package-ecosystem: bundler
