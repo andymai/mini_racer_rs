@@ -10,6 +10,8 @@ require_relative "../../test/upstream/ledger"
 module CompatCheck
   STATUS = /\A(?:done|deviation|todo:(?<milestone>[\w-]+))\z/
   KEYS = %w[status reason approved depends_on].freeze
+  EXTRA_STATUSES = %w[done internal].freeze
+  EXTRA_ID = /\A(?:module|class|const|imethod|smethod|kwarg):MiniRacerRs(?:\z|::|[.# ])/
 
   Inputs = Data.define(:ledger, :surface, :candidate, :milestones, :upstream_ledgers, :reference) do
     def initialize(upstream_ledgers: {}, reference: nil, **)
@@ -34,6 +36,33 @@ module CompatCheck
     out.concat(against_candidate(entries, ids, inputs.candidate, engine))
     out.concat(upstream_deviations(entries, inputs.upstream_ledgers))
     out.concat(drift(ids, inputs.reference, engine)) if inputs.reference
+    out.concat(extras(inputs.ledger.fetch("extra", {}), inputs.candidate))
+  end
+
+  def extras(extra, candidate)
+    entries = extra.select { |_, entry| entry.is_a?(Hash) }
+    out = (extra.keys - entries.keys).map { |id| "MALFORMED #{id}: an [extra] entry is a table with a status" }
+    entries.each { |id, entry| out.concat(malformed_extra(id, entry)) }
+    engine = candidate.fetch("engine")
+    present = candidate.fetch("extra_ids", [])
+    recorded = extra.keys.filter_map do |id|
+      base = CompatSurface.split(id).first
+      base if EXTRA_ID.match?(base) && CompatSurface.applies?(id, engine)
+    end
+    out.concat((present - recorded).map do |id|
+      "MISSING_EXTRA #{id}: mini_racer_rs has it on #{engine}; compat.toml [extra] does not"
+    end)
+    out.concat((recorded - present).map { |id| "STALE_EXTRA #{id}: not in mini_racer_rs on #{engine}" })
+  end
+
+  def malformed_extra(id, entry)
+    base, suffix = CompatSurface.split(id)
+    unknown = entry.keys - ["status"]
+    out = []
+    out << "MALFORMED #{id}: [extra] holds only MiniRacerRs ids" unless EXTRA_ID.match?(base)
+    out << "MALFORMED #{id}: unknown engine #{suffix}" if suffix && !CompatSurface::ENGINES.include?(suffix)
+    out << "MALFORMED #{id}: unknown keys #{unknown.join(", ")}" unless unknown.empty?
+    out << "MALFORMED #{id}: status #{entry["status"].inspect}" unless EXTRA_STATUSES.include?(entry["status"])
     out
   end
 

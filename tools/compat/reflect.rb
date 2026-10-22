@@ -87,6 +87,11 @@ report = {
   "gem" => options[:reference] ? "mini_racer #{Gem.loaded_specs.fetch("mini_racer").version}" : "mini_racer_rs",
   "ids" => ids.uniq.sort,
 }
+unless options[:reference]
+  extra_ids = []
+  walk(MiniRacerRs, extra_ids)
+  report["extra_ids"] = extra_ids.uniq.sort
+end
 json = "#{JSON.pretty_generate(report)}\n"
 if options[:out]
   FileUtils.mkdir_p(File.dirname(options[:out]))
