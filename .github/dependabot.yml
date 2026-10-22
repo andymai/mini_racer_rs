@@ -22,9 +22,12 @@ updates:
 
   # The transitive check's bundle stays out: it pins rtlcss exactly and takes
   # the other two gems by path, and Dependabot evaluates path gemspecs with
-  # File.read stubbed out, which the shim's version lookup cannot survive.
+  # File.read stubbed out, which the shim's version lookup cannot survive. For
+  # the same reason the root bundle excludes shim/, whose gemspec Dependabot
+  # otherwise finds and evaluates.
   - package-ecosystem: bundler
     directory: /
+    exclude-paths: ["shim/**"]
     schedule:
       interval: weekly
     cooldown:
