@@ -5,7 +5,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-mapfile -t files < <(find .github -type f \( -name '*.yml' -o -name '*.yaml' \) 2>/dev/null || true)
+files=()
+while IFS= read -r file; do files+=("$file"); done < <(find .github -type f \( -name '*.yml' -o -name '*.yaml' \) 2>/dev/null || true)
 [ "${#files[@]}" -gt 0 ] || { echo "No workflows."; exit 0; }
 fail=0
 
@@ -27,7 +28,9 @@ keys=$(grep -nE '^\s*-?\s*(container|image):\s*[^[:space:]#]' "${files[@]}" |
 runs=$(awk '{ line = line $0 } /\\$/ { sub(/\\$/, " ", line); next } { print FILENAME ":" FNR ": " line; line = "" }' "${files[@]}" |
   grep -E '(docker|podman) +(container +)?run( |$)' |
   grep -vE "$digest" | grep -vF "\$(scripts/alpine-image.sh " || true)
-mapfile -t dockerfiles < <(find . \( -name .git -o -name node_modules -o -path ./vendor -o -path ./target -o -path ./tmp \) -prune -o \
+dockerfiles=()
+while IFS= read -r file; do dockerfiles+=("$file"); done < <(find . \( -name .git -o -name node_modules -o -name vendor -o -name .worktrees \
+  -o -path ./.claude/worktrees -o -path ./target -o -path ./tmp \) -prune -o \
   -type f \( -name 'Dockerfile*' -o -name '*.Dockerfile' -o -name 'Containerfile*' \) -print)
 froms=$(for dockerfile in "${dockerfiles[@]}"; do
   grep -nHE '^\s*FROM\s' "$dockerfile" | grep -vE "FROM\s+\S+$digest(\s|$)" || true

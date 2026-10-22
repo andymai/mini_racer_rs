@@ -60,6 +60,8 @@ toolchain() {
   # cargo, run as the owner, keeps its registry and locks here.
   mkdir -p "$CARGO_HOME/registry"
   chown "$owner" "$CARGO_HOME" "$CARGO_HOME/registry"
+  # Fetched as root, read by cargo as the owner, who cannot read /root.
+  export MINI_RACER_RS_V8_CACHE="${MINI_RACER_RS_V8_CACHE:-/var/cache/mini_racer_rs/v8}"
   # shellcheck source=scripts/fetch-v8-archive.sh
   . scripts/fetch-v8-archive.sh
   gems

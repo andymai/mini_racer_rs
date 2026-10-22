@@ -572,8 +572,9 @@ jobs:
             ~/.cache/mini_racer_rs/alpine/registry/index
             ~/.cache/mini_racer_rs/alpine/registry/cache
             ~/.cache/mini_racer_rs/alpine/target
+          # No restore-keys: nothing prunes this directory, so a new key starts
+          # clean rather than carrying every earlier build along.
           key: alpine-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'ext/mini_racer_rs/v8-archives.sha256') }}
-          restore-keys: alpine-${{ runner.arch }}-
       # --init reaps the orphans the fork and daemon tests leave.
       - name: Build and test in ruby:3.4-alpine
         env:
@@ -587,6 +588,10 @@ jobs:
             -e MINI_RACER_RS_V8_CACHE=/cache/v8 -e CARGO_TARGET_DIR=/cache/target -e RB_SYS_CARGO_TARGET_DIR=/cache/target \
             -e CARGO_INCREMENTAL=0 -e CARGO_TERM_COLOR -e RUSTFLAGS -e SEED \
             "$(scripts/alpine-image.sh ruby-3.4)" scripts/alpine.sh test
+      # The madvise fixture's debug build is rebuilt each run rather than cached.
+      - name: Leave the madvise fixture's build out of the cache
+        if: github.ref == 'refs/heads/main' && steps.cargo.outputs.cache-hit != 'true'
+        run: rm -rf "$HOME/.cache/mini_racer_rs/alpine/target/no-madvise-wrap"
       - name: Save the cargo registry and target directory
         if: github.ref == 'refs/heads/main' && steps.cargo.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

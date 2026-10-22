@@ -22,7 +22,8 @@ about=$(taplo get -f about.toml -o json | jq -r '.targets[]' | xargs)
 platforms_of() {
   sed -n '/^PLATFORMS$/,/^$/p' "$1" | sed -nE 's/^  (.+)$/\1/p' | xargs
 }
-release_include=$(sed -nE 's/^ *- platform: ([a-z0-9_-]+)$/\1/p' .github/workflows/release.yml | xargs)
+musl_platforms=$(tr ' ' '\n' <<<"$gem_platforms" | grep -- '-linux-musl$' | xargs)
+release_includes=$(awk '/^  [a-z][a-z0-9-]*:$/ { job = $1 } /^ *- platform: [a-z0-9_-]+$/ { print job, $3 }' .github/workflows/release.yml)
 release_lists=$(sed -nE 's/^ *platform: \[(.+)\]$/\1/p' .github/workflows/release.yml | tr -d ',')
 package=$(sed -n '/^ *PLATFORMS = %w\[/,/\]\.freeze$/p' rakelib/package.rake | sed -E 's/^ *PLATFORMS = %w\[//; s/\]\.freeze$//' | xargs)
 publish=$(sed -nE 's/^platforms="(.+)"$/\1/p' scripts/publish-gems.sh)
@@ -34,7 +35,15 @@ same "$bindings" "$targets" || mismatch "v8-archives.sha256 bindings: $bindings"
 same "$extconf" "$targets" || mismatch "extconf.rb targets: $extconf"
 same "$deny" "$targets" || mismatch "deny.toml graph targets: $deny"
 same "$about" "$targets" || mismatch "about.toml targets: $about"
-same "$release_include" "$gem_platforms" || mismatch "release.yml matrix includes: $release_include"
+[ -n "$release_includes" ] || mismatch "release.yml has no matrix includes"
+while read -r job; do
+  included=$(awk -v job="$job" '$1 == job { print $2 }' <<<"$release_includes" | xargs)
+  case "$job" in
+    *musl*) expected=$musl_platforms ;;
+    *) expected=$gem_platforms ;;
+  esac
+  same "$included" "$expected" || mismatch "release.yml ${job%:} matrix includes: $included"
+done < <(cut -d' ' -f1 <<<"$release_includes" | sort -u)
 while read -r list; do
   same "$(tr ' ' '\n' <<<"$list" | grep -vx ruby | xargs)" "$gem_platforms" || mismatch "release.yml matrix platforms: $list"
 done <<<"$release_lists"

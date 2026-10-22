@@ -182,7 +182,7 @@ bundle exec ruby -Ilib test/stress/shared_load.rb multi  # 5 contexts loading on
 bundle exec ruby -Ilib test/stress/one_off_load.rb multi  # 10 contexts in turn each loading a different 3 MiB two-byte script once; fails over 16 MiB kept once all are disposed (also: single)
 bundle exec ruby -Ilib -Ivendor/execjs/lib test/stress/large_arguments.rb   # 3,000 ExecJS calls with 24 KB arguments of one length; fails when the last tenth is 3 times slower than the first
 scripts/madvise-fixture.sh         # Linux: build without the madvise wrapper and show a fork child crash
-podman run --rm --init --userns=keep-id --user 0 -v "$PWD:/mini_racer_rs" -w /mini_racer_rs "$(scripts/alpine-image.sh ruby-3.4)" scripts/alpine.sh test   # CI's Alpine job
+podman run --rm --init --userns=keep-id --user 0 --security-opt label=disable -v "$PWD:/mini_racer_rs" -w /mini_racer_rs "$(scripts/alpine-image.sh ruby-3.4)" scripts/alpine.sh test   # CI's Alpine job
 bundle exec rake package:stage PLATFORM=x86_64-linux-gnu   # copy the compiled extension to tmp/native/<platform>/<ruby minor>/
 bundle exec rake package:native PLATFORM=x86_64-linux-gnu  # a native gem from every staged Ruby's extension, into pkg/
 bundle exec rake package:source    # the source gem, into pkg/
