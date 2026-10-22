@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/andymai/mini_racer_rs/compare/v1.1.1...v1.2.0) (2026-10-22)
+
+
+### Features
+
+* **platforms:** native gems and CI for musl Linux ([#117](https://github.com/andymai/mini_racer_rs/issues/117)) ([5b565f2](https://github.com/andymai/mini_racer_rs/commit/5b565f2e7e5f2ef5f502c2ddf7d38fcbdcd68e35))
+
 ## [1.1.1](https://github.com/andymai/mini_racer_rs/compare/v1.1.0...v1.1.1) (2026-10-21)
 
 
