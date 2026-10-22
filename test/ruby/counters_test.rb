@@ -14,6 +14,12 @@ module CounterHelpers
 
   def now = Process.clock_gettime(Process::CLOCK_MONOTONIC, :nanosecond)
 
+  # Waits until the context has been sent `count` dispatches, so a thread is
+  # interrupted or read only once its script runs, however loaded the machine.
+  def dispatched(context, count)
+    Timeout.timeout(10) { sleep 0.001 until counters(context)[:dispatches] >= count }
+  end
+
   # The change in each count a block makes.
   def counted(context, keys = COUNTED)
     before = counters(context)
@@ -72,7 +78,7 @@ class CountersTest < Minitest::Test
     timed = MiniRacer::Context.new(timeout: 50)
     assert_raises(MiniRacer::ScriptTerminatedError) { timed.eval("while (true) {}") }
     interrupted = MiniRacer::Context.new
-    assert_raises(Timeout::Error) { Timeout.timeout(0.1) { interrupted.eval("while (true) {}") } }
+    assert_raises(Timeout::Error) { Timeout.timeout(0.3) { interrupted.eval("while (true) {}") } }
     capped = MiniRacer::Context.new(max_memory: 50_000_000)
     assert_raises(MiniRacer::V8OutOfMemoryError) do
       capped.eval("let a = []; while (true) { a.push(new Array(10000).fill(0)) }")
@@ -90,7 +96,7 @@ class CountersTest < Minitest::Test
     catch(:out) { context.eval("leave(); while (true) {}") }
     thread = Thread.new { context.eval("while (true) {}") }
     thread.report_on_exception = false
-    sleep 0.1
+    dispatched(context, 3)
     thread.raise(Halted)
     assert_raises(Halted) { thread.join }
 
@@ -168,13 +174,15 @@ class CountersReadTest < Minitest::Test
 
   def test_reads_counts_while_javascript_runs_on_another_thread
     context = MiniRacer::Context.new
-    running = Thread.new { context.eval("const until = Date.now() + 300; while (Date.now() < until) {} 1") }
-    sleep 0.1
+    running = Thread.new { context.eval("while (true) {}") }
+    running.report_on_exception = false
+    dispatched(context, 1)
     during = Timeout.timeout(5) { counters(context) }
+    context.stop
 
-    assert_equal 1, running.value
-    assert_equal({ dispatches: 1, bytes_from_js: 0 }, during.slice(:dispatches, :bytes_from_js))
-    assert_operator counters(context)[:js_ns], :>=, 299_000_000
+    assert_raises(MiniRacer::ScriptTerminatedError) { running.join }
+    assert_equal({ dispatches: 1, bytes_from_js: 0, js_ns: 0 }, during.slice(:dispatches, :bytes_from_js, :js_ns))
+    assert_operator counters(context)[:js_ns], :>, 0
   end
 
   def test_keeps_the_last_counts_after_dispose

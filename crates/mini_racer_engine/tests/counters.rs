@@ -505,32 +505,30 @@ fn heap_statistics_snapshots_and_collections_are_not_javascript_time() {
     assert!(counted.gc_ns > 0, "{counted:?}");
 }
 
+// Polls until the script is dispatched, then reads while it loops, so a
+// loaded machine cannot make the read come before or after it.
 #[test]
 fn counts_read_from_another_thread_while_a_script_runs() {
     let context = spawn();
-    let before = context.counters();
-    let during = std::thread::scope(|scope| {
-        let running = scope.spawn(|| {
-            eval(
-                &context,
-                "const until = Date.now() + 300; while (Date.now() < until) {} 0",
-                &mut Parking,
-            )
-        });
-        std::thread::sleep(Duration::from_millis(100));
+    let (during, ended) = std::thread::scope(|scope| {
+        let running = scope.spawn(|| context.eval("<eval>", "while (true) {}", &mut Parking));
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while context.counters().dispatches == 0 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
         let during = context.counters();
-        running.join().expect("eval thread");
-        during
+        context.stop().expect("live");
+        (during, running.join().expect("eval thread"))
     });
 
-    assert_eq!(during.dispatches, before.dispatches + 1);
-    assert_eq!(during.bytes_from_js, before.bytes_from_js);
-    let after = context.counters();
-    assert!(after.bytes_from_js > during.bytes_from_js);
-    assert!(
-        after.js_ns >= nanos(Duration::from_millis(299)),
-        "{after:?}"
+    assert_eq!(
+        (during.dispatches, during.bytes_from_js, during.js_ns),
+        (1, 0, 0)
     );
+    assert_eq!(terminated_by(ended), TerminationCause::Stop);
+    let after = context.counters();
+    assert!(after.js_ns > 0, "{after:?}");
+    assert_eq!(after.terminated.stop, 1);
 }
 
 #[test]
