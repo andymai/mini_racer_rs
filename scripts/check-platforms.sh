@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 targets="aarch64-apple-darwin aarch64-unknown-linux-gnu aarch64-unknown-linux-musl x86_64-apple-darwin x86_64-unknown-linux-gnu x86_64-unknown-linux-musl"
-gem_platforms="aarch64-linux-gnu arm64-darwin x86_64-darwin x86_64-linux-gnu"
+gem_platforms="aarch64-linux-gnu aarch64-linux-musl arm64-darwin x86_64-darwin x86_64-linux-gnu x86_64-linux-musl"
 fail=0
 mismatch() {
   echo "VIOLATION [platform]: $*"
@@ -24,7 +24,7 @@ platforms_of() {
 }
 release_include=$(sed -nE 's/^ *- platform: ([a-z0-9_-]+)$/\1/p' .github/workflows/release.yml | xargs)
 release_lists=$(sed -nE 's/^ *platform: \[(.+)\]$/\1/p' .github/workflows/release.yml | tr -d ',')
-package=$(sed -nE 's/^ *PLATFORMS = %w\[(.+)\]\.freeze$/\1/p' rakelib/package.rake)
+package=$(sed -n '/^ *PLATFORMS = %w\[/,/\]\.freeze$/p' rakelib/package.rake | sed -E 's/^ *PLATFORMS = %w\[//; s/\]\.freeze$//' | xargs)
 publish=$(sed -nE 's/^platforms="(.+)"$/\1/p' scripts/publish-gems.sh)
 lock=$(platforms_of Gemfile.lock)
 transitive=$(platforms_of test/consumers/transitive/Gemfile.lock)

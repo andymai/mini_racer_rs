@@ -17,7 +17,7 @@ if [ "${1:-}" = --dry-run ]; then
   shift
 fi
 dir=${1:?usage: publish-gems.sh [--dry-run] <dir with .gem files>}
-platforms="aarch64-linux-gnu arm64-darwin x86_64-darwin x86_64-linux-gnu"
+platforms="aarch64-linux-gnu aarch64-linux-musl arm64-darwin x86_64-darwin x86_64-linux-gnu x86_64-linux-musl"
 version=$(sed -nE 's/^ *VERSION = "([^"]+)"$/\1/p' lib/mini_racer_rs/version.rb)
 
 order=()
