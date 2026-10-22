@@ -40,6 +40,19 @@ updates:
         update-types: [version-update:semver-major]
     open-pull-requests-limit: 5
 
+  # The bundle the publish job signs gems with.
+  - package-ecosystem: bundler
+    directory: /release/sign
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+    groups:
+      sign:
+        update-types: [minor, patch]
+    open-pull-requests-limit: 2
+
   # The reference bundle is the parity baseline: mini_racer and its libv8-node
   # stay at the release the suite and the differential run compare against.
   - package-ecosystem: bundler

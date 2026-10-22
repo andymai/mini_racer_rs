@@ -617,6 +617,7 @@ jobs:
         --lockfile=Gemfile.lock
         --lockfile=package-lock.json
         --lockfile=tools/reference/Gemfile.lock
+        --lockfile=release/sign/Gemfile.lock
         --lockfile=test/consumers/js/package-lock.json
         --lockfile=test/consumers/transitive/Gemfile.lock
       upload-sarif: ${{ github.event.pull_request.head.repo.full_name == github.repository }}

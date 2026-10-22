@@ -1,0 +1,7 @@
+# frozen_string_literal: true
+
+# The publish job signs each gem with this locked bundle, never an unpinned
+# `gem exec`: it runs where the job can mint a RubyGems.org credential.
+source "https://rubygems.org"
+
+gem "sigstore-cli", "0.2.3"

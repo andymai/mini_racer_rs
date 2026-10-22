@@ -396,8 +396,12 @@ jobs:
       - name: Verify checksums
         working-directory: pkg
         run: sha256sum -c SHA256SUMS
+      # Before the credentials step, so nothing the signer loads runs while a
+      # RubyGems.org key is in the job's environment.
+      - name: Sign the gems with Sigstore
+        run: scripts/sign-gems.sh pkg
       - uses: rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a # v2.1.0
-      - run: scripts/publish-gems.sh --sign pkg
+      - run: scripts/publish-gems.sh pkg
       - name: Attach the gems to the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
