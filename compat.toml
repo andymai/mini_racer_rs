@@ -78,8 +78,8 @@ reason = "mini_racer_rs returns a regular expression as its pattern String and a
 status = "deviation"
 
 [ids."behavior:platforms@ruby"]
-approved = "2026-10-16"
-reason = "mini_racer_rs supports glibc Linux on x86_64 and aarch64, plus macOS on arm64 and x86_64. Installation stops on musl-based Linux, including Alpine, and on Windows, with a message naming the supported platforms."
+approved = "2026-10-22"
+reason = "mini_racer_rs ships native gems for the platforms libv8-node publishes gems for, which mini_racer 0.22.1 uses: glibc and musl Linux on x86_64 and aarch64, and macOS on x86_64 and arm64. Neither supports Windows. On any other platform, mini_racer_rs's source gem stops installation with a message naming the supported platforms, while mini_racer can install libv8-node's source gem."
 status = "deviation"
 
 [ids."behavior:shared-source-heap-stats@ruby"]

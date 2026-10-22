@@ -8,7 +8,9 @@ require "tomlrb"
 # lib/mini_racer_rs/<minor>/, which the loader picks by RUBY_VERSION.
 module Package
   ROOT = File.expand_path("..", __dir__)
-  PLATFORMS = %w[aarch64-linux-gnu arm64-darwin x86_64-darwin x86_64-linux-gnu].freeze
+  PLATFORMS = %w[
+    aarch64-linux-gnu aarch64-linux-musl arm64-darwin x86_64-darwin x86_64-linux-gnu x86_64-linux-musl
+  ].freeze
   # The source gem's Rust sources and build files stay out of native gems.
   SOURCE_ONLY = %r{\A(?:Cargo\.(?:toml|lock)|crates/|ext/)}
 

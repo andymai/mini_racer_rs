@@ -1,8 +1,9 @@
 # Code compiled into rusty_v8's prebuilt archives. archive_path is a source
 # directory the archives' debug strings name: a top-level directory, or one
 # third_party/<name>. source is where its license comes from: a rusty_v8
-# submodule at the release tag ("submodule:<path>"), or a pinned base URL; "-"
-# with file "-" means another section of THIRD_PARTY_NOTICES.md covers it.
+# submodule at the release tag ("submodule:<path>"), or a pinned base URL, whose
+# query (a cgit ref) follows the file; "-" with file "-" means another section
+# of THIRD_PARTY_NOTICES.md covers it.
 # component	archive_path	source	file
 v8	v8	submodule:v8	LICENSE
 v8	v8	submodule:v8	LICENSE.fdlibm
@@ -24,6 +25,9 @@ dragonbox	third_party/dragonbox	submodule:third_party/dragonbox/src	LICENSE-Boos
 # Chromium's build/ has no license file of its own; its sources defer to
 # Chromium's, pinned at the release line matching V8 15.2.
 chromium-build	build	https://chromium.googlesource.com/chromium/src/+/refs/tags/152.0.7977.89	LICENSE
+# The musl archives compile against the musl headers of rusty_v8's release
+# sysroot: musl 1.2.2 for x86_64, 1.2.5 for aarch64, whose COPYRIGHT files match.
+musl	musl-sysroot	https://git.musl-libc.org/cgit/musl/plain?h=v1.2.5	COPYRIGHT
 # rusty_v8's own bindings: the v8 crate in the Rust crates section.
 rusty_v8	src	-	-
 temporal_capi	third_party/rust/chromium_crates_io/vendor/temporal_capi-v0_2	-	-

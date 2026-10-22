@@ -1,3 +1,5 @@
 # The largest gem of release run 38981078177 (x86_64-linux-gnu, 65,608,192
 # bytes) plus 15%, held to the 75 MB ceiling in scripts/check-gem-sizes.sh.
+# In the dry run of release run 39749813468, the largest musl gem (x86_64) was
+# 66,215,936 bytes and the largest gem 66,223,104 (x86_64-linux-gnu).
 max_bytes = 75000000

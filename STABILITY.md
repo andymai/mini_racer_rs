@@ -36,6 +36,6 @@ The environment variables `MINI_RACER_RS_SPIN_US`, `MINI_RACER_RS_CODE_CACHE`, a
 
 Supported Rubies are CRuby 3.3, 3.4 and 4.0, plus TruffleRuby using mini_racer's vendored TruffleRuby backend. Supported Ruby versions follow CRuby's maintained releases.
 
-Supported platforms are glibc Linux on x86_64 and aarch64, and macOS on arm64 and x86_64. musl-based Linux, including Alpine, and Windows are out of scope.
+Supported platforms are glibc and musl Linux, including Alpine, on x86_64 and aarch64, and macOS on arm64 and x86_64. Windows is not supported.
 
 The extension uses V8 15.2 through the `v8` crate, pinned exactly at 152.2.0. Native gems contain one extension per supported Ruby. Source builds require Rust 1.91 or newer and libclang.

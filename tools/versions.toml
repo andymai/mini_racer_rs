@@ -23,6 +23,7 @@ commit = "413b11963457f176a62c6ea240d7edaf01214e76"
 tag = "v0.22.1"
 
 # Native gems: one extension per Ruby minor, built to these platform floors.
+# The musl gems' Alpine images are pinned in release/alpine/Dockerfile.
 [release]
 glibc = "2.35"
 macos = "13.0"

@@ -11,7 +11,13 @@
 # inside malloc and aborts when it lands inside a collection.
 require_relative "prelude"
 
-def rss_kib = Integer(`ps -o rss= -p #{Process.pid}`.strip)
+def rss_kib
+  if File.exist?("/proc/self/status")
+    File.read("/proc/self/status")[/VmRSS:\s+(\d+)/, 1].to_i
+  else
+    Integer(`ps -o rss= -p #{Process.pid}`.strip)
+  end
+end
 
 check_the_dive
 context = MiniRacer::Context.new

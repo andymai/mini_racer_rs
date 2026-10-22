@@ -10,6 +10,8 @@ end
 TARGETS = {
   %w[x86_64 linux] => "x86_64-unknown-linux-gnu",
   %w[aarch64 linux] => "aarch64-unknown-linux-gnu",
+  %w[x86_64 linux-musl] => "x86_64-unknown-linux-musl",
+  %w[aarch64 linux-musl] => "aarch64-unknown-linux-musl",
   %w[arm64 darwin] => "aarch64-apple-darwin",
   %w[aarch64 darwin] => "aarch64-apple-darwin",
   %w[x86_64 darwin] => "x86_64-apple-darwin",
@@ -18,13 +20,13 @@ MINIMUM_RUST = Gem::Version.new("1.91.0")
 
 host_os = RbConfig::CONFIG["host_os"]
 os = case host_os
-     when /linux-musl/ then nil
+     when /linux-musl/ then "linux-musl"
      when /linux/ then "linux"
      when /darwin/ then "darwin"
      end
 target = os && TARGETS[[RbConfig::CONFIG["host_cpu"], os]]
 unless target
-  abort "mini_racer_rs supports Linux (glibc) on x86_64 and aarch64 and macOS on arm64 and x86_64; " \
+  abort "mini_racer_rs supports Linux (glibc or musl) on x86_64 and aarch64 and macOS on arm64 and x86_64; " \
         "#{RbConfig::CONFIG["host_cpu"]}-#{host_os} is not supported"
 end
 
@@ -74,5 +76,8 @@ require "rb_sys/mkmf"
 
 create_rust_makefile("mini_racer_rs/mini_racer_rs") do |r|
   r.extra_cargo_args += ["--locked"]
+  # rb_sys hands -crt-static to rustc alone, but cargo refuses a musl cdylib
+  # from RUSTFLAGS before rustc runs.
+  r.extra_rustflags += ["-C", "target-feature=-crt-static"] if os == "linux-musl"
   r.env.merge!(build_env)
 end

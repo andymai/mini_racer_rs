@@ -18,3 +18,4 @@ simdutf	LICENSE	https://chromium.googlesource.com/chromium/src/third_party/simdu
 fast_float	LICENSE-MIT	https://chromium.googlesource.com/external/github.com/fastfloat/fast_float/+/34164f547b7df3f5d794ff67e9f885c36819ebfc/LICENSE-MIT	e562f3f974ced7e69dd1db77b820b36bcf8f30377f1aa105723fba449c53c4e6
 dragonbox	LICENSE-Boost	https://chromium.googlesource.com/external/github.com/jk-jeon/dragonbox/+/beeeef91cf6fef89a4d4ba5e95d47ca64ccb3a44/LICENSE-Boost	c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566
 chromium-build	LICENSE	https://chromium.googlesource.com/chromium/src/+/refs/tags/152.0.7977.89/LICENSE	368cca1106be99d39ecd32a38d8305585d802a475effb66380b91ffc9bcf709b
+musl	COPYRIGHT	https://git.musl-libc.org/cgit/musl/plain/COPYRIGHT?h=v1.2.5	f9bc4423732350eb0b3f7ed7e91d530298476f8fec0c6c427a1c04ade22655af

@@ -85,6 +85,24 @@ updates:
         patterns: ["*"]
     open-pull-requests-limit: 3
 
+  # The Alpine images the musl jobs run, pinned by digest: only new digests for
+  # the same tags, since each names a Ruby minor or the musl floor, and
+  # dependabot-auto-merge.yml leaves them for review because the release runs
+  # them.
+  - package-ecosystem: docker
+    directory: /release/alpine
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      alpine:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: ruby
+        update-types: [version-update:semver-major, version-update:semver-minor]
+    open-pull-requests-limit: 2
+
   - package-ecosystem: github-actions
     directories: [/, /.github/actions/setup]
     schedule:

@@ -5,12 +5,17 @@
 # shellcheck shell=sh
 
 mini_racer_rs_fetch_v8() {
-  local root version target base cache file sha actual
+  local root version libc target base cache file sha actual
   root=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
   version=$(awk '/^name = "v8"$/ { getline; gsub(/version = |"/, ""); print }' "$root/Cargo.lock")
+  # The glibc archive links on musl too, and the extension then fails to load.
+  case "$(ldd --version 2>&1)" in
+    *musl*) libc=musl ;;
+    *) libc=gnu ;;
+  esac
   case "$(uname -s)-$(uname -m)" in
-    Linux-x86_64) target=x86_64-unknown-linux-gnu ;;
-    Linux-aarch64) target=aarch64-unknown-linux-gnu ;;
+    Linux-x86_64) target=x86_64-unknown-linux-$libc ;;
+    Linux-aarch64) target=aarch64-unknown-linux-$libc ;;
     Darwin-arm64) target=aarch64-apple-darwin ;;
     Darwin-x86_64) target=x86_64-apple-darwin ;;
     *) echo "fetch-v8-archive: unsupported host $(uname -s)-$(uname -m)" >&2; return 1 ;;

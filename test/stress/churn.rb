@@ -22,7 +22,14 @@ slack_kb = 32 * 1024
 MiniRacer::Platform.set_flags!(:single_threaded) if mode == "single"
 Thread.abort_on_exception = true
 
-def rss_kb = Integer(`ps -o rss= -p #{Process.pid}`.strip)
+def rss_kb
+  if File.exist?("/proc/self/status")
+    File.read("/proc/self/status")[/VmRSS:\s+(\d+)/, 1].to_i
+  else
+    Integer(`ps -o rss= -p #{Process.pid}`.strip)
+  end
+end
+
 def now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
 def churn(threads, seconds)

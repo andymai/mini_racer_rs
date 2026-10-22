@@ -1,11 +1,13 @@
-# Gems ship for these four targets only; scoping the graph keeps Windows-only
+# Gems ship for these six targets only; scoping the graph keeps Windows-only
 # transitive crates and their licenses out of the checks.
 [graph]
 targets = [
   "aarch64-apple-darwin",
   "aarch64-unknown-linux-gnu",
+  "aarch64-unknown-linux-musl",
   "x86_64-apple-darwin",
   "x86_64-unknown-linux-gnu",
+  "x86_64-unknown-linux-musl",
 ]
 
 [advisories]

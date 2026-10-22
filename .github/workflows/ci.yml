@@ -536,6 +536,79 @@ jobs:
           cd "$RUNNER_TEMP"
           ruby -e 'require "mini_racer"; p MiniRacer::Context.new.eval("1+1")' | grep -qx 2
 
+  # musl, in Alpine's Ruby image: the setup action's Ruby, cache and tools are
+  # glibc builds. scripts/alpine.sh runs the same steps under a local podman.
+  alpine:
+    name: Alpine ${{ matrix.arch }} (Ruby 3.4)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: aarch64
+            os: ubuntu-24.04-arm
+          - arch: x86_64
+            os: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: true
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/mini_racer_rs/v8
+          key: v8-alpine-${{ runner.arch }}-${{ hashFiles('ext/mini_racer_rs/v8-archives.sha256') }}
+      # Saved from main only, like the other jobs' rust-cache.
+      - name: Restore the cargo registry and target directory
+        id: cargo
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/mini_racer_rs/alpine/registry/index
+            ~/.cache/mini_racer_rs/alpine/registry/cache
+            ~/.cache/mini_racer_rs/alpine/target
+          # No restore-keys: nothing prunes this directory, so a new key starts
+          # clean rather than carrying every earlier build along.
+          key: alpine-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'ext/mini_racer_rs/v8-archives.sha256') }}
+      # --init reaps the orphans the fork and daemon tests leave.
+      - name: Build and test in ruby:3.4-alpine
+        env:
+          SEED: ${{ github.run_number }}
+        run: |
+          cache="$HOME/.cache/mini_racer_rs"
+          mkdir -p "$cache/v8" "$cache/alpine/registry" "$cache/alpine/target"
+          docker run --rm --init \
+            -v "$GITHUB_WORKSPACE:/mini_racer_rs" -w /mini_racer_rs \
+            -v "$cache/v8:/cache/v8" -v "$cache/alpine/registry:/usr/local/cargo/registry" -v "$cache/alpine/target:/cache/target" \
+            -e MINI_RACER_RS_V8_CACHE=/cache/v8 -e CARGO_TARGET_DIR=/cache/target -e RB_SYS_CARGO_TARGET_DIR=/cache/target \
+            -e CARGO_INCREMENTAL=0 -e CARGO_TERM_COLOR -e RUSTFLAGS -e SEED \
+            "$(scripts/alpine-image.sh ruby-3.4)" scripts/alpine.sh test
+      # The madvise fixture's debug build is rebuilt each run rather than cached.
+      - name: Leave the madvise fixture's build out of the cache
+        if: github.ref == 'refs/heads/main' && steps.cargo.outputs.cache-hit != 'true'
+        run: rm -rf "$HOME/.cache/mini_racer_rs/alpine/target/no-madvise-wrap"
+      - name: Save the cargo registry and target directory
+        if: github.ref == 'refs/heads/main' && steps.cargo.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/mini_racer_rs/alpine/registry/index
+            ~/.cache/mini_racer_rs/alpine/registry/cache
+            ~/.cache/mini_racer_rs/alpine/target
+          key: ${{ steps.cargo.outputs.cache-primary-key }}
+      - name: Keep upstream run logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: upstream-alpine-${{ matrix.arch }}
+          path: tmp/upstream
+          retention-days: 7
+
   # TruffleRuby runs upstream's own TruffleRuby backend, vendored unchanged; this
   # proves the loader picks it and the harness guard holds on a second engine.
   truffleruby:
@@ -670,7 +743,7 @@ jobs:
   ci-pass:
     name: CI Pass
     if: ${{ !cancelled() }}
-    needs: [changes, fmt, taplo, rubocop, machete, deny, audit, notices, boundaries, repo-checks, msrv, rustdoc, clippy, rust-test, loom, fuzz-smoke, gem-verify, ruby, truffleruby, gc-stress, sign-bundle, osv]
+    needs: [changes, fmt, taplo, rubocop, machete, deny, audit, notices, boundaries, repo-checks, msrv, rustdoc, clippy, rust-test, loom, fuzz-smoke, gem-verify, ruby, alpine, truffleruby, gc-stress, sign-bundle, osv]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
