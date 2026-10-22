@@ -600,6 +600,43 @@ jobs:
           MINI_RACER_RS_AUTO_COMPACT: "1"
         run: bundle exec rake test
 
+  # The release's sign job installs this bundle only on a tag, so this catches
+  # an update that no longer installs, checksums missing from its lockfile, or
+  # a signer that waits instead of failing without an OIDC token, before a
+  # release ships gems without attestations.
+  sign-bundle:
+    name: Sign Bundle
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ruby/setup-ruby@651ff0d62c5c79bed6d53ec518387aae20e72c1a # v1.329.0
+        with:
+          ruby-version: "3.4"
+      - name: Every locked gem has a checksum
+        run: |
+          lock=release/sign/Gemfile.lock
+          specs=$(awk '/^GEM$/ {g = 1} g && /^    [^ ]/ {print $1, $2} /^$/ {g = 0}' "$lock" | sort)
+          sums=$(awk '/^CHECKSUMS$/ {c = 1; next} c && /^  [^ ]/ && / sha256=/ {print $1, $2} /^$/ {c = 0}' "$lock" | sort)
+          if [ -z "$specs" ] || [ "$specs" != "$sums" ]; then
+            echo "::error file=$lock::every locked gem needs a sha256 checksum"
+            diff <(echo "$specs") <(echo "$sums") || true
+            exit 1
+          fi
+      - name: Without an OIDC token, signing fails at once and warns
+        run: |
+          mkdir -p "$RUNNER_TEMP/pkg"
+          : >"$RUNNER_TEMP/pkg/probe.gem"
+          started=$SECONDS
+          scripts/sign-gems.sh "$RUNNER_TEMP/pkg" | tee "$RUNNER_TEMP/sign.log"
+          grep -q 'signing probe.gem failed' "$RUNNER_TEMP/sign.log"
+          test ! -e "$RUNNER_TEMP/pkg/probe.gem.sigstore.json"
+          test $((SECONDS - started)) -lt 300
+
   # Fails on findings the PR adds, or when either scan cannot finish: the
   # reusable workflow scans the base and the head and compares them, so an
   # advisory against a version already on main fails osv-scan.yml's runs
@@ -617,7 +654,6 @@ jobs:
         --lockfile=Gemfile.lock
         --lockfile=package-lock.json
         --lockfile=tools/reference/Gemfile.lock
-        --lockfile=release/sign/Gemfile.lock
         --lockfile=test/consumers/js/package-lock.json
         --lockfile=test/consumers/transitive/Gemfile.lock
       upload-sarif: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
@@ -633,7 +669,7 @@ jobs:
   ci-pass:
     name: CI Pass
     if: ${{ !cancelled() }}
-    needs: [changes, fmt, taplo, rubocop, machete, deny, audit, notices, boundaries, repo-checks, msrv, rustdoc, clippy, rust-test, loom, fuzz-smoke, gem-verify, ruby, truffleruby, gc-stress, osv]
+    needs: [changes, fmt, taplo, rubocop, machete, deny, audit, notices, boundaries, repo-checks, msrv, rustdoc, clippy, rust-test, loom, fuzz-smoke, gem-verify, ruby, truffleruby, gc-stress, sign-bundle, osv]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

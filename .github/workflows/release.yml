@@ -20,6 +20,8 @@ on:
       - mini_racer_rs.gemspec
       - rakelib/package.rake
       - release/**
+      # Its own CI job installs and checks it; a dry run never signs.
+      - "!release/sign/**"
       - scripts/check-exports.sh
       - scripts/check-gem-sizes.sh
       - scripts/check-glibc-floor.sh
@@ -371,10 +373,49 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  publish:
-    name: Publish to RubyGems.org
+  # A job of its own, without the rubygems environment the trusted publisher
+  # requires, so nothing the signer loads can exchange this job's OIDC token
+  # for a RubyGems.org key, and a slow Sigstore cannot time out the publish.
+  sign:
+    name: Sigstore attestations
     needs: [verify, checksums]
     if: github.ref_type == 'tag' && (github.event_name == 'release' || inputs.publish)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    continue-on-error: true
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ruby/setup-ruby@651ff0d62c5c79bed6d53ec518387aae20e72c1a # v1.329.0
+        with:
+          ruby-version: "3.4"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-${{ needs.verify.outputs.version }}
+          path: pkg
+      - name: Verify checksums
+        working-directory: pkg
+        run: sha256sum -c SHA256SUMS
+      - run: scripts/sign-gems.sh pkg
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sigstore-${{ needs.verify.outputs.version }}
+          path: pkg/*.sigstore.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  publish:
+    name: Publish to RubyGems.org
+    needs: [verify, checksums, sign]
+    # Whether or not signing worked: gems it could not sign go up without an
+    # attestation.
+    if: >-
+      !cancelled() && needs.checksums.result == 'success' &&
+      github.ref_type == 'tag' && (github.event_name == 'release' || inputs.publish)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     # Its required reviewer approves every publish; only v* tags may deploy.
@@ -396,10 +437,11 @@ jobs:
       - name: Verify checksums
         working-directory: pkg
         run: sha256sum -c SHA256SUMS
-      # Before the credentials step, so nothing the signer loads runs while a
-      # RubyGems.org key is in the job's environment.
-      - name: Sign the gems with Sigstore
-        run: scripts/sign-gems.sh pkg
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        continue-on-error: true
+        with:
+          name: sigstore-${{ needs.verify.outputs.version }}
+          path: pkg
       - uses: rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a # v2.1.0
       - run: scripts/publish-gems.sh pkg
       - name: Attach the gems to the GitHub release

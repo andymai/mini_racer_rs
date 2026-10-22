@@ -40,7 +40,8 @@ updates:
         update-types: [version-update:semver-major]
     open-pull-requests-limit: 5
 
-  # The bundle the publish job signs gems with.
+  # The release workflow signs gems with this bundle under an OIDC token, so
+  # dependabot-auto-merge.yml leaves its updates for review.
   - package-ecosystem: bundler
     directory: /release/sign
     schedule:
