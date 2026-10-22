@@ -60,15 +60,18 @@ Locally, write runs into a fresh directory with `--out <dir>/<name>.jsonl` (one 
 
 `compat/surface.json` lists every public id of mini_racer 0.22.1 (constants, classes with their superclass, instance and singleton methods, keyword arguments, required standard libraries), reflected from the real gem on CRuby and TruffleRuby; an id found on one engine only ends in `@ruby` or `@truffleruby`. Keywords that upstream's C parses by hand are found by calling with each one (`KEYWORD_PROBES` in `tools/compat/reflect.rb`). `compat.toml` gives each id a status for CRuby: `done`, `todo:<milestone>`, or `deviation` with a `reason` (an `approved` date is the owner's to add). A surface deviation means the id is absent on purpose; a behavior difference gets its own `behavior:<kebab>` id, optionally engine-scoped. On TruffleRuby mini_racer_rs runs upstream's backend, so its surface must match exactly.
 
+What this gem adds under `MiniRacerRs` is reflected apart, as the candidate report's `extra_ids`, and recorded in `compat.toml`'s `[extra]` table by the same id grammar with `status = "done"`, or `"internal"` for what callers never use (`MiniRacerRs::Pins`, `ForkHook`); `COMPATIBILITY.md` lists them under Additions. On TruffleRuby the native extension never loads, so `MiniRacerRs` holds only `VERSION`, and an id the extension defines ends in `@ruby`.
+
 | Task | Command |
 |---|---|
 | Check the ledger against this gem | `bundle exec rake compat:check` |
 | Also re-reflect the real gem | `bundle exec rake compat:verify` (needs the `tools/reference` bundle) |
 | Regenerate COMPATIBILITY.md and the README table | `bundle exec rake compat:render` |
 | Implemented a planned method | set its id to `done`, then `rake compat:render` |
+| Added a `MiniRacerRs` method, constant or class | add `[extra."smethod:MiniRacerRs.<name>@ruby"]` with `status = "done"`, then `rake compat:render` |
 | Rebuild the surface | `REFERENCE=1 bundle exec rake compat:reflect` on CRuby and on TruffleRuby, then `bundle exec rake compat:surface` |
 
-`compat:check` failures: `MISSING` (an id has no entry), `STALE` (an entry for an id that left the surface), `MALFORMED`, `UNKNOWN_MILESTONE`, `CLAIMED_DONE_BUT_ABSENT`, `TODO_BUT_IMPLEMENTED` (mark it done), `DEVIATION_BUT_PRESENT`, `EXTRA_SURFACE` (this gem exposes something mini_racer does not), `UNKNOWN_DEVIATION` (an upstream ledger cites a deviation compat.toml lacks), `SURFACE_DRIFT` (`compat:verify` only: the real gem and compat/surface.json disagree).
+`compat:check` failures: `MISSING` (an id has no entry), `STALE` (an entry for an id that left the surface), `MALFORMED`, `UNKNOWN_MILESTONE`, `CLAIMED_DONE_BUT_ABSENT`, `TODO_BUT_IMPLEMENTED` (mark it done), `DEVIATION_BUT_PRESENT`, `EXTRA_SURFACE` (this gem exposes something mini_racer does not), `UNKNOWN_DEVIATION` (an upstream ledger cites a deviation compat.toml lacks), `SURFACE_DRIFT` (`compat:verify` only: the real gem and compat/surface.json disagree), `MISSING_EXTRA` (a `MiniRacerRs` id with no `[extra]` entry), `STALE_EXTRA` (an `[extra]` entry this gem lacks on the engine checked).
 
 ## Differential run
 

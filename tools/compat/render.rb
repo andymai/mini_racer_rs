@@ -15,7 +15,7 @@ module CompatRender
     entries = ledger.fetch("ids", {})
     readme = File.read(File.join(ROOT, "README.md"))
     {
-      "COMPATIBILITY.md" => compatibility(entries, surface),
+      "COMPATIBILITY.md" => compatibility(entries, surface, ledger.fetch("extra", {})),
       "README.md" => readme_region(readme, entries, surface),
     }
   end
@@ -29,14 +29,23 @@ module CompatRender
     status.to_s.start_with?("todo:") ? "planned (#{status.delete_prefix("todo:")})" : status.to_s
   end
 
-  def rows(entries, surface)
-    surface.fetch("ids").group_by { |id| CompatSurface.split(id).first }.sort.map do |base, ids|
+  def table(ids)
+    engines = CompatSurface::ENGINES.map { |engine| ENGINE_NAMES.fetch(engine) }
+    rows = ids.group_by { |id| CompatSurface.split(id).first }.sort.map do |base, group|
       cells = CompatSurface::ENGINES.map do |engine|
-        id = ids.find { |candidate| CompatSurface.applies?(candidate, engine) }
-        id ? label(status_on(entries, id, engine)) : "n/a"
+        id = group.find { |candidate| CompatSurface.applies?(candidate, engine) }
+        id ? yield(id, engine) : "n/a"
       end
       "| `#{base}` | #{cells.join(" | ")} |"
     end
+    ["| Id | #{engines.join(" | ")} |", "|---|#{"---|" * engines.size}", *rows]
+  end
+
+  def additions(extra)
+    return [] if extra.empty?
+
+    ["## Additions", "", "What mini_racer_rs adds under `MiniRacerRs`. An internal id is not for callers.", "",
+     *table(extra.keys) { |id, _| extra.dig(id, "status") }, "",]
   end
 
   def counts(entries, surface)
@@ -61,13 +70,12 @@ module CompatRender
     end
   end
 
-  def compatibility(entries, surface)
-    engines = CompatSurface::ENGINES.map { |engine| ENGINE_NAMES.fetch(engine) }
+  def compatibility(entries, surface, extra = {})
     lines = [
       "# Compatibility with mini_racer #{surface.fetch("mini_racer")}", "", "<!-- #{GENERATED} -->", "",
       *summary(entries, surface), "",
-      "## Surface", "", "| Id | #{engines.join(" | ")} |", "|---|#{"---|" * engines.size}",
-      *rows(entries, surface), "",
+      "## Surface", "", *table(surface.fetch("ids")) { |id, engine| label(status_on(entries, id, engine)) }, "",
+      *additions(extra),
     ]
     devs = deviations(entries)
     lines.push("## Deviations", "", *devs) unless devs.empty?

@@ -82,6 +82,23 @@
 | `smethod:MiniRacer::Platform.set_flags!` | done | done |
 | `smethod:MiniRacer::Snapshot.load` | done | n/a |
 
+## Additions
+
+What mini_racer_rs adds under `MiniRacerRs`. An internal id is not for callers.
+
+| Id | CRuby | TruffleRuby |
+|---|---|---|
+| `class:MiniRacerRs::Pins < Object` | internal | n/a |
+| `class:MiniRacerRs::Spill < Object` | internal | n/a |
+| `const:MiniRacerRs::NATIVE_VERSION` | done | n/a |
+| `const:MiniRacerRs::V8_VERSION` | done | n/a |
+| `const:MiniRacerRs::VERSION` | done | done |
+| `imethod:MiniRacerRs::ForkHook#_fork` | internal | n/a |
+| `imethod:MiniRacerRs::ForkHook#daemon` | internal | n/a |
+| `module:MiniRacerRs` | done | done |
+| `module:MiniRacerRs::ForkHook` | internal | n/a |
+| `smethod:MiniRacerRs.register_source_map` | done | n/a |
+
 ## Deviations
 
 ### `behavior:bigint-objects@ruby`
