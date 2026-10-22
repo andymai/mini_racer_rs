@@ -355,6 +355,9 @@ status = "internal"
 [extra."class:MiniRacerRs::Spill < Object@ruby"]
 status = "internal"
 
+[extra."class:MiniRacerRs::TimeoutScope < Object@ruby"]
+status = "internal"
+
 [extra."const:MiniRacerRs::NATIVE_VERSION@ruby"]
 status = "done"
 
@@ -377,4 +380,7 @@ status = "done"
 status = "internal"
 
 [extra."smethod:MiniRacerRs.register_source_map@ruby"]
+status = "done"
+
+[extra."smethod:MiniRacerRs.timeout@ruby"]
 status = "done"
