@@ -62,10 +62,12 @@ impl Watchdog {
         let mut timers = lock(&self.timers);
         timers.seq = timers.seq.wrapping_add(1);
         let seq = timers.seq;
-        timers
-            .blocks
-            .entry(key)
-            .or_insert_with(|| Arc::downgrade(block));
+        // A live reference at this address can only be this context's; a dead
+        // one is a context gone without `forget`, whose place this one took.
+        let slot = timers.blocks.entry(key).or_default();
+        if slot.strong_count() == 0 {
+            *slot = Arc::downgrade(block);
+        }
         timers.heap.push(Reverse(Entry {
             at,
             seq,
@@ -222,7 +224,11 @@ fn run(watchdog: &Watchdog) {
                     if let Some(Reverse(entry)) = timers.heap.pop()
                         && let Some(block) = timers.blocks.get(&entry.block)
                     {
-                        due.push(Weak::clone(block));
+                        if block.strong_count() == 0 {
+                            timers.blocks.remove(&entry.block);
+                        } else {
+                            due.push(Weak::clone(block));
+                        }
                     }
                 }
                 // Lock order: the heap is released before any context's timer
