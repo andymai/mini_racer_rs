@@ -189,10 +189,10 @@ class LeftoverMicrotasksHeapLimitTest < Minitest::Test
       context = MiniRacer::Context.new
       puts outcome { context.eval("({ get x() { \#{HOG} } })") }
       puts outcome { context.eval("1 + 1") }
-      puts outcome { context.eval("({ get x() { return new Array(7e6).fill(1.5).length } })") }
+      puts outcome { context.eval("({ get x() { return new Array(7e6).fill(1.5).length } })")["x"] }
       puts outcome { context.eval("1 + 1") }
     RUBY
 
-    assert_equal [REACHED, "ok 2", 'ok {"x" => 7000000}', "ok 2"], lines
+    assert_equal [REACHED, "ok 2", "ok 7000000", "ok 2"], lines
   end
 end
