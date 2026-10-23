@@ -323,11 +323,6 @@ class PoolTurnsTest < Minitest::Test
   include PoolHelpers
   include RubyProcess
 
-  def now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-
-  # A thread that checks its context in and at once asks again would take it
-  # back before a woken waiter ran, so a freed context goes to the checkout
-  # that has waited longest, and a new one waits behind those waiting.
   # A thread that checks its context in and at once asks again would take it
   # back before a woken waiter ran, so a freed context goes to the checkout
   # that has waited longest, and a new one waits behind those waiting. The
@@ -360,6 +355,37 @@ class PoolTurnsTest < Minitest::Test
 
       assert_operator counts.min, :>=, counts.max / 2, "#{ending}: #{counts.inspect}"
     end
+  end
+
+  # A signal trap that checks out while its own thread waits in a checkout
+  # takes that wait's place in line; behind it, it would wait for a wait that
+  # cannot go on until the trap returns.
+  def test_a_trap_checks_out_while_its_thread_waits
+    skip "needs CRuby and SIGUSR1" unless RUBY_ENGINE == "ruby" && Signal.list.key?("USR1")
+    code = <<~RUBY
+      require "mini_racer"
+      pool = MiniRacerRs::Pool.new(size: 1)
+      trapped = nil
+      trap("USR1") { trapped = pool.with { _1.eval("'trap'") } }
+      held = Queue.new
+      release = Queue.new
+      Thread.new { pool.with { held << true; release.pop } }
+      held.pop
+      Thread.new do
+        sleep 0.2 until Thread.main.status == "sleep"
+        Process.kill("USR1", Process.pid)
+        sleep 0.2
+        release << true
+        sleep 5
+        warn "stuck: trapped \#{trapped.inspect}"
+        exit!(2)
+      end
+      puts pool.with { _1.eval("'main'") }, trapped
+    RUBY
+    stdout, stderr, status = run_ruby(code)
+
+    assert_predicate status, :success?, stderr
+    assert_equal "main\ntrap\n", stdout
   end
 
   def test_contexts_stay_put_through_compaction

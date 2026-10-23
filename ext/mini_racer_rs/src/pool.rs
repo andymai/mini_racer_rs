@@ -50,8 +50,16 @@ struct Slot {
     // The fiber that checked the context out, whose nested checkouts reuse
     // it, or the queue of the waiting checkout it is reserved for.
     holder: OwnedRoot<Value>,
+    // The fiber of the waiting checkout it is reserved for.
+    waiter: OwnedRoot<Value>,
     uses: Cell<u64>,
     spent: Cell<bool>,
+}
+
+#[derive(Default)]
+struct Waiter {
+    queue: OwnedRoot<Value>,
+    fiber: OwnedRoot<Value>,
 }
 
 /// `MiniRacerRs::Pool`: contexts built ahead, checked out one per fiber, and
@@ -72,7 +80,7 @@ pub struct Pool {
     // that it pops, which parks a fiber under a scheduler and the thread
     // otherwise. A freed context goes to the first of them, and a checkout
     // that finds any waiting waits behind them, so none is passed over.
-    waiting: RefCell<VecDeque<OwnedRoot<Value>>>,
+    waiting: RefCell<VecDeque<Waiter>>,
     epoch: Cell<u64>,
     shut_down: Cell<bool>,
 }
@@ -86,12 +94,14 @@ impl DataTypeFunctions for Pool {
         let Ok(waiting) = self.waiting.try_borrow() else {
             std::process::abort();
         };
-        for queue in waiting.iter() {
-            queue.mark(marker);
+        for waiter in waiting.iter() {
+            waiter.queue.mark(marker);
+            waiter.fiber.mark(marker);
         }
         for slot in self.slots.get().iter().flat_map(|slots| slots.iter()) {
             slot.value.mark(marker);
             slot.holder.mark(marker);
+            slot.waiter.mark(marker);
         }
     }
 }
@@ -271,6 +281,7 @@ impl Pool {
         for slot in self.slots.get().iter().flat_map(|slots| slots.iter()) {
             slot.value.take(ruby);
             slot.holder.take(ruby);
+            slot.waiter.take(ruby);
             slot.uses.set(0);
             slot.spent.set(false);
             slot.phase.set(phase);
@@ -278,25 +289,53 @@ impl Pool {
         self.waiting.borrow_mut().clear();
     }
 
-    fn first_waiting(&self, ruby: &Ruby) -> Option<Value> {
-        self.waiting
-            .borrow()
-            .front()
-            .and_then(|queue| queue.get(ruby))
+    // The first waiting checkout's queue and fiber.
+    fn first_waiting(&self, ruby: &Ruby) -> Option<(Value, Value)> {
+        let waiting = self.waiting.borrow();
+        let first = waiting.front()?;
+        Some((first.queue.get(ruby)?, first.fiber.get(ruby)?))
     }
 
-    fn enlist(&self, ruby: &Ruby, queue: Value) {
-        let root = OwnedRoot::default();
-        root.set(ruby, queue);
-        self.waiting.borrow_mut().push_back(root);
+    fn enlist(&self, ruby: &Ruby, queue: Value, fiber: Value) {
+        let waiter = Waiter::default();
+        waiter.queue.set(ruby, queue);
+        waiter.fiber.set(ruby, fiber);
+        self.waiting.borrow_mut().push_back(waiter);
     }
 
     fn delist(&self, ruby: &Ruby, queue: Value) -> bool {
         let mut waiting = self.waiting.borrow_mut();
-        let found = waiting
-            .iter()
-            .position(|listed| listed.get(ruby).is_some_and(|listed| same(listed, queue)));
+        let found = waiting.iter().position(|waiter| {
+            waiter
+                .queue
+                .get(ruby)
+                .is_some_and(|listed| same(listed, queue))
+        });
         found.and_then(|index| waiting.remove(index)).is_some()
+    }
+
+    // The queue of a wait `fiber` already has, in line or with a context
+    // reserved for it.
+    fn place_of(&self, ruby: &Ruby, fiber: Value) -> Option<Value> {
+        let listed = self.waiting.borrow().iter().find_map(|waiter| {
+            waiter
+                .fiber
+                .get(ruby)
+                .is_some_and(|listed| same(listed, fiber))
+                .then(|| waiter.queue.get(ruby))
+                .flatten()
+        });
+        listed.or_else(|| {
+            self.slots.get()?.iter().find_map(|slot| {
+                (slot.phase.get() == Phase::Reserved
+                    && slot
+                        .waiter
+                        .get(ruby)
+                        .is_some_and(|waiter| same(waiter, fiber)))
+                .then(|| slot.holder.get(ruby))
+                .flatten()
+            })
+        })
     }
 
     fn reserved_for(&self, ruby: &Ruby, queue: Value) -> Option<(usize, &Slot)> {
@@ -386,8 +425,17 @@ impl Pool {
                 return self.take(ruby, index, fiber);
             }
         }
-        let queue = thread_queue(ruby)?;
-        self.enlist(ruby, queue);
+        // A trap handler or a finalizer that checks out while its own fiber
+        // waits here takes that wait's place in line, and any context
+        // reserved for it: the wait cannot go on until the handler returns,
+        // and then finds its place gone and takes a new one.
+        let queue = if let Some(queue) = self.place_of(ruby, fiber) {
+            queue
+        } else {
+            let queue = thread_queue(ruby)?;
+            self.enlist(ruby, queue, fiber);
+            queue
+        };
         let waited = self.wait_in_turn(ruby, rb_self, fiber, queue);
         // A context handed to this checkout that it did not take goes to the
         // next in line, unless a break, throw or Thread#kill is under way,
@@ -411,7 +459,7 @@ impl Pool {
             self.reconcile(ruby);
             self.refuse_if_shut_down(ruby)?;
             if self.reserved_for(ruby, queue).is_none() && !self.is_listed(ruby, queue) {
-                self.enlist(ruby, queue);
+                self.enlist(ruby, queue, fiber);
             }
             self.start_pending(ruby, rb_self)?;
             self.hand_off(ruby)?;
@@ -420,7 +468,7 @@ impl Pool {
             }
             if self
                 .first_waiting(ruby)
-                .is_some_and(|first| same(first, queue))
+                .is_some_and(|(first, _)| same(first, queue))
                 && let Some(index) = self
                     .slots(ruby)?
                     .iter()
@@ -433,10 +481,12 @@ impl Pool {
     }
 
     fn is_listed(&self, ruby: &Ruby, queue: Value) -> bool {
-        self.waiting
-            .borrow()
-            .iter()
-            .any(|listed| listed.get(ruby).is_some_and(|listed| same(listed, queue)))
+        self.waiting.borrow().iter().any(|waiter| {
+            waiter
+                .queue
+                .get(ruby)
+                .is_some_and(|listed| same(listed, queue))
+        })
     }
 
     // Makes no Ruby call. Whether it gave back a context handed to it.
@@ -446,6 +496,7 @@ impl Pool {
             return false;
         };
         slot.holder.take(ruby);
+        slot.waiter.take(ruby);
         slot.phase.set(Phase::Idle);
         true
     }
@@ -457,10 +508,11 @@ impl Pool {
             return Ok(());
         }
         let slots = self.slots(ruby)?;
-        while let Some(first) = self.first_waiting(ruby) {
+        while let Some((first, fiber)) = self.first_waiting(ruby) {
             if let Some(slot) = slots.iter().find(|slot| slot.phase.get() == Phase::Idle) {
                 self.delist(ruby, first);
                 slot.holder.set(ruby, first);
+                slot.waiter.set(ruby, fiber);
                 slot.phase.set(Phase::Reserved);
             } else if !slots.iter().any(|slot| slot.phase.get() == Phase::Failed) {
                 return Ok(());
@@ -481,6 +533,7 @@ impl Pool {
             .ok_or_else(|| errors::internal(ruby, "the pool's context is missing"))?;
         slot.phase.set(Phase::InUse);
         slot.holder.set(ruby, fiber);
+        slot.waiter.take(ruby);
         slot.uses.set(slot.uses.get().saturating_add(1));
         slot.spent.set(false);
         Ok((index, context))
@@ -657,6 +710,7 @@ impl Pool {
                 match slot.phase.get() {
                     Phase::Idle | Phase::Reserved => {
                         slot.holder.take(ruby);
+                        slot.waiter.take(ruby);
                         slot.phase.set(Phase::Pending);
                     }
                     Phase::Failed => {
@@ -671,7 +725,7 @@ impl Pool {
             .waiting
             .borrow()
             .iter()
-            .filter_map(|queue| queue.get(ruby))
+            .filter_map(|waiter| waiter.queue.get(ruby))
             .collect();
         for queue in waiting {
             queue.funcall::<_, _, Value>("push", (true,))?;
