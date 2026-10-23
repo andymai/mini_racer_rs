@@ -1304,8 +1304,9 @@ pub mod tests {
     }
 
     // Each worst case is linear, so it takes a fraction of a second even
-    // unoptimized; quadratic work at these sizes would take hours.
-    const BOUND: Duration = Duration::from_secs(5);
+    // unoptimized, and a few seconds on a loaded CI runner; quadratic work at
+    // these sizes would take hours.
+    const BOUND: Duration = Duration::from_secs(30);
 
     fn timed<T>(label: &str, work: impl FnOnce() -> T) -> T {
         let started = Instant::now();

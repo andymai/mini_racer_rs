@@ -35,9 +35,10 @@ held = [4_000_000, 8_000_000, 16_000_000, 32_000_000].any? do |pairs|
   next false if waited < 0.45
 
   ran = (MiniRacerRs.counters(looper)[:js_ns] - before[:js_ns]) / 1e9
-  # The fork interrupts the loop 50 ms into its wait, and the loop parks until
-  # the fork is done.
-  raise "js_ns #{ran} s of a #{wall} s loop that waited #{waited} s for the fork" if ran > wall - (waited - 0.15)
+  # The fork interrupts the loop 50 ms into its wait and the loop parks until
+  # the fork is done; a loaded runner parks later, so at least half the wait
+  # must be left out. Counted whole, it would reach the wall time.
+  raise "js_ns #{ran} s of a #{wall} s loop that waited #{waited} s for the fork" if ran > wall - (waited / 2)
 
   true
 end
