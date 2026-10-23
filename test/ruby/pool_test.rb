@@ -357,37 +357,6 @@ class PoolTurnsTest < Minitest::Test
     end
   end
 
-  # A signal trap that checks out while its own thread waits in a checkout
-  # takes that wait's place in line; behind it, it would wait for a wait that
-  # cannot go on until the trap returns.
-  def test_a_trap_checks_out_while_its_thread_waits
-    skip "needs CRuby and SIGUSR1" unless RUBY_ENGINE == "ruby" && Signal.list.key?("USR1")
-    code = <<~RUBY
-      require "mini_racer"
-      pool = MiniRacerRs::Pool.new(size: 1)
-      trapped = nil
-      trap("USR1") { trapped = pool.with { _1.eval("'trap'") } }
-      held = Queue.new
-      release = Queue.new
-      Thread.new { pool.with { held << true; release.pop } }
-      held.pop
-      Thread.new do
-        sleep 0.2 until Thread.main.status == "sleep"
-        Process.kill("USR1", Process.pid)
-        sleep 0.2
-        release << true
-        sleep 5
-        warn "stuck: trapped \#{trapped.inspect}"
-        exit!(2)
-      end
-      puts pool.with { _1.eval("'main'") }, trapped
-    RUBY
-    stdout, stderr, status = run_ruby(code)
-
-    assert_predicate status, :success?, stderr
-    assert_equal "main\ntrap\n", stdout
-  end
-
   def test_contexts_stay_put_through_compaction
     skip "needs GC.compact" unless GC.respond_to?(:compact)
     built = []
@@ -429,6 +398,79 @@ class PoolTurnsTest < Minitest::Test
 
     assert_predicate status, :success?, stderr
     assert_equal "42\n", stdout
+  end
+end
+
+class PoolTrapTest < Minitest::Test
+  include PoolHelpers
+  include RubyProcess
+
+  # A signal trap that checks out while its own thread waits in a checkout
+  # takes that wait's place in line; behind it, it would wait for a wait that
+  # cannot go on until the trap returns.
+  def test_a_trap_checks_out_while_its_thread_waits
+    skip "needs CRuby and SIGUSR1" unless RUBY_ENGINE == "ruby" && Signal.list.key?("USR1")
+    code = <<~RUBY
+      require "mini_racer"
+      pool = MiniRacerRs::Pool.new(size: 1)
+      trapped = nil
+      trap("USR1") { trapped = pool.with { _1.eval("'trap'") } }
+      held = Queue.new
+      release = Queue.new
+      Thread.new { pool.with { held << true; release.pop } }
+      held.pop
+      Thread.new do
+        sleep 0.2 until Thread.main.status == "sleep"
+        Process.kill("USR1", Process.pid)
+        sleep 0.2
+        release << true
+        sleep 5
+        warn "stuck: trapped \#{trapped.inspect}"
+        exit!(2)
+      end
+      puts pool.with { _1.eval("'main'") }, trapped
+    RUBY
+    stdout, stderr, status = run_ruby(code)
+
+    assert_predicate status, :success?, stderr
+    assert_equal "main\ntrap\n", stdout
+  end
+
+  # The handler waits on a queue of its own and its thread is woken once the
+  # handler returns, since a timed pop misses a push made while a trap
+  # handler runs on its thread and would sleep out its rescan.
+  def test_a_wait_a_trap_displaced_goes_on_once_the_trap_returns
+    skip "needs CRuby and SIGUSR1" unless RUBY_ENGINE == "ruby" && Signal.list.key?("USR1")
+    code = <<~RUBY
+      def now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      require "mini_racer"
+      pool = MiniRacerRs::Pool.new(size: 1)
+      returned = nil
+      trap("USR1") do
+        pool.with { 1 }
+        returned = now
+      end
+      waits = Array.new(5) do
+        held = Queue.new
+        release = Queue.new
+        holder = Thread.new { pool.with { held << true; release.pop } }
+        held.pop
+        Thread.new do
+          sleep 0.01 until Thread.main.status == "sleep"
+          Process.kill("USR1", Process.pid)
+          sleep 0.05
+          release << true
+        end
+        got = pool.with { now }
+        holder.join
+        got - returned
+      end
+      puts waits.sort[2] * 1000
+    RUBY
+    stdout, stderr, status = run_ruby(code)
+
+    assert_predicate status, :success?, stderr
+    assert_operator Float(stdout), :<, 20, "median ms from the trap's return to the wait's checkout"
   end
 end
 

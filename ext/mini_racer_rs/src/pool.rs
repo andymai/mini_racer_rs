@@ -7,8 +7,8 @@ use magnus::scan_args::{get_kwargs, scan_args};
 use magnus::typed_data::Obj;
 use magnus::value::ReprValue;
 use magnus::{
-    Class, DataTypeFunctions, Error, Exception, ExceptionClass, Integer, KwArgs, Module, RClass,
-    RHash, RModule, Ruby, TypedData, Value, kwargs,
+    Class, DataTypeFunctions, Error, Exception, ExceptionClass, Integer, KwArgs, Module, RArray,
+    RClass, RHash, RModule, Ruby, TypedData, Value, kwargs,
 };
 use mini_racer_engine::process::fork;
 
@@ -81,6 +81,8 @@ pub struct Pool {
     // otherwise. A freed context goes to the first of them, and a checkout
     // that finds any waiting waits behind them, so none is passed over.
     waiting: RefCell<VecDeque<Waiter>>,
+    // Queues of waits a trap handler's checkout displaced, owed a wakeup.
+    owed: RefCell<Vec<OwnedRoot<Value>>>,
     epoch: Cell<u64>,
     shut_down: Cell<bool>,
 }
@@ -97,6 +99,12 @@ impl DataTypeFunctions for Pool {
         for waiter in waiting.iter() {
             waiter.queue.mark(marker);
             waiter.fiber.mark(marker);
+        }
+        let Ok(owed) = self.owed.try_borrow() else {
+            std::process::abort();
+        };
+        for queue in owed.iter() {
+            queue.mark(marker);
         }
         for slot in self.slots.get().iter().flat_map(|slots| slots.iter()) {
             slot.value.mark(marker);
@@ -287,6 +295,7 @@ impl Pool {
             slot.phase.set(phase);
         }
         self.waiting.borrow_mut().clear();
+        self.owed.borrow_mut().clear();
     }
 
     // The first waiting checkout's queue and fiber.
@@ -312,6 +321,19 @@ impl Pool {
                 .is_some_and(|listed| same(listed, queue))
         });
         found.and_then(|index| waiting.remove(index)).is_some()
+    }
+
+    fn replace_waiting(&self, ruby: &Ruby, outer: Value, queue: Value) {
+        let waiting = self.waiting.borrow();
+        let listed = waiting.iter().find(|waiter| {
+            waiter
+                .queue
+                .get(ruby)
+                .is_some_and(|listed| same(listed, outer))
+        });
+        if let Some(waiter) = listed {
+            waiter.queue.set(ruby, queue);
+        }
     }
 
     // The queue of a wait `fiber` already has, in line or with a context
@@ -372,14 +394,15 @@ impl Pool {
         if let Some(slot) = held {
             return Self::nested(ruby, slot);
         }
-        let (index, context) = rb_self.checkout(ruby, rb_self, fiber)?;
+        let (index, context, displaced) = rb_self.checkout(ruby, rb_self, fiber)?;
         let epoch = fork::epoch();
         let result = rb_raw::yield_ensuring(ruby, context, &mut |ruby, raised| {
             rb_self.checkin(ruby, index, epoch, raised);
         });
+        rb_self.owe(ruby, displaced);
         // What the checkin left to do takes Ruby calls, which would overwrite
-        // a break, throw or Thread#kill under way; the next checkout or a
-        // waiting one's rescan does it then.
+        // a break, throw or Thread#kill under way; the next settle, on any
+        // thread, or a waiting checkout's rescan does it then.
         match &result {
             Err(error) if jumped(error) => result,
             _ => rb_self.settle(ruby, rb_self).and(result),
@@ -403,12 +426,14 @@ impl Pool {
 
     // Once a slot is marked in use, nothing calls a Ruby method before the
     // block's ensure is in place, so no interrupt can strand the slot.
+    // Also the queue of a wait this checkout displaced, which its caller
+    // wakes once the checkout is over.
     fn checkout(
         &self,
         ruby: &Ruby,
         rb_self: Obj<Self>,
         fiber: Value,
-    ) -> Result<(usize, Value), Error> {
+    ) -> Result<(usize, Value, Option<Value>), Error> {
         self.start_pending(ruby, rb_self)?;
         if self.waiting.borrow().is_empty() {
             let slots = self.slots(ruby)?;
@@ -422,30 +447,73 @@ impl Pool {
                 .iter()
                 .position(|slot| slot.phase.get() == Phase::Idle)
             {
-                return self.take(ruby, index, fiber);
+                let (index, context) = self.take(ruby, index, fiber)?;
+                return Ok((index, context, None));
             }
         }
         // A trap handler or a finalizer that checks out while its own fiber
         // waits here takes that wait's place in line, and any context
         // reserved for it: the wait cannot go on until the handler returns,
-        // and then finds its place gone and takes a new one.
-        let queue = if let Some(queue) = self.place_of(ruby, fiber) {
-            queue
-        } else {
-            let queue = thread_queue(ruby)?;
-            self.enlist(ruby, queue, fiber);
-            queue
-        };
+        // and then finds its place gone and takes a new one. The handler
+        // waits on a queue of its own, so the wait's stays as it slept on it.
+        let displaced = self.place_of(ruby, fiber);
+        if let Some((index, _)) = displaced.and_then(|outer| self.reserved_for(ruby, outer)) {
+            let (index, context) = self.take(ruby, index, fiber)?;
+            return Ok((index, context, displaced));
+        }
+        let queue = thread_queue(ruby)?;
+        match displaced {
+            Some(outer) => self.replace_waiting(ruby, outer, queue),
+            None => self.enlist(ruby, queue, fiber),
+        }
         let waited = self.wait_in_turn(ruby, rb_self, fiber, queue);
         // A context handed to this checkout that it did not take goes to the
         // next in line, unless a break, throw or Thread#kill is under way,
         // when the others' rescans find it.
         let handed_back = self.leave(ruby, queue);
+        if waited.is_err() {
+            self.owe(ruby, displaced);
+        }
         match waited {
             Err(error) if jumped(&error) => Err(error),
-            Err(error) if handed_back => Err(self.hand_off(ruby).err().unwrap_or(error)),
-            waited => waited,
+            Err(error) if handed_back || displaced.is_some() => {
+                Err(self.settle(ruby, rb_self).err().unwrap_or(error))
+            }
+            waited => waited.map(|(index, context)| (index, context, displaced)),
         }
+    }
+
+    fn owe(&self, ruby: &Ruby, displaced: Option<Value>) {
+        if let Some(queue) = displaced {
+            let root = OwnedRoot::default();
+            root.set(ruby, queue);
+            self.owed.borrow_mut().push(root);
+        }
+    }
+
+    // A displaced wait sleeps in a timed pop, which misses a push made while
+    // a trap handler runs on its thread, since the handler's return puts the
+    // thread back to sleep; so a thread of the pool's own pushes, once the
+    // GVL is free.
+    fn wake_owed(&self, ruby: &Ruby) -> Result<(), Error> {
+        let owed: Vec<Value> = self
+            .owed
+            .borrow_mut()
+            .drain(..)
+            .filter_map(|queue| queue.get(ruby))
+            .collect();
+        if owed.is_empty() {
+            return Ok(());
+        }
+        let queues = ruby.ary_new_capa(owed.len());
+        for queue in owed {
+            queues.push(queue)?;
+        }
+        gc_root::spawn(ruby, queues, |_ruby, queues: RArray| {
+            while let Ok(Some(queue)) = queues.shift::<Option<Value>>() {
+                let _ = queue.funcall::<_, _, Value>("push", (true,));
+            }
+        })
     }
 
     fn wait_in_turn(
@@ -595,7 +663,8 @@ impl Pool {
     fn settle(&self, ruby: &Ruby, rb_self: Obj<Self>) -> Result<(), Error> {
         self.reconcile(ruby);
         self.start_pending(ruby, rb_self)?;
-        self.hand_off(ruby)
+        self.hand_off(ruby)?;
+        self.wake_owed(ruby)
     }
 
     fn start_pending(&self, ruby: &Ruby, rb_self: Obj<Self>) -> Result<(), Error> {
