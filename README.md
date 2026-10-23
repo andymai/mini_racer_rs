@@ -283,7 +283,7 @@ mini_racer_rs uses the `v8` crate, rusty_v8 152.2.0, with magnus and rb-sys Ruby
 
 A waiting Ruby thread spins with the GVL held, then without it. It then parks with the GVL released. After enough consecutive answers arrive beyond the spin budget, that context skips spinning and parks at once until an answer arrives within the budget. Under a fiber scheduler, only the waiting fiber parks. Values use V8's serialization format and decode directly into Ruby objects. There is no intermediate tree. Repeated objects keep their identity.
 
-One watchdog thread per process enforces every context's `timeout:`. In both platform modes, a fork through Ruby waits for every runner to be idle or parked. Under `:single_threaded`, the child takes over contexts whose runners were idle at the fork, while contexts in use raise there. Default multi-threaded children refuse every inherited context. mini_racer_rs gives V8 a copied platform vtable in each process. Worker-thread slots post to its own pool. V8's platform has one worker thread, which receives no tasks. Forking pauses the pool. The parent resumes it afterward.
+One watchdog thread per process enforces every context's `timeout:`. Fork behavior is covered in [Forking servers such as Puma](#forking-servers-such-as-puma), and the protocol, including the worker pool that runs V8's tasks, is documented in [ARCHITECTURE.md](ARCHITECTURE.md#forks).
 
 The implementation has five crates:
 
@@ -301,7 +301,7 @@ The release pipeline runs the full suites for every released extension.
 
 mini_racer_rs does not:
 
-- Run on Windows. It supports glibc and musl Linux, including Alpine, on x86_64 and aarch64, and macOS on arm64 and x86_64.
+- Run on Windows. Supported platforms are listed in [STABILITY.md](STABILITY.md#platforms-rubies-and-v8).
 
 - Provide Node.js APIs. JavaScript runs in plain V8 without file system, network, or process access. It can reach only Ruby callables you `attach`.
 
@@ -311,7 +311,7 @@ mini_racer_rs does not:
 
 - Extend the `MiniRacer` API beyond mini_racer 0.22.1. [COMPATIBILITY.md](COMPATIBILITY.md) records deliberate differences.
 
-Supported implementations are CRuby 3.3, 3.4, and 4.0, plus TruffleRuby through mini_racer's unchanged TruffleRuby backend.
+Supported Rubies include TruffleRuby through mini_racer's unchanged TruffleRuby backend, as listed in [STABILITY.md](STABILITY.md#platforms-rubies-and-v8).
 
 ## Documentation
 
