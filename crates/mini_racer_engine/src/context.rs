@@ -23,6 +23,25 @@ use crate::{EngineError, InvalidSnapshot, SnapshotBlob, runner};
 const MIN_RUNNER_STACK_BYTES: usize = 2 << 20;
 const STACK_HEADROOM_BYTES: usize = 1 << 20;
 
+/// How a script dispatch runs.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ScriptOptions {
+    /// Awaits a promise result, as `eval_await` and `call_await` do.
+    pub awaited: bool,
+    /// A timeout for this script alone. It only tightens the context's: the
+    /// script, and the microtasks it leaves, run under the shorter of the two.
+    pub timeout: Option<Duration>,
+}
+
+impl ScriptOptions {
+    const fn awaited(awaited: bool) -> Self {
+        Self {
+            awaited,
+            timeout: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WaitOutcome {
     Ready,
@@ -258,7 +277,7 @@ impl ContextHandle {
         source: impl Into<JsText>,
         host: &mut impl Host,
     ) -> Result<Vec<u8>, EngineError> {
-        self.evaluate((filename.into(), source.into()), false, host)
+        self.evaluate(filename, source, ScriptOptions::awaited(false), host)
     }
 
     /// `eval`, then awaits a promise result: runs microtasks and due tasks
@@ -269,29 +288,33 @@ impl ContextHandle {
         source: impl Into<JsText>,
         host: &mut impl Host,
     ) -> Result<Vec<u8>, EngineError> {
-        self.evaluate((filename.into(), source.into()), true, host)
+        self.evaluate(filename, source, ScriptOptions::awaited(true), host)
     }
 
-    fn evaluate(
+    /// `eval` or `eval_await`, as `options` says.
+    pub fn evaluate(
         &self,
-        (filename, source): (JsText, JsText),
-        awaited: bool,
+        filename: impl Into<JsText>,
+        source: impl Into<JsText>,
+        options: ScriptOptions,
         host: &mut impl Host,
     ) -> Result<Vec<u8>, EngineError> {
+        let (filename, source) = (filename.into(), source.into());
         self.dispatch(
             DispatchKind::Script,
             |depth| Request::Eval {
                 filename,
                 source,
                 depth,
-                awaited,
+                awaited: options.awaited,
+                timeout: options.timeout,
             },
             host,
         )
     }
 
     pub fn call(&self, request: CallRequest, host: &mut impl Host) -> Result<Vec<u8>, EngineError> {
-        self.invoke(request, false, host)
+        self.invoke(request, ScriptOptions::awaited(false), host)
     }
 
     /// `call`, then awaits a promise result, as `eval_await` does.
@@ -300,13 +323,14 @@ impl ContextHandle {
         request: CallRequest,
         host: &mut impl Host,
     ) -> Result<Vec<u8>, EngineError> {
-        self.invoke(request, true, host)
+        self.invoke(request, ScriptOptions::awaited(true), host)
     }
 
-    fn invoke(
+    /// `call` or `call_await`, as `options` says.
+    pub fn invoke(
         &self,
         request: CallRequest,
-        awaited: bool,
+        options: ScriptOptions,
         host: &mut impl Host,
     ) -> Result<Vec<u8>, EngineError> {
         self.dispatch(
@@ -314,7 +338,8 @@ impl ContextHandle {
             |depth| Request::Call {
                 request,
                 depth,
-                awaited,
+                awaited: options.awaited,
+                timeout: options.timeout,
             },
             host,
         )
@@ -632,7 +657,10 @@ impl ContextHandle {
         result
     }
 
-    // A script nested in an untimed dispatch gets a timeout of its own.
+    // A nested script gets a timeout of its own, the context's tightened by
+    // the script's, unless a script around it ends first: in an untimed
+    // dispatch always, as with `timeout:`, and otherwise when its own is the
+    // shortest.
     fn nested(
         &self,
         block: &Arc<ControlBlock>,
@@ -643,14 +671,14 @@ impl ContextHandle {
         if block.term.is_disposing() {
             return Err(EngineError::Disposed);
         }
-        let timer = match (kind, block.config.timeout) {
-            (DispatchKind::Script, Some(timeout)) => {
+        let timer = match (kind, block.config.timeout_within(request.timeout())) {
+            (DispatchKind::Script, Some(timeout)) if !watchdog::ends_within(block, timeout) => {
                 block.term.time_nested().map(|id| (timeout, id))
             }
             _ => None,
         };
         if let Some((timeout, id)) = timer
-            && let Err(error) = watchdog::schedule(timeout, block, id)
+            && let Err(error) = watchdog::schedule_nested(timeout, block, id)
         {
             block.term.untime_nested(id);
             return Err(error);
@@ -671,7 +699,7 @@ impl ContextHandle {
         if let Some((_, id)) = timer
             && !wait.forked()
         {
-            watchdog::clear(block, id);
+            watchdog::clear_nested(block, id);
             block.term.untime_nested(id);
         }
         result

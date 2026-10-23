@@ -652,6 +652,108 @@ fn a_nested_timeout_racing_its_end_leaves_the_outer_dispatch_running() {
     });
 }
 
+// Model 20: a script's own timeout firing as a script nested in it ends on
+// its own timeout keeps the script around it terminated.
+#[test]
+fn an_outer_timeout_racing_a_nested_ones_end_keeps_the_outer_terminated() {
+    loom::model(|| {
+        let (cell, isolate) = term_cell(None);
+        let outer = cell.begin(DispatchKind::Script).expect("nothing armed");
+        let nested = cell.time_nested().expect("a dispatch is armed");
+        cell.request(Interrupt::Timeout(nested));
+        let watchdog_cell = Arc::clone(&cell);
+        let watchdog = thread::spawn(move || watchdog_cell.request(Interrupt::Timeout(outer)));
+
+        cell.untime_nested(nested);
+        watchdog.join().expect("watchdog thread");
+
+        assert!(isolate.terminating());
+        assert_eq!(
+            cell.end(outer),
+            Some(Halt::Terminated(TerminationCause::Timeout))
+        );
+        assert!(!isolate.terminating());
+    });
+}
+
+// Model 21: an enclosing nested script's timeout firing as the script nested
+// in it ends on its own timeout keeps the enclosing one terminated.
+#[test]
+fn an_enclosing_nested_timeout_racing_the_inner_end_keeps_its_termination() {
+    loom::model(|| {
+        let (cell, isolate) = term_cell(None);
+        let pump = cell.begin(DispatchKind::Pump).expect("nothing armed");
+        let enclosing = cell.time_nested().expect("a dispatch is armed");
+        let inner = cell.time_nested().expect("a dispatch is armed");
+        cell.request(Interrupt::Timeout(inner));
+        let watchdog_cell = Arc::clone(&cell);
+        let watchdog = thread::spawn(move || watchdog_cell.request(Interrupt::Timeout(enclosing)));
+
+        cell.untime_nested(inner);
+        watchdog.join().expect("watchdog thread");
+
+        assert!(isolate.terminating());
+        assert_eq!(
+            cell.check(DispatchKind::Script),
+            Some(Halt::Terminated(TerminationCause::Timeout))
+        );
+        cell.untime_nested(enclosing);
+        assert!(!isolate.terminating());
+        assert_eq!(cell.end(pump), None);
+    });
+}
+
+// Model 22: an inner nested script's timeout firing as it ends, with an
+// enclosing nested timer still live, leaves that enclosing timer armed and
+// nothing terminated.
+#[test]
+fn an_inner_nested_timeout_racing_its_end_leaves_the_enclosing_timer() {
+    loom::model(|| {
+        let (cell, isolate) = term_cell(None);
+        let pump = cell.begin(DispatchKind::Pump).expect("nothing armed");
+        let enclosing = cell.time_nested().expect("a dispatch is armed");
+        let inner = cell.time_nested().expect("a dispatch is armed");
+        let watchdog_cell = Arc::clone(&cell);
+        let watchdog = thread::spawn(move || watchdog_cell.request(Interrupt::Timeout(inner)));
+
+        cell.untime_nested(inner);
+        watchdog.join().expect("watchdog thread");
+
+        assert!(!isolate.terminating());
+        assert_eq!(cell.check(DispatchKind::Script), None);
+        assert!(cell.request(Interrupt::Timeout(enclosing)));
+        assert!(isolate.terminating());
+        cell.untime_nested(enclosing);
+        assert_eq!(cell.end(pump), None);
+    });
+}
+
+// Model 23: the outermost script's timeout firing as two nested scripts end
+// on their own timeouts keeps the outermost one terminated.
+#[test]
+fn an_outer_timeout_racing_two_nested_ends_keeps_the_outer_terminated() {
+    loom::model(|| {
+        let (cell, isolate) = term_cell(None);
+        let outer = cell.begin(DispatchKind::Script).expect("nothing armed");
+        let enclosing = cell.time_nested().expect("a dispatch is armed");
+        let inner = cell.time_nested().expect("a dispatch is armed");
+        cell.request(Interrupt::Timeout(inner));
+        let watchdog_cell = Arc::clone(&cell);
+        let watchdog = thread::spawn(move || watchdog_cell.request(Interrupt::Timeout(outer)));
+
+        cell.untime_nested(inner);
+        cell.untime_nested(enclosing);
+        watchdog.join().expect("watchdog thread");
+
+        assert!(isolate.terminating());
+        assert_eq!(
+            cell.end(outer),
+            Some(Halt::Terminated(TerminationCause::Timeout))
+        );
+        assert!(!isolate.terminating());
+    });
+}
+
 // Model 15: a timeout landing while a settled dispatch serializes its result
 // neither replaces that result nor terminates the next dispatch.
 #[test]

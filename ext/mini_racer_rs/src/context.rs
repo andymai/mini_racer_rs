@@ -12,13 +12,13 @@ use magnus::{
     TypedData, Value,
 };
 use mini_racer_engine::process::platform;
-use mini_racer_engine::{ContextConfig, ContextHandle, Counts, EngineError, JsText};
+use mini_racer_engine::{ContextConfig, ContextHandle, Counts, EngineError, JsText, ScriptOptions};
 
 use crate::encode;
 use crate::gc_root::OwnedRoot;
 use crate::host::{Callbacks, RubyHost, Waiter};
 use crate::options::{self, OptionError, OptionValue};
-use crate::{decode, errors, export, rb_raw, snapshot};
+use crate::{decode, errors, export, rb_raw, snapshot, timeout};
 
 // What Ruby's GC is told a live context holds outside its heap: roughly an
 // isolate and its runner thread.
@@ -145,7 +145,7 @@ fn resolve_date_time(ruby: &Ruby) -> Result<(), Error> {
     Ok(())
 }
 
-fn option_value(ruby: &Ruby, value: Value) -> OptionValue {
+pub fn option_value(ruby: &Ruby, value: Value) -> OptionValue {
     let other = || {
         if value.is_nil() {
             OptionValue::Nil
@@ -185,20 +185,24 @@ fn config(ruby: &Ruby, keywords: RHash) -> Result<ContextConfig, Error> {
         pairs.push((key, value));
         Ok(ForEach::Continue)
     })?;
-    let config = options::configure(pairs.into_iter()).map_err(|error| match error {
-        OptionError::Type(_) | OptionError::SnapshotType(_) => {
-            errors::raised(ruby, ruby.exception_type_error(), error.to_string())
-        }
-        OptionError::Range(_) => {
-            errors::raised(ruby, ruby.exception_arg_error(), error.to_string())
-        }
-        OptionError::Keyword(_) => errors::runtime(ruby, error.to_string()),
-        OptionError::InvalidSnapshot(invalid) => errors::engine(ruby, invalid.into()),
-    })?;
+    let config =
+        options::configure(pairs.into_iter()).map_err(|error| option_error(ruby, &error))?;
     Ok(ContextConfig {
         heap_limit: platform::heap_limit(),
         ..config
     })
+}
+
+pub fn option_error(ruby: &Ruby, error: &OptionError) -> Error {
+    let message = error.to_string();
+    match *error {
+        OptionError::Type(_) | OptionError::SnapshotType(_) => {
+            errors::raised(ruby, ruby.exception_type_error(), message)
+        }
+        OptionError::Range(_) => errors::raised(ruby, ruby.exception_arg_error(), message),
+        OptionError::Keyword(_) => errors::runtime(ruby, message),
+        OptionError::InvalidSnapshot(invalid) => errors::engine(ruby, invalid.into()),
+    }
 }
 
 impl Context {
@@ -287,12 +291,12 @@ impl Context {
             _ => JsText::from("<eval>"),
         };
         let source = js_text(ruby, source)?;
+        let options = ScriptOptions {
+            awaited,
+            timeout: timeout::current(ruby)?,
+        };
         let bytes = rb_self.dispatch(ruby, |host| {
-            if awaited {
-                handle.eval_await(filename, source, host)
-            } else {
-                handle.eval(filename, source, host)
-            }
+            handle.evaluate(filename, source, options, host)
         })?;
         decode::value(ruby, &bytes)
     }
@@ -316,13 +320,11 @@ impl Context {
         let request = encode::call(ruby, name, args, |message| {
             errors::runtime(ruby, [b"Context.call: ".as_slice(), &message].concat())
         })?;
-        let bytes = rb_self.dispatch(ruby, |host| {
-            if awaited {
-                handle.call_await(request, host)
-            } else {
-                handle.call(request, host)
-            }
-        })?;
+        let options = ScriptOptions {
+            awaited,
+            timeout: timeout::current(ruby)?,
+        };
+        let bytes = rb_self.dispatch(ruby, |host| handle.invoke(request, options, host))?;
         decode::value(ruby, &bytes)
     }
 

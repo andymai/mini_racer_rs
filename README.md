@@ -103,6 +103,7 @@ ExecJS.eval("[1, 2].map(x => x * 2)")         # => [2, 4]
 | `Platform.set_flags!(*flags)` | Sets V8 flags before the first context. |
 | `MiniRacerRs.register_source_map(bundle, map)` | Registers a source map for a bundle, so `MiniRacer::RuntimeError` backtraces show its original files and positions. CRuby only. |
 | `MiniRacerRs.counters(context)` | Returns per-context activity counters without dispatching or taking the context lock, including while a script runs and after disposal. CRuby only. |
+| `MiniRacerRs.timeout(milliseconds) { }` | Gives each JavaScript call started in the block a time budget, including calls made by ExecJS and react-rails. CRuby only. |
 
 `Context.new` accepts these options:
 
@@ -122,6 +123,15 @@ V8 positions remain for async frames and frames after the tenth. They also remai
 Detailed stack capture makes creating and throwing errors more expensive in affected contexts. Measured React and MUI server renders were unchanged. Registration is process wide and holds at most eight bundles. Maps cannot be removed. Registering a bundle again replaces its map. Trust bundles and maps like application code because source names appear in Ruby backtraces.
 
 **Counters.** `MiniRacerRs.counters(context)` returns a Hash of symbol-keyed counts for activity since context creation. It reads without a dispatch or the context lock, so another thread can inspect it while a script runs. After `dispose`, it returns the last counts. A forked child that takes a context over continues from the parent's counts. Values are read individually, so an in-flight request can appear in `dispatches` before its result bytes. Keys are `dispatches` (runner requests, including nested callback requests), `callbacks` (Ruby callables run for JavaScript), `bytes_to_js` (sources, requests, callback returns and errors), `bytes_from_js` (results and callback arguments), `js_ns` (runner time excluding callback, await task and fork waits), `gc_count` and `gc_ns` (V8 collections and time), and `terminated` (counts by `stop`, `timeout`, `interrupt`, `max_memory` and `heap_exhausted`). A non-context argument raises `TypeError`. CRuby only. In release builds, timing `js_ns` added about 30 ns to a roughly 0.72 µs call round trip. Counting alone measured within noise.
+
+**Timeouts per call.** `MiniRacerRs.timeout` gives each `eval`, `eval_await`, `call`, and `call_await` started in the block on the current fiber its own time budget. This bounds calls made through ExecJS and react-rails, whose contexts are created without options.
+
+```ruby
+MiniRacerRs.timeout(200) { React::ServerRendering.render("Page", props, {}) }
+MiniRacerRs.timeout(5_000) { context.eval(bundle) }
+```
+
+The method returns the block's value. Fibers, threads, enumerators, and Async tasks started inside the block inherit its timeout while the block remains open. The effective budget is the smallest of every open scope and the context's own `timeout:`. A scope never loosens that context limit. A tighter scope inside an attached callback can terminate its nested script at any depth while the outer script continues. An overrun raises `MiniRacer::ScriptTerminatedError`, and leftover microtasks receive the same bound. The context remains usable. `milliseconds` is validated like `timeout:`. Passing `0` adds no bound, and omitting the block raises `LocalJumpError`. CRuby only.
 
 ## Switching from mini_racer
 

@@ -91,6 +91,7 @@ What mini_racer_rs adds under `MiniRacerRs`. An internal id is not for callers.
 | `class:MiniRacerRs::HeapLimitError < MiniRacer::V8OutOfMemoryError` | done | n/a |
 | `class:MiniRacerRs::Pins < Object` | internal | n/a |
 | `class:MiniRacerRs::Spill < Object` | internal | n/a |
+| `class:MiniRacerRs::TimeoutScope < Object` | internal | n/a |
 | `const:MiniRacerRs::NATIVE_VERSION` | done | n/a |
 | `const:MiniRacerRs::V8_VERSION` | done | n/a |
 | `const:MiniRacerRs::VERSION` | done | done |
@@ -102,6 +103,7 @@ What mini_racer_rs adds under `MiniRacerRs`. An internal id is not for callers.
 | `smethod:MiniRacerRs.heap_limit` | done | n/a |
 | `smethod:MiniRacerRs.heap_limit=` | done | n/a |
 | `smethod:MiniRacerRs.register_source_map` | done | n/a |
+| `smethod:MiniRacerRs.timeout` | done | n/a |
 
 ## Deviations
 

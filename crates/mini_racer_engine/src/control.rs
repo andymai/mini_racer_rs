@@ -92,16 +92,19 @@ pub enum Request {
         depth: Depth,
     },
     /// `awaited`: a promise result is awaited, as `eval_await` does.
+    /// `timeout`: the dispatch's own, which only tightens the context's.
     Eval {
         filename: JsText,
         source: JsText,
         depth: Depth,
         awaited: bool,
+        timeout: Option<Duration>,
     },
     Call {
         request: CallRequest,
         depth: Depth,
         awaited: bool,
+        timeout: Option<Duration>,
     },
     Attach {
         request: Vec<u8>,
@@ -136,6 +139,14 @@ pub enum Request {
 }
 
 impl Request {
+    /// The timeout a script request was given for itself.
+    pub const fn timeout(&self) -> Option<Duration> {
+        match self {
+            Self::Eval { timeout, .. } | Self::Call { timeout, .. } => *timeout,
+            _ => None,
+        }
+    }
+
     /// The bytes a counted dispatch hands JavaScript; `None` for the
     /// context's own setup and dispose, which no caller asked for.
     pub const fn payload(&self) -> Option<usize> {
@@ -261,9 +272,12 @@ impl HeapWatch {
 
 /// The context's pending timeout and the earliest deadline the watchdog holds
 /// for it, so the watchdog keeps about one entry per context, not per dispatch.
+/// Nested scripts timed on their own have slots apart, innermost last, so
+/// the deadlines around each outlive it.
 #[derive(Default)]
 pub struct Timer {
     pub due: Option<(Instant, DispatchId)>,
+    pub nested: Vec<(Instant, DispatchId)>,
     pub queued: Option<Instant>,
 }
 
@@ -305,6 +319,18 @@ impl Drop for ControlBlock {
             std::mem::forget(isolate);
             #[expect(clippy::mem_forget, reason = "the leaked isolate may still read it")]
             std::mem::forget(self.config.snapshot.take());
+        }
+    }
+}
+
+impl ContextConfig {
+    /// The timeout a script runs under: the shorter of the context's and the
+    /// one the script was given, so a script's own only tightens it.
+    #[must_use]
+    pub fn timeout_within(&self, own: Option<Duration>) -> Option<Duration> {
+        match (self.timeout, own) {
+            (Some(context), Some(own)) => Some(context.min(own)),
+            (context, own) => context.or(own),
         }
     }
 }

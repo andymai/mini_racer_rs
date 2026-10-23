@@ -827,20 +827,28 @@ fn handle(
             source,
             depth,
             awaited,
-        } => script(scope, runtime, depth, DispatchKind::Script, |tc| {
-            unpoisoned(runtime)?;
-            evaluate(tc, runtime, (&filename, &source), (depth, awaited))
-        }),
+            timeout,
+        } => {
+            let timed = Timed::Script(runtime.block.config.timeout_within(timeout));
+            script(scope, runtime, depth, timed, |tc| {
+                unpoisoned(runtime)?;
+                evaluate(tc, runtime, (&filename, &source), (depth, awaited))
+            })
+        }
         Request::Call {
             request,
             depth,
             awaited,
-        } => script(scope, runtime, depth, DispatchKind::Script, |tc| {
-            unpoisoned(runtime)?;
-            invoke(tc, runtime, &request, (depth, awaited))
-        }),
+            timeout,
+        } => {
+            let timed = Timed::Script(runtime.block.config.timeout_within(timeout));
+            script(scope, runtime, depth, timed, |tc| {
+                unpoisoned(runtime)?;
+                invoke(tc, runtime, &request, (depth, awaited))
+            })
+        }
         Request::Attach { request, depth } => {
-            script(scope, runtime, depth, DispatchKind::Maintenance, |tc| {
+            script(scope, runtime, depth, Timed::Maintenance, |tc| {
                 attach(tc, &request)
             })
         }
@@ -858,7 +866,7 @@ fn handle(
         // mini_racer leaves a termination this meets for the dispatch around
         // it, or for the next script.
         Request::MicrotaskCheckpoint { depth } => {
-            script(scope, runtime, depth, DispatchKind::Maintenance, |tc| {
+            script(scope, runtime, depth, Timed::Maintenance, |tc| {
                 unpoisoned(runtime)?;
                 tc.perform_microtask_checkpoint();
                 // Maintenance reports no cause, and an exhausted heap leaves
@@ -874,13 +882,11 @@ fn handle(
                 Ok(Vec::new())
             })
         }
-        Request::HeapStats { depth } => {
-            script(scope, runtime, depth, DispatchKind::Maintenance, |tc| {
-                Ok(heap_stats(tc))
-            })
-        }
+        Request::HeapStats { depth } => script(scope, runtime, depth, Timed::Maintenance, |tc| {
+            Ok(heap_stats(tc))
+        }),
         Request::HeapSnapshot { depth } => {
-            script(scope, runtime, depth, DispatchKind::Maintenance, |tc| {
+            script(scope, runtime, depth, Timed::Maintenance, |tc| {
                 let heap = &runtime.block.heap;
                 heap.collecting.store(true, Ordering::Relaxed);
                 let json = heap_snapshot(tc);
@@ -888,12 +894,10 @@ fn handle(
                 Ok(json)
             })
         }
-        Request::PumpMessageLoop { depth } => {
-            script(scope, runtime, depth, DispatchKind::Pump, |tc| {
-                unpoisoned(runtime)?;
-                Ok(vec![u8::from(pump(tc, runtime))])
-            })
-        }
+        Request::PumpMessageLoop { depth } => script(scope, runtime, depth, Timed::Pump, |tc| {
+            unpoisoned(runtime)?;
+            Ok(vec![u8::from(pump(tc, runtime))])
+        }),
         // The extension refuses a dispose from inside a callback before it
         // gets here.
         Request::Dispose => Err(EngineError::DisposeBusy),
@@ -935,13 +939,14 @@ fn script(
     scope: &mut v8::PinScope<'_, '_>,
     runtime: &Runtime,
     depth: Depth,
-    kind: DispatchKind,
+    timed: Timed,
     run: impl FnOnce(&mut Tc<'_, '_, '_, '_>) -> Result<Vec<u8>, EngineError>,
 ) -> Result<Vec<u8>, EngineError> {
     let term = &runtime.block.term;
+    let kind = timed.kind();
     v8::tc_scope!(let tc, scope);
     tc.set_verbose(runtime.block.config.verbose_exceptions);
-    let result = if let Err(error) = arm_timeout(runtime, depth, kind) {
+    let result = if let Err(error) = arm_timeout(runtime, depth, timed) {
         Err(error)
     } else if term.refuses(kind) {
         Err(EngineError::Internal("halted without a cause".to_owned()))
@@ -983,7 +988,7 @@ fn script(
             }
             let drains = !exhausted
                 && verdict.is_some_and(|halt| halt != Halt::Disposed)
-                && rearm_timeout(runtime, dispatch).is_ok();
+                && rearm_timeout(runtime, dispatch, timed).is_ok();
             if drains {
                 tc.reset();
                 tc.perform_microtask_checkpoint();
@@ -1041,23 +1046,42 @@ fn discard_microtasks(tc: &mut Tc<'_, '_, '_, '_>, term: &TermCell<IsolateTermin
     tc.reset();
 }
 
+// A dispatch's kind, and for a script the timeout it runs under.
+#[derive(Clone, Copy)]
+enum Timed {
+    Script(Option<Duration>),
+    Maintenance,
+    Pump,
+}
+
+impl Timed {
+    const fn kind(self) -> DispatchKind {
+        match self {
+            Self::Script(_) => DispatchKind::Script,
+            Self::Maintenance => DispatchKind::Maintenance,
+            Self::Pump => DispatchKind::Pump,
+        }
+    }
+}
+
 // mini_racer starts a script's watchdog on its V8 thread as it takes the
 // request, so time spent waiting for the runner, such as behind a collection
 // after `ensure_gc_after_idle`, never counts against the timeout. Setup and
 // maintenance are never timed.
-fn arm_timeout(runtime: &Runtime, depth: Depth, kind: DispatchKind) -> Result<(), EngineError> {
-    match (depth, kind, runtime.block.config.timeout) {
-        (Depth::Outermost(dispatch), DispatchKind::Script, Some(timeout)) => {
+fn arm_timeout(runtime: &Runtime, depth: Depth, timed: Timed) -> Result<(), EngineError> {
+    match (depth, timed) {
+        (Depth::Outermost(dispatch), Timed::Script(Some(timeout))) => {
             watchdog::schedule(timeout, &runtime.block, dispatch)
         }
         _ => Ok(()),
     }
 }
 
-fn rearm_timeout(runtime: &Runtime, dispatch: DispatchId) -> Result<(), EngineError> {
-    runtime.block.config.timeout.map_or(Ok(()), |timeout| {
-        watchdog::rearm_if_fired(timeout, &runtime.block, dispatch)
-    })
+fn rearm_timeout(runtime: &Runtime, dispatch: DispatchId, timed: Timed) -> Result<(), EngineError> {
+    match timed {
+        Timed::Script(Some(timeout)) => watchdog::rearm_if_fired(timeout, &runtime.block, dispatch),
+        _ => Ok(()),
+    }
 }
 
 fn escaped(tc: &Tc<'_, '_, '_, '_>, runtime: &Runtime) -> bool {

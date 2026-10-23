@@ -62,6 +62,18 @@ result["call_timeout_rtt_ns"] = metric do
   spread(samples(rounds, rounds / 10) { context.call("id", 1) })
 end
 
+# mini_racer has no timeout scope, so its column is a call on a context with
+# `timeout:`, its only bound on one call; mini_racer_rs's is a call on a plain
+# context inside MiniRacerRs.timeout, which arms the same watchdog once it has
+# read the scope from fiber storage.
+result["call_scope_rtt_ns"] = metric do
+  scoped = defined?(MiniRacerRs)
+  context = scoped ? MiniRacer::Context.new : MiniRacer::Context.new(timeout: 60_000)
+  context.eval("function id(x) { return x }")
+  measure = -> { spread(samples(rounds, rounds / 10) { context.call("id", 1) }) }
+  scoped ? MiniRacerRs.timeout(60_000, &measure) : measure.call
+end
+
 # One sample is a JavaScript loop of callbacks, so the cost per callback is
 # the round trip from V8 to Ruby and back, without a Ruby-side dispatch.
 result["callback_rtt_ns"] = metric do
