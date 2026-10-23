@@ -213,6 +213,157 @@ class TimeoutScopeCallbackTest < Minitest::Test
   end
 end
 
+# A scope opened inside a callback times the script the callback runs on the
+# context whenever nothing around that script ends sooner: inside an untimed
+# eval, inside a looser scope or `timeout:`, and inside a pump. The script
+# around it carries on once the nested one has ended, still under its own
+# bound.
+class TimeoutScopeNestedTest < Minitest::Test
+  include TimeoutScopeFixtures
+
+  def setup
+    super
+    @outcomes = []
+    attach_nest(@context)
+  end
+
+  def attach_nest(context)
+    [["nest", 50], ["loose", 60_000]].each do |name, milliseconds|
+      nest = proc do
+        MiniRacerRs.timeout(milliseconds) { context.eval(SPIN) }
+      rescue MiniRacer::ScriptTerminatedError
+        @outcomes << :terminated
+        1
+      end
+      context.attach(name, nest)
+    end
+  end
+
+  # Fails rather than hangs when nothing bounds the nested script.
+  def assert_nested_ended(&)
+    started = now
+    result = begin
+      Timeout.timeout(5, &)
+    rescue Timeout::Error
+      :unbounded
+    end
+
+    assert_equal 2, result
+    assert_operator now - started, :<, 2
+    assert_equal [:terminated], @outcomes
+  end
+
+  def test_inside_an_untimed_eval
+    assert_nested_ended { @context.eval("nest() + 1") }
+  end
+
+  def test_inside_a_looser_scope
+    assert_nested_ended { MiniRacerRs.timeout(60_000) { @context.eval("nest() + 1") } }
+  end
+
+  def test_inside_a_looser_context_timeout
+    context = busy_context(timeout: 60_000)
+    attach_nest(context)
+
+    assert_nested_ended { context.eval("nest() + 1") }
+  ensure
+    context&.dispose
+  end
+
+  def test_inside_a_pump
+    @context.eval("Atomics.waitAsync(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1).value" \
+                  ".then(() => { globalThis.result = nest() + 1 })")
+    sleep 0.05
+
+    assert_nested_ended do
+      @context.pump_message_loop
+      @context.eval("result")
+    end
+  end
+
+  def test_the_outer_bound_still_ends_the_script_around_it
+    assert_terminated { MiniRacerRs.timeout(300) { @context.eval("nest(); #{SPIN}") } }
+    assert_equal [:terminated], @outcomes
+
+    context = busy_context(timeout: 300)
+    attach_nest(context)
+
+    assert_terminated { context.eval("nest(); #{SPIN}") }
+  ensure
+    context&.dispose
+  end
+
+  def test_a_looser_nested_scope_leaves_the_outer_bound
+    assert_terminated { MiniRacerRs.timeout(50) { @context.eval("loose() + 1") } }
+    assert_equal [:terminated], @outcomes
+  end
+end
+
+# A block left by break or throw resumes through the jump Ruby keeps pending,
+# so restoring the fiber's storage must neither clear it nor drop an
+# exception or a trap an interrupt brings meanwhile. Each case loops for a few
+# seconds under a stream of Thread#raise or signal traps, in a child that
+# kills itself if it outlives its bound.
+class TimeoutScopeInterruptTest < Minitest::Test
+  include RubyProcess
+
+  SECONDS = 3
+
+  PRELUDE = <<~RUBY.freeze
+    require "mini_racer"
+    Thread.new { sleep #{SECONDS * 10}; Process.kill(:KILL, Process.pid) }
+    def now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    deadline = now + #{SECONDS}
+  RUBY
+
+  CASES = {
+    "break" => "MiniRacerRs.timeout(50) { break }",
+    "throw" => "catch(:out) { MiniRacerRs.timeout(50) { throw :out } }",
+  }.freeze
+
+  def raced(leave)
+    <<~RUBY
+      #{PRELUDE}
+      E = Class.new(StandardError)
+      target = Thread.current
+      Thread.new { loop { target.raise(E); sleep 0.0005 } }
+      raised = 0
+      while now < deadline
+        begin
+          loop { #{leave} }
+        rescue E
+          raised += 1
+        end
+      end
+      puts raised.positive?
+    RUBY
+  end
+
+  TRAPPED = <<~RUBY.freeze
+    #{PRELUDE}
+    handled = 0
+    trap("USR1") do
+      raise "inside the trap"
+    rescue RuntimeError
+      handled += 1
+    end
+    Thread.new { loop { Process.kill(:USR1, Process.pid); sleep 0.0005 } }
+    MiniRacerRs.timeout(50) { break } while now < deadline
+    puts handled.positive?
+  RUBY
+
+  def run_cases(codes)
+    codes.map { |code| Thread.new { run_ruby(code) } }.map(&:value).each do |out, err, status|
+      assert_predicate status, :success?, err.lines.first(3).join
+      assert_equal "true\n", out
+    end
+  end
+
+  def test_interrupts_and_traps_while_a_block_breaks_or_throws_out
+    run_cases([*CASES.values.map { raced(_1) }, TRAPPED])
+  end
+end
+
 class TimeoutScopeFiberTest < Minitest::Test
   include TimeoutScopeFixtures
 
