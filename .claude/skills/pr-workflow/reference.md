@@ -2,7 +2,7 @@
 
 ## CI jobs (`.github/workflows/ci.yml`)
 
-`CI Pass` needs every job below to succeed or be skipped. Docs-only PRs (Markdown, `LICENSE`, issue templates, funding) skip the build jobs.
+`CI Pass` needs every job below to succeed or be skipped. Docs-only PRs (Markdown, `LICENSE`, issue templates, funding) skip the build jobs. So does main's run for a Release Please release commit (`chore(main): release ...`), whose PR ran them on the same tree and whose gems the release workflow tests.
 
 | Job | Runs |
 |---|---|
