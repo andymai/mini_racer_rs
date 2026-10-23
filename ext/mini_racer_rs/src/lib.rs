@@ -1,4 +1,5 @@
 mod context;
+mod counters;
 mod decode;
 mod encode;
 mod errors;
@@ -49,6 +50,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     context::init(ruby, racer)?;
     snapshot::init(ruby, racer)?;
     source_maps::init(rs)?;
+    counters::init(rs)?;
     pool::init(ruby, rs)?;
     fork::init(ruby, rs)?;
     Ok(())
