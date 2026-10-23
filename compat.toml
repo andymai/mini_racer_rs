@@ -355,6 +355,12 @@ status = "done"
 [extra."class:MiniRacerRs::Pins < Object@ruby"]
 status = "internal"
 
+[extra."class:MiniRacerRs::Pool < Object@ruby"]
+status = "done"
+
+[extra."class:MiniRacerRs::Pool::ShutdownError < MiniRacer::Error@ruby"]
+status = "done"
+
 [extra."class:MiniRacerRs::Spill < Object@ruby"]
 status = "internal"
 
@@ -375,6 +381,12 @@ status = "internal"
 
 [extra."imethod:MiniRacerRs::ForkHook#daemon@ruby"]
 status = "internal"
+
+[extra."imethod:MiniRacerRs::Pool#shutdown@ruby"]
+status = "done"
+
+[extra."imethod:MiniRacerRs::Pool#with@ruby"]
+status = "done"
 
 [extra."module:MiniRacerRs"]
 status = "done"

@@ -14,6 +14,7 @@ mod heap_limit;
 mod host;
 mod options;
 mod platform;
+mod pool;
 #[allow(
     unsafe_code,
     reason = "the only module that calls rb-sys directly (invariant I6)"
@@ -54,6 +55,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     heap_limit::init(rs)?;
     timeout::init(ruby, rs)?;
     counters::init(rs)?;
+    pool::init(ruby, rs)?;
     fork::init(ruby, rs)?;
     Ok(())
 }

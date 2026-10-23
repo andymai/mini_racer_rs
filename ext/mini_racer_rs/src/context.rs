@@ -6,10 +6,11 @@ use magnus::encoding::{EncodingCapable, RbEncoding};
 use magnus::gc::Marker;
 use magnus::r_hash::ForEach;
 use magnus::scan_args::scan_args;
+use magnus::typed_data::Obj;
 use magnus::value::{LazyId, ReprValue};
 use magnus::{
     Class, DataTypeFunctions, Error, Fixnum, Module, RArray, RHash, RModule, RString, Ruby, Symbol,
-    TypedData, Value,
+    TryConvert, TypedData, Value,
 };
 use mini_racer_engine::process::platform;
 use mini_racer_engine::{ContextConfig, ContextHandle, Counts, EngineError, JsText, ScriptOptions};
@@ -203,6 +204,16 @@ pub fn option_error(ruby: &Ruby, error: &OptionError) -> Error {
         OptionError::Keyword(_) => errors::runtime(ruby, message),
         OptionError::InvalidSnapshot(invalid) => errors::engine(ruby, invalid.into()),
     }
+}
+
+/// Whether `value` is a `MiniRacer::Context` that can no longer run anything.
+/// Makes no Ruby call.
+pub fn is_disposed(ruby: &Ruby, value: Value) -> bool {
+    // Matched by name first, since a failed conversion builds its message
+    // through Ruby calls.
+    rb_raw::typed_data_name(ruby, value).as_deref() == Some("mini_racer/context")
+        && Obj::<Context>::try_convert(value)
+            .is_ok_and(|context| context.handle.get().is_none_or(ContextHandle::is_disposed))
 }
 
 impl Context {

@@ -121,9 +121,87 @@ pub fn configure(
     })
 }
 
+/// The most contexts one `MiniRacerRs::Pool` holds. A pool builds every
+/// context before `new` returns, each an isolate and a runner thread, so a
+/// size near what `timeout:` allows would exhaust the process instead.
+pub const MAX_POOL_SIZE: i64 = 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PoolLimits {
+    pub size: usize,
+    pub max_uses: Option<u64>,
+}
+
+/// `MiniRacerRs::Pool.new`'s `size:` and `max_uses:` (nil for no limit),
+/// checked as `Context.new` checks its integers.
+pub fn pool(size: &OptionValue, max_uses: &OptionValue) -> Result<PoolLimits, OptionError> {
+    let size = within(size, "size", 1..=MAX_POOL_SIZE)?;
+    let max_uses = match max_uses {
+        OptionValue::Nil => None,
+        other => Some(within(other, "max_uses", 1..)?),
+    };
+    Ok(PoolLimits {
+        size: usize::try_from(size).map_err(|_| OptionError::Range("size"))?,
+        max_uses: max_uses
+            .map(u64::try_from)
+            .transpose()
+            .map_err(|_| OptionError::Range("max_uses"))?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pool_takes_one_to_max_contexts_and_any_positive_use_limit() {
+        let limits = pool(&OptionValue::Fixnum(4), &OptionValue::Nil);
+        assert_eq!(
+            limits,
+            Ok(PoolLimits {
+                size: 4,
+                max_uses: None
+            })
+        );
+        let limits = pool(
+            &OptionValue::Fixnum(MAX_POOL_SIZE),
+            &OptionValue::Fixnum(i64::MAX),
+        );
+        assert_eq!(
+            limits.map(|limits| (limits.size, limits.max_uses)),
+            Ok((1024, Some(i64::MAX.cast_unsigned())))
+        );
+        for size in [0, -1, MAX_POOL_SIZE + 1] {
+            assert_eq!(
+                pool(&OptionValue::Fixnum(size), &OptionValue::Nil),
+                Err(OptionError::Range("size"))
+            );
+        }
+        assert_eq!(
+            pool(&OptionValue::Fixnum(1), &OptionValue::Fixnum(0))
+                .map_err(|error| error.to_string()),
+            Err("bad max_uses".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_pool_names_a_value_of_the_wrong_type_as_context_new_does() {
+        assert_eq!(
+            pool(&OptionValue::Nil, &OptionValue::Nil).map_err(|error| error.to_string()),
+            Err("wrong argument type nil (expected Integer)".to_owned())
+        );
+        assert_eq!(
+            pool(&OptionValue::Fixnum(2), &OptionValue::False).map_err(|error| error.to_string()),
+            Err("wrong argument type false (expected Integer)".to_owned())
+        );
+        assert_eq!(
+            pool(
+                &OptionValue::Other("String".to_owned()),
+                &OptionValue::Other("Float".to_owned())
+            ),
+            Err(OptionError::Type("String".to_owned()))
+        );
+    }
 
     fn configure_pairs(pairs: &[(&str, OptionValue)]) -> Result<ContextConfig, OptionError> {
         configure(
