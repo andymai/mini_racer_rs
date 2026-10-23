@@ -2,7 +2,7 @@
 
 ## Ruby tests
 
-`bundle exec rake test` compiles, then runs `test/ruby/**/*_test.rb` (`rakelib/test.rake`). `test/ruby/test_helper.rb` puts this gem's `lib/` first on the load path and turns on `GC.auto_compact` when `MINI_RACER_RS_AUTO_COMPACT` is set, as CI's GC Stress job does for a second `rake test`. `RubyProcess#run_ruby(code, env:, load_path:)` runs code in a fresh Ruby and returns stdout, stderr and the status; tests that set platform flags or need a clean process use it (`test/ruby/watchdog_test.rb`, `test/ruby/spent_termination_test.rb`).
+`bundle exec rake test` compiles, then runs `test/ruby/**/*_test.rb` (`rakelib/test.rake`). `test/ruby/test_helper.rb` puts this gem's `lib/` first on the load path and turns on `GC.auto_compact` when `MINI_RACER_RS_AUTO_COMPACT` is set, as CI's GC Stress job does for a second `rake test`. `RubyProcess#run_ruby(code, env:, load_path:)` runs code in a fresh Ruby and returns stdout, stderr and the status; tests that set platform flags or need a clean process use it (`test/ruby/watchdog_test.rb`, `test/ruby/spent_termination_test.rb`), as does every case that reaches a heap limit, so an abort fails that case alone (`test/ruby/heap_limit_test.rb`); keep those limits at or under 512 MiB.
 
 ## Fork cases
 
@@ -51,6 +51,7 @@ Each script runs alone with `bundle exec ruby -Ilib test/stress/<script>.rb`, ta
 | `test/stress/shared_load.rb single\|multi [contexts] [max_mib]` | a context loading the same generated 3 MiB two-byte script as the others costs over 14 MiB of RSS | every CI Ruby leg on Linux, both modes |
 | `test/stress/one_off_load.rb single\|multi [scripts] [max_mib]` | contexts loading a different generated 3 MiB two-byte script once each, disposed in turn, leave over 16 MiB of RSS behind | every CI Ruby leg on Linux, both modes |
 | `test/stress/large_arguments.rb [calls] [max_ratio]` (also `-Ivendor/execjs/lib`) | the last tenth of ExecJS calls with equal-length 24 KB arguments take over 3 times as long as the first tenth | every CI Ruby leg |
+| `test/stress/heap_limit.rb single\|multi [hits] [max_mib]` | a hit of a 64 MiB heap limit does not raise `MiniRacerRs::HeapLimitError` or leaves its context unusable, or RSS grows over 64 MiB past its reading after a warm-up | Nightly and `stress`: 300 hits per mode |
 | `test/stress/madvise_fixture.rb clean\|crash` | the child's outcome is not the expected one | `scripts/madvise-fixture.sh`, CI's ubuntu-24.04 Ruby 3.4 leg |
 
 The churn bound is not zero because rusty_v8 leaks a 64-byte cell per isolate (denoland/rusty_v8#2075). The nightly `stress` job runs on ubuntu-24.04 and macos-15, one step per run with `if: ${{ !cancelled() }}`, so one failure does not hide the others; a new long-running script gets a step there.

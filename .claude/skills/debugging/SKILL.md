@@ -21,6 +21,7 @@ Every harness here writes its evidence to a known place. Read that first, reprod
 | Fork case fails or hangs | ForkTest's message: status, stdout, stderr | `bundle exec ruby test/ruby/fork/<what>_case.rb; echo $?` |
 | Scheduled run issue | the issue: run link, commit, failed jobs | `gh run view <run-id> --log-failed` |
 | A Rust change has no effect | which extension `$LOADED_FEATURES` lists | `bundle exec rake compile` |
+| `Fatal JavaScript out of memory` with a heap limit set, or a `MiniRacerRs::HeapLimitError` a script did not earn | V8's line on stderr (`Reached heap limit`, `CALL_AND_RETRY_LAST`, `Ineffective mark-compacts near heap limit`); the heap limit pitfall in `CLAUDE.md` | the script alone through `capped` in `test/ruby/heap_limit_test.rb`, or `crates/mini_racer_engine/tests/heap_limit.rs` |
 
 ## Rules
 
