@@ -4,7 +4,7 @@
 
 | Engine | Done | Planned | Deviation |
 |---|---|---|---|
-| CRuby | 54 | 0 | 28 |
+| CRuby | 54 | 0 | 26 |
 | TruffleRuby | 58 | 0 | 0 |
 
 ## Surface
@@ -249,21 +249,9 @@ mini_racer_rs returns a typed array or DataView at any byte offset as a binary (
 
 Approved 2026-10-16.
 
-### `behavior:uncloneable-after-filter@ruby`
-
-mini_racer_rs returns an error Hash when a result remains uncloneable after both gems copy it through mini_racer's filter function, which keeps enumerable data and drops functions. For example, `({a: Symbol("s")})` returns `{"error" => "Error: Symbol(s) could not be cloned."}`. A Map with a function key is another such case. mini_racer 0.22.1 aborts the Ruby process with signal 6 (SIGABRT), although its code contains the fallback that returns V8's message in a Hash. mini_racer_rs uses that fallback.
-
-Approved 2026-10-16.
-
 ### `behavior:v8-version@ruby`
 
 On CRuby, `mini_racer_rs` embeds V8 15.2.124.1 through the `v8` crate 152.2.0, while `mini_racer` 0.22.1 uses V8 13.6.233.17 through `libv8-node` 24.12.0.1. V8-generated text, including parse and runtime error messages and locale formatting, can therefore differ. So can the nesting depth at which V8 stops reading a value: with the default stack limit, `Context#call` accepts arguments about 6,250 levels deep in `mini_racer_rs` and about 3,100 in `mini_racer` 0.22.1, and both limits halve with half the stack. In single-threaded mode, after `low_memory_notification` on a new context, `pump_message_loop` returns `true` in `mini_racer_rs` and `false` in `mini_racer` 0.22.1 because V8 15.2 posts a zero-delay foreground task during collection. Later pumps return `false` in both, as they do in the default multi-threaded mode. Affected upstream tests are marked `deviation:behavior:v8-version@ruby` in `test/upstream/mini_racer.status.toml`. This difference does not apply on TruffleRuby, where both gems use upstream's GraalJS backend.
-
-Approved 2026-10-16.
-
-### `behavior:warmup-discards-context@ruby`
-
-mini_racer_rs completes `Snapshot#warmup!` when the warmup script creates an object V8 cannot serialize, while mini_racer 0.22.1 stops the process with a `global handle not serialized` trap. mini_racer_rs releases the warmup context before writing the new snapshot blob, so its objects are not written. mini_racer 0.22.1 still holds that context while writing the blob. For `snapshot = MiniRacer::Snapshot.new("function f() { return 1 }")`, `snapshot.warmup!("var formatter = new Intl.DateTimeFormat('en'); f()")` succeeds in mini_racer_rs, and a context created from the snapshot evaluates `[f(), typeof formatter]` to `[1, "undefined"]`. Both gems use a fresh default context, so warmup variables are never part of the result.
 
 Approved 2026-10-16.
 

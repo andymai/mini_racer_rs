@@ -319,13 +319,13 @@ status = "same"
 status = "same"
 
 [cases."curated-uncloneable-after-filter-map-key"]
-status = "accepted:uncloneable-after-filter"
+status = "same"
 
 [cases."curated-uncloneable-after-filter-symbol"]
-status = "accepted:uncloneable-after-filter"
+status = "same"
 
 [cases."curated-uncloneable-after-filter-symbol-map-key"]
-status = "accepted:uncloneable-after-filter"
+status = "same"
 
 [cases."curated-view-at-offset"]
 status = "accepted:view-at-an-offset"
@@ -340,7 +340,7 @@ status = "same"
 status = "same"
 
 [cases."js-1-100"]
-status = "accepted:uncloneable-after-filter"
+status = "same"
 
 [cases."js-1-101"]
 status = "same"
@@ -688,7 +688,7 @@ status = "same"
 status = "same"
 
 [cases."js-1-26"]
-status = "accepted:uncloneable-after-filter"
+status = "same"
 
 [cases."js-1-27"]
 status = "same"
@@ -814,7 +814,7 @@ status = "same"
 status = "same"
 
 [cases."js-1-64"]
-status = "accepted:uncloneable-after-filter"
+status = "same"
 
 [cases."js-1-65"]
 status = "same"
@@ -841,7 +841,7 @@ status = "same"
 status = "same"
 
 [cases."js-1-72"]
-status = "accepted:uncloneable-after-filter"
+status = "same"
 
 [cases."js-1-73"]
 status = "same"
@@ -889,7 +889,7 @@ status = "same"
 status = "same"
 
 [cases."js-1-87"]
-status = "accepted:uncloneable-after-filter"
+status = "same"
 
 [cases."js-1-88"]
 status = "same"

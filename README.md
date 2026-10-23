@@ -257,7 +257,7 @@ bundle exec ruby bench/run.rb --cpus 0-7
 
 | Engine | Done | Planned | Deviation |
 |---|---|---|---|
-| CRuby | 54 | 0 | 28 |
+| CRuby | 54 | 0 | 26 |
 | TruffleRuby | 58 | 0 | 0 |
 
 See [COMPATIBILITY.md](COMPATIBILITY.md).
