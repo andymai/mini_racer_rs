@@ -22,8 +22,8 @@ pub struct Counts {
     /// Each result the runner answered with and each callback's arguments.
     pub bytes_from_js: u64,
     /// The runner's time on evals, calls, attaches, microtask checkpoints and
-    /// pumps, short of its waits for Ruby callbacks and for a task an await
-    /// needs.
+    /// pumps, short of its waits for Ruby callbacks, for a task an await
+    /// needs and for a fork.
     pub js_ns: u64,
     /// V8's scavenges, minor mark-sweeps and mark-compacts on the context's
     /// isolate, in a dispatch or not.

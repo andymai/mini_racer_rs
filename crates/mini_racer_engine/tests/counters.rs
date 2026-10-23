@@ -483,6 +483,74 @@ fn javascript_time_leaves_out_an_awaits_sleep() {
     assert!(js < nanos(Duration::from_millis(100)), "{js}");
 }
 
+const SPIN: &str = "const until = Date.now() + 50; while (Date.now() < until) {}";
+
+fn spun(before: Counts, after: Counts) -> u64 {
+    since(before, after).js_ns
+}
+
+// The task resolves the promise, and the pump runs its reaction after it.
+#[test]
+fn a_pumped_task_is_javascript_time() {
+    let context = spawn();
+    eval(
+        &context,
+        &format!(
+            "Atomics.waitAsync(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5).value \
+               .then(() => {{ {SPIN} }}); 0"
+        ),
+        &mut Parking,
+    );
+    std::thread::sleep(Duration::from_millis(30));
+    let before = context.counters();
+
+    assert!(context.pump_message_loop(&mut Parking).expect("pump"));
+    let ran = spun(before, context.counters());
+    assert!(ran >= nanos(Duration::from_millis(49)), "{ran}");
+}
+
+// Drained from a callback, the microtask runs while the script around it
+// waits for Ruby, which is not timed.
+#[test]
+fn a_microtask_checkpoint_is_javascript_time() {
+    let context = attached("drain");
+    let before = context.counters();
+    let mut host = Answering(|_: &[u8]| {
+        context
+            .perform_microtask_checkpoint(&mut Parking)
+            .expect("checkpoint");
+        CallbackReply::Value(integer(0))
+    });
+    eval(
+        &context,
+        &format!("Promise.resolve().then(() => {{ {SPIN} }}); drain(); 0"),
+        &mut host,
+    );
+
+    let ran = spun(before, context.counters());
+    assert!(ran >= nanos(Duration::from_millis(49)), "{ran}");
+}
+
+// Attach reads each segment of its path but the last, so a getter there runs.
+#[test]
+fn an_attach_is_javascript_time() {
+    let context = spawn();
+    eval(
+        &context,
+        &format!(
+            "Object.defineProperty(globalThis, 'slow', {{ get() {{ {SPIN}; return {{}} }} }}); 0"
+        ),
+        &mut Parking,
+    );
+    let before = context.counters();
+    context
+        .attach(request("slow.callback", &[0]), &mut Parking)
+        .expect("attach");
+
+    let ran = spun(before, context.counters());
+    assert!(ran >= nanos(Duration::from_millis(49)), "{ran}");
+}
+
 #[test]
 fn heap_statistics_snapshots_and_collections_are_not_javascript_time() {
     let context = spawn();
