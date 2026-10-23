@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.5.1](https://github.com/andymai/mini_racer_rs/compare/v1.5.0...v1.5.1) (2026-10-23)
+
+
+### Bug Fixes
+
+* free disposed context memory before timeout is due ([#141](https://github.com/andymai/mini_racer_rs/issues/141)) ([1b8fd96](https://github.com/andymai/mini_racer_rs/commit/1b8fd96057d09ebb4a7e4b30eaa71c0d436c5694))
+* free snapshot blob bytes after contexts are gone ([#142](https://github.com/andymai/mini_racer_rs/issues/142)) ([72f4a2d](https://github.com/andymai/mini_racer_rs/commit/72f4a2d5aa287e065ffa9a1402a5255a5ea7db99))
+
 ## [1.5.0](https://github.com/andymai/mini_racer_rs/compare/v1.4.0...v1.5.0) (2026-10-23)
 
 
