@@ -4,7 +4,7 @@
 # runner stayed with the parent, so that dispatch, a nested one made before
 # returning and every later use of the context raise in the child, which can
 # still make new contexts. The parent's dispatch carries on. mini_racer
-# 0.22.1's child hangs instead.
+# 0.22.2's child hangs instead.
 require_relative "prelude"
 
 MiniRacer::Platform.set_flags!(:single_threaded)

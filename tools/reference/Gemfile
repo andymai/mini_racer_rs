@@ -1,12 +1,12 @@
 # frozen_string_literal: true
 
-# The real mini_racer 0.22.1, for reference runs of upstream's suite and for
+# The real mini_racer 0.22.2, for reference runs of upstream's suite and for
 # differential tests. Install from this directory:
 #   cd tools/reference && BUNDLE_PATH=vendor/bundle bundle install
 
 source "https://rubygems.org"
 
 gem "activesupport", "~> 8.0"
-gem "mini_racer", "0.22.1"
+gem "mini_racer", "0.22.2"
 gem "minitest", "~> 5.25"
 gem "tzinfo-data"

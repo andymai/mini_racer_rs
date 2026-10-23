@@ -1,6 +1,6 @@
 # Contributing
 
-mini_racer_rs is a Rust implementation of the MiniRacer Ruby API and targets compatibility with mini_racer 0.22.1. It uses V8 15.2 through `v8` 152.2.0. [STABILITY.md](STABILITY.md#platforms-rubies-and-v8) lists the supported Rubies and platforms.
+mini_racer_rs is a Rust implementation of the MiniRacer Ruby API and targets compatibility with mini_racer 0.22.2. It uses V8 15.2 through `v8` 152.2.0. [STABILITY.md](STABILITY.md#platforms-rubies-and-v8) lists the supported Rubies and platforms.
 
 ## Setup
 
@@ -34,9 +34,9 @@ Do not use en dashes or em dashes in code, comments, documentation, or commit me
 
 ## Matching mini_racer
 
-The compatibility target is mini_racer's unmodified test suite at version 0.22.1. Its per-platform results are recorded in `test/upstream/mini_racer.status.toml`.
+The compatibility target is mini_racer's unmodified test suite at version 0.22.2. Its per-platform results are recorded in `test/upstream/mini_racer.status.toml`.
 
-Every public surface identifier has a status in `compat.toml`. `COMPATIBILITY.md` is generated from that file. A behavior that differs from mini_racer 0.22.1 requires a test that fails first and a `compat.toml` entry stating the reason. Deliberate differences require both a reason and a test.
+Every public surface identifier has a status in `compat.toml`. `COMPATIBILITY.md` is generated from that file. A behavior that differs from mini_racer 0.22.2 requires a test that fails first and a `compat.toml` entry stating the reason. Deliberate differences require both a reason and a test.
 
 ## Pull requests
 

@@ -92,7 +92,7 @@ impl CauseSet {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DispatchId(u64);
 
-/// How a dispatch treats pending causes, following `mini_racer` 0.22.1.
+/// How a dispatch treats pending causes, following `mini_racer` 0.22.2.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DispatchKind {
     /// `eval`, `call` and their await forms, snapshot creation and warmup:

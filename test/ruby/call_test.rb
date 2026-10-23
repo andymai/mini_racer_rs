@@ -89,15 +89,7 @@ class CallTest < Minitest::Test
     assert_equal [[Time.at(0), "changed", nil]], @context.call("id", array)
   end
 
-  def test_an_argument_nested_past_v8s_limit_raises_an_internal_error
-    deep = []
-    20_000.times { deep = [deep] }
-    error = assert_raises(MiniRacer::InternalError) { @context.call("one", deep) }
-
-    assert_match(/Maximum call stack size exceeded/, error.message)
-  end
-
-  # mini_racer 0.22.1 reads a call's arguments once, so with a max_memory: they
+  # mini_racer 0.22.2 reads a call's arguments once, so with a max_memory: they
   # fit into once, each of these calls returns 0. Values the runner built and
   # then left to V8 would be held while V8 read them all again.
   def test_a_call_left_to_v8_holds_its_arguments_once_under_max_memory

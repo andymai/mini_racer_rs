@@ -65,9 +65,9 @@ module DiffWorkers
       end
     end
 
-    # A gem that crashes the process dies by a signal (mini_racer 0.22.1 aborts
-    # with SIGABRT on some Map keys). An exit status means a Ruby exception
-    # escaped the worker, which is the harness failing, not either gem.
+    # A gem that crashes the process dies by a signal. An exit status means a
+    # Ruby exception escaped the worker, which is the harness failing, not
+    # either gem.
     def died
       @io.close
       status = Process.last_status

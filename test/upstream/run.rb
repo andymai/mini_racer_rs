@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 # Runs an upstream test suite, unmodified, against mini_racer_rs (or, with
-# --reference, against the real mini_racer 0.22.1) and checks the results
+# --reference, against the real mini_racer 0.22.2) and checks the results
 # against that suite's ledger for this Ruby and platform: mini_racer's own
 # suite by default, or ExecJS's with its MiniRacer runtime.
 
@@ -23,7 +23,7 @@ options = {
 }
 OptionParser.new do |opts|
   opts.banner = "usage: run.rb [options]"
-  opts.on("--reference", "Run the real mini_racer 0.22.1 from tools/reference") { options[:mode] = "reference" }
+  opts.on("--reference", "Run the real mini_racer 0.22.2 from tools/reference") { options[:mode] = "reference" }
   opts.on("--suite NAME", UpstreamSuites::ALL.keys,
           "Upstream suite: #{UpstreamSuites::ALL.keys.join(" or ")}",) do |name|
     options[:suite] = name

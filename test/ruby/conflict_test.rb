@@ -9,7 +9,7 @@ class ConflictTest < Minitest::Test
     run_ruby(<<~RUBY)
       spec = Gem::Specification.new do |s|
         s.name = "mini_racer"
-        s.version = "0.22.1"
+        s.version = "0.22.2"
         s.metadata = #{metadata.inspect}
       end
       Gem.loaded_specs["mini_racer"] = spec
@@ -27,7 +27,7 @@ class ConflictTest < Minitest::Test
     out, _err, status = require_with_spec({})
 
     assert_equal 3, status.exitstatus
-    assert_match "the mini_racer 0.22.1 gem are both active", out
+    assert_match "the mini_racer 0.22.2 gem are both active", out
   end
 
   def test_loads_beside_the_shim

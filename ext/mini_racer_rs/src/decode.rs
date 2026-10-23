@@ -741,13 +741,21 @@ impl Visitor for RubyVisitor<'_> {
 }
 
 // mini_racer decodes a result inside its [result, error] reply, one level
-// below its limit.
+// below its limit, and a callback's arguments array at its limit.
 const RESULT_LIMITS: Limits = Limits {
     max_depth: 95,
     max_bigint_bytes: 16 << 20,
 };
 
 pub fn value(ruby: &Ruby, bytes: &[u8]) -> Result<Value, Error> {
+    decode(ruby, bytes, RESULT_LIMITS)
+}
+
+pub fn arguments(ruby: &Ruby, bytes: &[u8]) -> Result<Value, Error> {
+    decode(ruby, bytes, Limits::default())
+}
+
+fn decode(ruby: &Ruby, bytes: &[u8], limits: Limits) -> Result<Value, Error> {
     let mut visitor = RubyVisitor {
         ruby,
         refs: None,
@@ -762,7 +770,7 @@ pub fn value(ruby: &Ruby, bytes: &[u8]) -> Result<Value, Error> {
         scratch: Vec::new(),
         roomy: usize::MAX,
     };
-    decode_value(bytes, RESULT_LIMITS, &mut visitor).map_err(|e| match e {
+    decode_value(bytes, limits, &mut visitor).map_err(|e| match e {
         DecodeError::Visitor(error) => error,
         other => errors::runtime(ruby, other.to_string()),
     })

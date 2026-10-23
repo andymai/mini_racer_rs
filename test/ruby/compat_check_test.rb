@@ -94,7 +94,7 @@ class CompatCheckTest < Minitest::Test
   end
 
   def test_surface_that_mini_racer_lacks_is_extra
-    assert_equal ["EXTRA_SURFACE #{STOP}: mini_racer 0.22.1 has no such ruby surface"],
+    assert_equal ["EXTRA_SURFACE #{STOP}: mini_racer 0.22.2 has no such ruby surface"],
                  problems({ EVAL => done }, present: [EVAL, STOP])
   end
 

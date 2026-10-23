@@ -30,7 +30,7 @@ class SharedSourceHeapStatsTest < Minitest::Test
     JSON.parse(out)
   end
 
-  # Deviation behavior:shared-source-heap-stats@ruby: mini_racer 0.22.1
+  # Deviation behavior:shared-source-heap-stats@ruby: mini_racer 0.22.2
   # reports `:external_memory` as 0 in all three contexts and the same
   # `:used_heap_size` in each, 14,578,448 bytes for this script, as each
   # keeps a copy of the source of its own. Here all three, the first
@@ -48,7 +48,7 @@ class SharedSourceHeapStatsTest < Minitest::Test
 
   # Deviation behavior:shared-source-heap-stats@ruby: with the switch set
   # before the first context, every context keeps its own copy and reports
-  # it as mini_racer 0.22.1 does.
+  # it as mini_racer 0.22.2 does.
   def test_with_the_code_cache_off_every_context_counts_its_own_copy
     units, stats = reported("off")
     first_used = stats.first.first

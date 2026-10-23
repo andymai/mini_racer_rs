@@ -44,7 +44,7 @@ module MilestoneRules
     unless UpstreamLedger::PASSING.include?(ref) || ref == "skip"
       cause = previous_kind == "upstream-fail" ? previous["cause"] : nil
       return { "status" => "upstream-fail",
-               "cause" => cause || "mini_racer 0.22.1: #{ref}: #{reference["message"]}".strip, }
+               "cause" => cause || "mini_racer 0.22.2: #{ref}: #{reference["message"]}".strip, }
     end
     return previous.slice(*STATUS_KEYS) if previous_kind == "deviation"
 

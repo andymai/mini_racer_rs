@@ -42,7 +42,7 @@ class SnapshotTest < Minitest::Test
     assert_equal "wrong argument type Renamed (expected mini_racer/snapshot)", error.message
   end
 
-  # Deviation behavior:snapshot-filter-context@ruby: mini_racer 0.22.1 builds
+  # Deviation behavior:snapshot-filter-context@ruby: mini_racer 0.22.2 builds
   # the filter's safe context from the snapshot too, so these values come
   # back as nil.
   def test_snapshot_code_cannot_change_how_values_are_copied
@@ -57,9 +57,8 @@ class SnapshotTest < Minitest::Test
     assert_equal({ "a" => 1 }, MiniRacer::Context.new(snapshot: snapshot).eval("({a: 1, f() {}})"))
   end
 
-  # Deviation behavior:warmup-discards-context@ruby: mini_racer 0.22.1 keeps
-  # the warmup context alive while it writes the blob, and aborts the process
-  # when that context holds an object V8 cannot serialize.
+  # mini_racer lets go of the warmup's context before it writes the blob, so
+  # an object V8 cannot write never reaches it.
   def test_a_warmup_leaves_nothing_of_its_own_context_in_the_blob
     snapshot = MiniRacer::Snapshot.new("function f() { return 1 }")
     snapshot.warmup!("var formatter = new Intl.DateTimeFormat('en'); f()")

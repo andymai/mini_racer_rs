@@ -1,6 +1,6 @@
 # Architecture
 
-`mini_racer_rs` implements the `MiniRacer` Ruby API from mini_racer 0.22.1 in Rust, using V8 15.2 through `v8` (rusty_v8 152.2.0) and Ruby bindings through magnus and rb-sys. Rust owns behavior, while `lib/` defines vocabulary: constants, the error hierarchy, `MiniRacer::Binary`, the loader, `Context#load`, `Context#write_heap_snapshot`, and mini_racer's unchanged TruffleRuby backend in `lib/mini_racer/truffleruby.rb` and `lib/mini_racer/shared.rb`.
+`mini_racer_rs` implements the `MiniRacer` Ruby API from mini_racer 0.22.2 in Rust, using V8 15.2 through `v8` (rusty_v8 152.2.0) and Ruby bindings through magnus and rb-sys. Rust owns behavior, while `lib/` defines vocabulary: constants, the error hierarchy, `MiniRacer::Binary`, the loader, `Context#load`, `Context#write_heap_snapshot`, and mini_racer's unchanged TruffleRuby backend in `lib/mini_racer/truffleruby.rb` and `lib/mini_racer/shared.rb`.
 
 ## Crates
 
@@ -28,9 +28,9 @@ The context handle in `crates/mini_racer_engine/src/context.rs` coordinates disp
 
 ## Values
 
-Values cross the channel in V8's serialization format. Results are decoded from format versions 13 through 16 by `mini_racer_wire`, using a visitor that constructs Ruby objects directly in `ext/mini_racer_rs/src/decode.rs`. There is no intermediate tree, nesting is limited to 95 levels, and repeated objects preserve their identity.
+Values cross the channel in V8's serialization format. Results are decoded from format versions 13 through 16 by `mini_racer_wire`, using a visitor that constructs Ruby objects directly in `ext/mini_racer_rs/src/decode.rs`. There is no intermediate tree, repeated objects preserve their identity, results may be nested 95 levels, and callback arguments may be nested 96 levels counting the arguments array, matching mini_racer 0.22.2.
 
-Arguments to `Context#call` travel in the other direction. `ext/mini_racer_rs/src/encode.rs` writes format version 15 directly from Ruby values.
+Arguments to `Context#call` travel in the other direction. `ext/mini_racer_rs/src/encode.rs` writes format version 15 directly from Ruby values. It refuses an argument nested deeper than 512 levels with `Context.call: max depth exceeded`, as mini_racer 0.22.2 does.
 
 The encoder in `ext/mini_racer_rs/src/encode.rs` writes Ruby Strings sent as UTF-8 as V8 one-byte text when Ruby's cached coderange, or a byte scan when no coderange exists, identifies all-ASCII input. For valid non-ASCII UTF-8 from 16 bytes through 8 MiB, bundled simdutf decoding produces V8's one-byte or padded two-byte storage form, while broken UTF-8, larger values, Hash keys, and call names retain mini_racer's form, and the runner builds calls holding padded or wide two-byte strings itself.
 
@@ -66,9 +66,11 @@ Termination rings the queue, waking a runner sleeping in an await without postin
 
 ## Snapshots
 
-`MiniRacer::Snapshot` builds and warms up a V8 startup blob in a purpose-built isolate in `crates/mini_racer_engine/src/snapshot.rs`. Contexts made from one snapshot share one read-only `SnapshotBlob`, and `sys::startup_data` gives V8 those bytes directly. A context's control block retains the blob until its runner drops the isolate because V8 reads it throughout the isolate's lifetime, including when creating contexts and checking code caches. Snapshot builds retain the snapshot they warm up the same way. The shared copy is created by `Context.new` and reused while a context made from it lives and the String returned by `dump` retains the same bytes. The snapshot holds that copy weakly, so after its contexts are gone it holds only the String. Each `Context.new` starts from the String's current contents.
+`MiniRacer::Snapshot` builds and warms up a V8 startup blob in a purpose-built isolate in `crates/mini_racer_engine/src/snapshot.rs`. Contexts made from one snapshot share one read-only `SnapshotBlob`, and `sys::startup_data` gives V8 those bytes directly. A context's control block retains the blob until its runner drops the isolate because V8 reads it throughout the isolate's lifetime, including when creating contexts and checking code caches. Snapshot builds retain the snapshot they warm up the same way. The shared `SnapshotBlob` is made at `Context.new` and reused while a context made from it lives. The snapshot holds it weakly, so once its contexts are gone, it holds only its own String. Like mini_racer 0.22.2, `dump` returns a copy of that String, so changing the copy does not change what a context starts from.
 
-`SnapshotBlob::check` in `crates/mini_racer_engine/src/snapshot.rs` follows V8 15.2's `SnapshotImpl` layout in snapshot.cc. It checks the header, the version through V8's `StartupData::is_valid`, the context count and rehash flag, and each section's magic number and recorded payload length. The magic number's top half is V8's `0xC0DE`. Empty blobs, bytes after the last section, and damaged payload bytes that V8 can read are accepted. The check has no checksum and leaves payload contents to V8, but rejects damage to a section's 8-byte header. See compatibility deviation `behavior:invalid-snapshot@ruby`.
+`Snapshot.new` runs mini_racer 0.22.2's `Intl` guard script word for word before its script. A script that reads or writes `Intl` raises `MiniRacer::SnapshotError` with `Intl is not supported in Snapshot.new scripts`, because V8 cannot write `Intl` objects into a blob and aborts the process on one. The guard restores `Intl` after a script that did not access it. `#warmup!` has no guard. Warming up an empty snapshot warms up V8's own snapshot, as mini_racer 0.22.2 does.
+
+`SnapshotBlob::check` makes mini_racer 0.22.2's checks, in its order and with its messages, on V8 15.2's blob layout (`SnapshotImpl` in V8's `snapshot.cc`): the length, the version through V8's `StartupData::is_valid`, the header, each section's offset, then the checksum V8 writes in word 8 over everything after it. It accepts Adler-32, written by libv8-node's V8 built with zlib, or V8's own Fletcher-32, written by the `v8` crate's V8. It then rejects two blobs mini_racer hands to V8: a section without V8's magic number, which V8 aborts on, and a recorded payload that runs past its section, which V8 reads unchecked. The magic word is pinned as `SnapshotBlob::MAGIC` and compared whole, as V8 compares it. A matching checksum prevents neither case because a blob writer can also write its checksum. An empty blob creates a context without a snapshot. Damaged payload or trailing bytes under a matching checksum load when V8 can read them, as in mini_racer 0.22.2. See compatibility deviation `behavior:invalid-snapshot@ruby`.
 
 ## Code cache
 
@@ -123,8 +125,8 @@ Under a fiber scheduler, a fiber waiting for its context parks through the sched
 
 ## How it is checked
 
-The unmodified mini_racer and ExecJS test suites run from submodules against per-platform ledgers in `test/upstream/`. Differential tests in `test/diff/` send the same generated values and the Babel, Terser, Handlebars, React, and MUI libraries to mini_racer 0.22.1 and this gem.
+The unmodified mini_racer and ExecJS test suites run from submodules against per-platform ledgers in `test/upstream/`. Differential tests in `test/diff/` send the same generated values and the Babel, Terser, Handlebars, React, and MUI libraries to mini_racer 0.22.2 and this gem.
 
 Loom models exercise the channel, termination, fork, per-isolate task queue, and worker task queue pause and resume protocols. cargo-fuzz targets cover the wire codec and source map parser. AddressSanitizer, ThreadSanitizer, fork and spawn stress, and garbage collection stress with compaction run in CI or nightly.
 
-Every difference from mini_racer 0.22.1 is recorded in `compat.toml` and listed in `COMPATIBILITY.md`.
+Every difference from mini_racer 0.22.2 is recorded in `compat.toml` and listed in `COMPATIBILITY.md`.

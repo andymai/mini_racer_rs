@@ -33,8 +33,8 @@ class CompatCrossCheckTest < Minitest::Test
   def test_a_fresh_reference_must_match_the_surface
     found = problems({ EVAL => done }, reference: { "ids" => [STOP] })
 
-    assert_includes found, "SURFACE_DRIFT #{STOP}: mini_racer 0.22.1 has it on ruby; compat/surface.json does not"
-    assert_includes found, "SURFACE_DRIFT #{EVAL}: in compat/surface.json but not in mini_racer 0.22.1 on ruby"
+    assert_includes found, "SURFACE_DRIFT #{STOP}: mini_racer 0.22.2 has it on ruby; compat/surface.json does not"
+    assert_includes found, "SURFACE_DRIFT #{EVAL}: in compat/surface.json but not in mini_racer 0.22.2 on ruby"
   end
 
   def test_a_scalar_entry_never_reaches_later_checks

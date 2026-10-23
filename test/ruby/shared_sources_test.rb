@@ -70,7 +70,7 @@ class SharedSourcesTest < Minitest::Test
     puts JSON.generate([source.bytesize, outcomes, heaps])
   RUBY
 
-  # What mini_racer 0.22.1 returns for LONE's source and probes, in each of
+  # What mini_racer 0.22.2 returns for LONE's source and probes, in each of
   # its three contexts.
   LONE_OUTCOME = [
     3,

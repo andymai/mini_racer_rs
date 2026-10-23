@@ -2,7 +2,7 @@
 
 require "json"
 
-# The floors mini_racer_rs keeps against the real mini_racer 0.22.1, checked on
+# The floors mini_racer_rs keeps against the real mini_racer 0.22.2, checked on
 # the ratios bench/run.rb writes. Given several results, a row fails only if it
 # fails in every one, so a second run confirms a miss on a shared runner.
 module BenchFloors

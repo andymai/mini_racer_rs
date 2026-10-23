@@ -18,7 +18,7 @@ use crate::process::platform::Mode;
 use crate::process::{self, platform, watchdog};
 use crate::runner::Start;
 use crate::spin::spin_until;
-use crate::{EngineError, InvalidSnapshot, SnapshotBlob, runner};
+use crate::{EngineError, SnapshotBlob, runner};
 
 const MIN_RUNNER_STACK_BYTES: usize = 2 << 20;
 const STACK_HEADROOM_BYTES: usize = 1 << 20;
@@ -414,11 +414,6 @@ impl ContextHandle {
         base: Option<SnapshotBlob>,
         host: &mut impl Host,
     ) -> Result<Vec<u8>, EngineError> {
-        // A warmup from no snapshot would build the read-only heap again, which
-        // V8 aborts on once the process has one.
-        if base.as_ref().is_some_and(SnapshotBlob::is_empty) {
-            return Err(InvalidSnapshot::Empty.into());
-        }
         let context = Self::spawn(ContextConfig::default(), host)?;
         let built = context.dispatch(
             DispatchKind::Script,

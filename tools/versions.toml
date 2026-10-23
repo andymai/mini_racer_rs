@@ -19,8 +19,8 @@ commit = "b8a5855917b0cf368b1e6bf34958f92e5148dd88"
 tag = "v2.10.2"
 
 [upstream.mini_racer]
-commit = "413b11963457f176a62c6ea240d7edaf01214e76"
-tag = "v0.22.1"
+commit = "d8c91a2d7895f0460f3081739456413d2589da72"
+tag = "v0.22.2"
 
 # Native gems: one extension per Ruby minor, built to these platform floors.
 # The musl gems' Alpine images are pinned in release/alpine/Dockerfile.

@@ -9,13 +9,13 @@ A drop-in replacement for mini_racer, implemented in Rust on V8 15.2.
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Ruby 3.3 | 3.4 | 4.0](https://img.shields.io/badge/ruby-3.3%20%7C%203.4%20%7C%204.0-red.svg)](#scope)
 [![V8 15.2](https://img.shields.io/badge/V8-15.2-4285F4.svg)](#how-it-works)
-[![mini_racer 0.22.1 suite](https://img.shields.io/badge/mini__racer%200.22.1%20suite-passing-success.svg)](COMPATIBILITY.md)
+[![mini_racer 0.22.2 suite](https://img.shields.io/badge/mini__racer%200.22.2%20suite-passing-success.svg)](COMPATIBILITY.md)
 
 **[Install](#install)** · **[Quick start](#quick-start)** · **[API](#api-at-a-glance)** · **[Switching](#switching-from-mini_racer)** · **[Benchmarks](#benchmarks)** · **[How it works](#how-it-works)** · **[Compatibility](COMPATIBILITY.md)** · **[Architecture](ARCHITECTURE.md)**
 
 </div>
 
-mini_racer_rs implements the `MiniRacer` API from mini_racer 0.22.1. It defines `MiniRacer` and ships `lib/mini_racer.rb`, so `require "mini_racer"` and ExecJS keep working.
+mini_racer_rs implements the `MiniRacer` API from mini_racer 0.22.2. It defines `MiniRacer` and ships `lib/mini_racer.rb`, so `require "mini_racer"` and ExecJS keep working.
 
 > mini_racer_rs is an independent project and is not affiliated with the Discourse staff who maintain mini_racer.
 
@@ -26,11 +26,11 @@ mini_racer_rs implements the `MiniRacer` API from mini_racer 0.22.1. It defines 
 - **Bundle load:** 4.6x faster for a 44 MB production server rendering bundle (215 ms vs 983 ms).
 - **Memory:** A context holding the MUI bundle uses 43 MB vs 110 MB.
 - **Forks:** After loading and rendering React: 20 of 20 clean mini_racer_rs exits vs 20 of 20 mini_racer aborts.
-- **V8:** V8 15.2.124.1 vs V8 13.6.233.17 in mini_racer 0.22.1.
+- **V8:** V8 15.2.124.1 vs V8 13.6.233.17 in mini_racer 0.22.2.
 - **No compiler:** Native gems cover glibc and musl Linux, including Alpine, and macOS, on both architectures, with Ruby 3.3, 3.4 and 4.0 extensions.
 - **Fiber scheduler:** Three 100 ms loops in separate contexts and fibers finish in 100 ms vs 300 ms.
-- **Upstream suites:** mini_racer passes 171 of 174 with 3 skipped by itself; ExecJS passes 197 of 198 with 1 skipped.
-- **Difficult values:** A `Map` with a function key returns an error Hash instead of aborting with SIGABRT.
+- **Upstream suites:** mini_racer passes 187 of 190 with 3 skipped by itself; ExecJS passes 197 of 198 with 1 skipped.
+- **Callback jumps:** A `throw` out of an attached callback ends the script with `Error: terminated` and continues after `eval`; mini_racer 0.22.2 crashes with a segmentation fault.
 - **Checks:** Script-enforced crate boundaries, four fenced `unsafe` modules, loom, wire-codec fuzzing, nightly sanitizers and mini_racer differential tests.
 
 These numbers compare with mini_racer 0.22.1. See [Benchmarks](#benchmarks) for the method.
@@ -177,7 +177,7 @@ The public API and require path stay the same. Changes include native installati
 
 - You're affected if an attached callback reenters its context from another fiber, including inside `Enumerator#next`. mini_racer_rs raises `ThreadError`; mini_racer allows it.
 
-- You're affected if a callback exits by `throw`, returns from a proc, or receives `Thread#kill`. The script ends with `Error: terminated`. The jump continues after `eval` returns. mini_racer hangs.
+- You're affected if an attached callback exits by `throw`, returns from a proc while its method is still running, or receives `Thread#kill`. mini_racer_rs ends the script with `Error: terminated`, then continues the jump after `eval` or `call` returns. In mini_racer 0.22.2, `throw` and `return` cause a segmentation fault. `Thread#kill` gives JavaScript a catchable `Error: Ruby exception`; the script continues, and the thread ends after `eval` returns.
 
 - You're affected if JavaScript reads a callback exception's non-ASCII message. mini_racer_rs passes UTF-8, such as `"café"`; mini_racer passes `"cafÃ©"`.
 
@@ -197,20 +197,20 @@ See [COMPATIBILITY.md](COMPATIBILITY.md) for every difference.
 
 ### Gems that depend on mini_racer
 
-If another gem adds `mini_racer`, point Bundler to the repository's shim. This empty `mini_racer` gem is version 0.22.1. It depends on the `mini_racer_rs` version from the same checkout.
+If another gem adds `mini_racer`, point Bundler to the repository's shim. This empty `mini_racer` gem is version 0.22.2. It depends on the `mini_racer_rs` version from the same checkout.
 
 ```ruby
 gem "mini_racer_rs"
 gem "mini_racer", github: "andymai/mini_racer_rs", tag: "vX.Y.Z", glob: "shim/*.gemspec"
 ```
 
-The repository tests the `path:` form of the shim with rtlcss in `test/consumers/transitive/`. A dependency excluding `mini_racer` 0.22.1 cannot use the shim.
+The repository tests the `path:` form of the shim with rtlcss in `test/consumers/transitive/`. A dependency excluding `mini_racer` 0.22.2 cannot use the shim.
 
 ### Forking servers such as Puma
 
 Before forking, evaluate each bundle of 1 MiB or more twice in the master, then dispose those contexts. Use the renderer's exact source text and file name. The second evaluation builds the process-wide V8 code cache. Matching evaluations compile from it, and forked children inherit it. For Babel's 2.3 MB bundle at commit `5e13c1c`, a forked child's first load took 60.8 ms without a parent load. It took 65.5 ms after one load and 25.0 ms after two. These are medians across 5 trials. Prime a `react-rails` app by building its server renderer twice. Children do not use parent contexts. Only the cache carries over.
 
-For Ruby's `fork`, `IO.popen("-")`, or `Process.daemon`, mini_racer_rs waits for context runners, pauses its worker pool and waits for running tasks. An async `WebAssembly.compile` in a new default-mode child completes on the child's own pool. On Ubuntu 24.04 with glibc 2.39, 20 of 20 mini_racer children aborted with signal 6 after React rendering; all mini_racer_rs children exited cleanly. On Fedora, mini_racer hung within 50 `test/stress/fork_busy.rb` forks; mini_racer_rs completed 300 per run on Fedora and Ubuntu.
+For Ruby's `fork`, `IO.popen("-")`, or `Process.daemon`, mini_racer_rs waits for context runners, pauses its worker pool and waits for running tasks. An async `WebAssembly.compile` in a new default-mode child completes on the child's own pool. On Ubuntu 24.04 with glibc 2.39, 20 of 20 mini_racer 0.22.1 children aborted with signal 6 after React rendering; all mini_racer_rs children exited cleanly. mini_racer 0.22.2 has the same fork handling. On Fedora, `test/stress/fork_busy.rb` aborted with mini_racer 0.22.2 in 3 of 3 runs, after 5, 14 and 19 forks, when an evaluating parent thread raised `TypeError`. mini_racer_rs completed 300 forks per run on Fedora and Ubuntu.
 
 With `mini_racer` 0.22.1, each worker compiles the bundle from source on its first load because it has no code cache.
 
@@ -257,7 +257,7 @@ bundle exec ruby bench/run.rb --cpus 0-7
 
 | Engine | Done | Planned | Deviation |
 |---|---|---|---|
-| CRuby | 54 | 0 | 28 |
+| CRuby | 54 | 0 | 26 |
 | TruffleRuby | 58 | 0 | 0 |
 
 See [COMPATIBILITY.md](COMPATIBILITY.md).
@@ -307,9 +307,9 @@ mini_racer_rs does not:
 
 - Work reliably without Bundler. RubyGems may activate the original mini_racer first.
 
-- Satisfy dependencies pinning `mini_racer` versions other than 0.22.1. This includes minibars and its `~> 0.6.4` requirement.
+- Satisfy dependencies pinning `mini_racer` versions other than 0.22.2. This includes minibars and its `~> 0.6.4` requirement.
 
-- Extend the `MiniRacer` API beyond mini_racer 0.22.1. [COMPATIBILITY.md](COMPATIBILITY.md) records deliberate differences.
+- Extend the `MiniRacer` API beyond mini_racer 0.22.2. [COMPATIBILITY.md](COMPATIBILITY.md) records deliberate differences.
 
 Supported Rubies include TruffleRuby through mini_racer's unchanged TruffleRuby backend, as listed in [STABILITY.md](STABILITY.md#platforms-rubies-and-v8).
 
@@ -318,7 +318,7 @@ Supported Rubies include TruffleRuby through mini_racer's unchanged TruffleRuby 
 | Document | Covers |
 |---|---|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Crates, a call end to end, values, termination and limits, callbacks, promises and V8's tasks, snapshots, code cache, shared sources, fast calls, source maps, forks, fiber schedulers, rules that keep it safe, and how it is checked. |
-| [COMPATIBILITY.md](COMPATIBILITY.md) | Every public API item and deliberate difference from mini_racer 0.22.1, with its reason. |
+| [COMPATIBILITY.md](COMPATIBILITY.md) | Every public API item and deliberate difference from mini_racer 0.22.2, with its reason. |
 | [BENCHMARKS.md](BENCHMARKS.md) | Benchmark method and full results. |
 | [STABILITY.md](STABILITY.md) | Versioning, the public API, unstable interfaces, and support policy. |
 | [SECURITY.md](SECURITY.md) | Vulnerability reporting, untrusted JavaScript, and supply-chain controls. |

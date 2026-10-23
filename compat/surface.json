@@ -1,5 +1,5 @@
 {
-  "mini_racer": "0.22.1",
+  "mini_racer": "0.22.2",
   "ids": [
     "class:MiniRacer::Binary < Object",
     "class:MiniRacer::Context < Object",

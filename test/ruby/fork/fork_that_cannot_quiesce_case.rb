@@ -2,7 +2,7 @@
 
 # V8 does not interrupt JSON.parse, so a fork during a long one waits out its
 # bound and the child, unsure what V8 was in the middle of, leaves every
-# inherited context alone; new ones still work. mini_racer 0.22.1 forks at once
+# inherited context alone; new ones still work. mini_racer 0.22.2 forks at once
 # and its child uses the idle context. A parse that ends before the bound lets
 # the fork through, so the input grows until one outlasts it.
 require_relative "prelude"

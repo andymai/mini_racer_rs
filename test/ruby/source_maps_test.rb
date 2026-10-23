@@ -4,7 +4,7 @@ require "test_helper"
 require "json"
 require "mini_racer"
 
-# behavior:source-maps@ruby. mini_racer 0.22.1 has no source maps: the frames
+# behavior:source-maps@ruby. mini_racer 0.22.2 has no source maps: the frames
 # of its MiniRacer::RuntimeError, which join the error's backtrace, give V8's
 # positions in the evaluated source. With a map registered for a bundle, the
 # frames of an error in that bundle give the original source's positions

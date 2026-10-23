@@ -1,6 +1,6 @@
 name: Bench
 
-# mini_racer_rs against the real mini_racer 0.22.1 on a hosted runner, weekly
+# mini_racer_rs against the real mini_racer 0.22.2 on a hosted runner, weekly
 # and on demand. Hosted runners are shared and noisy, so the run fails only when
 # a row bench/floors.rb gates is below its floor in this run and again in a
 # second one; the rest of the table is kept for trends.
@@ -33,7 +33,7 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           ruby: "3.4"
-      - name: Install the real mini_racer 0.22.1
+      - name: Install the real mini_racer 0.22.2
         working-directory: tools/reference
         run: BUNDLE_PATH=vendor/bundle bundle install
       - run: bundle exec rake compile

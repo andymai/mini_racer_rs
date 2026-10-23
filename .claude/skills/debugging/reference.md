@@ -62,7 +62,7 @@ Reproduce with the seed from the summary line or the file names: `bundle exec ru
 
 `test/diff/run.rb` feeds each case to a long-lived worker per side (`test/diff/workers.rb`) and compares step outcomes in canonical form. Results are `tmp/diff/values-<seed>.jsonl` (seed 1 by default) or `tmp/diff/consumers.jsonl`, one line per case with its `class` and the `expected` (real gem) and `actual` (this gem) outcomes. Worker stderr goes to `tmp/diff/reference-worker.log`, `tmp/diff/candidate-worker.log` and, with `--twin`, `tmp/diff/reference-twin-worker.log`.
 
-- A worker killed by a signal records `["crash","signal <n>"]` for that step and restarts. mini_racer 0.22.1 aborts with signal 6 on some values, such as a `Map` with a function key; if this gem returns something sensible there, the difference is accepted only through a `test/diff/divergences.toml` entry naming a `compat.toml` deviation (`uncloneable-after-filter` is one).
+- A worker killed by a signal records `["crash","signal <n>"]` for that step and restarts. mini_racer 0.22.1 aborted with signal 6 on some values, such as a `Map` with a function key, which 0.22.2 returns as an error Hash; if this gem returns something sensible where mini_racer crashes, the difference is accepted only through a `test/diff/divergences.toml` entry naming a `compat.toml` deviation.
 - A worker that exits with a status is the harness failing (a Ruby exception escaped `test/diff/worker.rb`): the run stops with `the <role> worker exited with <n>; see <log>`.
 - A case over 30 seconds records `["timeout",30]` and restarts the worker.
 - `--shrink` minimizes each new divergence not already `xfail:` or `crash:` into `test/diff/corpus/min-<id>.json`, keeping how its first differing step differs.

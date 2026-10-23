@@ -193,7 +193,7 @@ impl<'r> RubyHost<'r> {
         if rb_raw::stack_exhausted(ruby) {
             return Err(errors::stack_exhausted(ruby));
         }
-        let args = RArray::from_value(decode::value(ruby, request)?).ok_or_else(bad)?;
+        let args = RArray::from_value(decode::arguments(ruby, request)?).ok_or_else(bad)?;
         let id = Integer::from_value(args.pop::<Value>()?).ok_or_else(bad)?;
         let id = isize::try_from(id.to_i64()?).map_err(|_| bad())?;
         let callables = self
