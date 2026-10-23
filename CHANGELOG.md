@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/andymai/mini_racer_rs/compare/v1.4.0...v1.5.0) (2026-10-23)
+
+
+### Features
+
+* target mini_racer 0.22.2 ([#137](https://github.com/andymai/mini_racer_rs/issues/137)) ([586475f](https://github.com/andymai/mini_racer_rs/commit/586475f231473ade936f69eb7344e9d5619fa045))
+
 ## [1.4.0](https://github.com/andymai/mini_racer_rs/compare/v1.3.0...v1.4.0) (2026-10-23)
 
 
