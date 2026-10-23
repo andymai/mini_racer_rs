@@ -72,6 +72,12 @@ jobs:
       - name: Context churn from 8 threads, multi-threaded platform
         if: ${{ !cancelled() }}
         run: bundle exec ruby -Ilib test/stress/churn.rb multi 8 600
+      - name: Heap limit hits, single-threaded platform
+        if: ${{ !cancelled() }}
+        run: bundle exec ruby -Ilib test/stress/heap_limit.rb single 300
+      - name: Heap limit hits, multi-threaded platform
+        if: ${{ !cancelled() }}
+        run: bundle exec ruby -Ilib test/stress/heap_limit.rb multi 300
 
   # Every fuzz target for 15 minutes on the pinned nightly: three, 45 minutes,
   # with room for setup and the nightly's build.
