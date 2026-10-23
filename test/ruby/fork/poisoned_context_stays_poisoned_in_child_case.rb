@@ -13,7 +13,9 @@ context = MiniRacer::Context.new
 raised(MiniRacerRs::HeapLimitError) do
   context.eval("globalThis.keep = []; for (;;) keep.push({i: keep.length, s: 'k' + keep.length});")
 end
-child do
+# Each heap limit hit fills 64 MiB and collects in full, which on the slowest
+# CI runners takes seconds.
+child(within: 30) do
   error = raised(MiniRacerRs::HeapLimitError) { context.eval("1 + 1") }
   raise "child: #{error.inspect}" unless error == STILL_OVER
 
