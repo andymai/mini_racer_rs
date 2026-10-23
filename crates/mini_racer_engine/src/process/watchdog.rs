@@ -1,5 +1,5 @@
 use std::cmp::{Ordering, Reverse};
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap, HashMap};
 use std::sync::{Arc, Condvar, Mutex, Weak};
 use std::time::{Duration, Instant};
 
@@ -7,11 +7,13 @@ use mini_racer_sync::{DispatchId, Interrupt, lock, wait, wait_timeout};
 
 use crate::EngineError;
 use crate::control::{ControlBlock, Timer};
+use crate::process::fork::Generation;
 
 struct Entry {
     at: Instant,
     seq: u64,
-    block: Weak<ControlBlock>,
+    // The context's key in `Timers::blocks`.
+    block: usize,
 }
 
 impl PartialEq for Entry {
@@ -37,6 +39,15 @@ impl Ord for Entry {
 #[derive(Default)]
 struct Timers {
     heap: BinaryHeap<Reverse<Entry>>,
+    // The contexts the entries are for, by address, each from its first
+    // timed script until its runner exits (`forget`). Entries outlive their
+    // dispatches and a weak reference keeps a context's allocation, so an
+    // entry names its context rather than holds it: held to its deadline, a
+    // disposed context's allocation fragments the malloc arena of a thread
+    // that made it and exited. An address is mapped only while its context's
+    // allocation is, and an entry left after `forget` at most wakes the
+    // watchdog to reread a slot.
+    blocks: HashMap<usize, Weak<ControlBlock>>,
     seq: u64,
 }
 
@@ -46,14 +57,27 @@ pub struct Watchdog {
 }
 
 impl Watchdog {
-    fn push(&self, at: Instant, block: Weak<ControlBlock>) {
+    fn push(&self, at: Instant, block: &Arc<ControlBlock>) {
+        let key = address(block);
         let mut timers = lock(&self.timers);
         timers.seq = timers.seq.wrapping_add(1);
         let seq = timers.seq;
-        timers.heap.push(Reverse(Entry { at, seq, block }));
+        timers
+            .blocks
+            .entry(key)
+            .or_insert_with(|| Arc::downgrade(block));
+        timers.heap.push(Reverse(Entry {
+            at,
+            seq,
+            block: key,
+        }));
         drop(timers);
         self.changed.notify_one();
     }
+}
+
+fn address(block: &ControlBlock) -> usize {
+    std::ptr::from_ref(block).addr()
 }
 
 // One thread per process serves every context's timeouts. It is kept per
@@ -118,7 +142,7 @@ fn arm(
     drop(timer);
     // A wake entry the watchdog no longer needs is harmless: it rereads the slot.
     if wake {
-        watchdog.push(at, Arc::downgrade(block));
+        watchdog.push(at, block);
     }
     Ok(())
 }
@@ -166,6 +190,15 @@ pub fn clear_nested(block: &ControlBlock, id: DispatchId) {
     lock(&block.timer).nested.retain(|(_, due)| *due != id);
 }
 
+/// Drops the watchdog's reference to a context whose runner has exited, so
+/// a deadline still pending keeps none of it.
+pub fn forget(block: &ControlBlock, generation: &Generation) {
+    let watchdog = lock(generation.watchdog()).clone();
+    if let Some(watchdog) = watchdog {
+        lock(&watchdog.timers).blocks.remove(&address(block));
+    }
+}
+
 fn run(watchdog: &Watchdog) {
     loop {
         let mut timers = lock(&watchdog.timers);
@@ -186,8 +219,10 @@ fn run(watchdog: &Watchdog) {
                     .peek()
                     .is_some_and(|Reverse(entry)| entry.at <= now)
                 {
-                    if let Some(Reverse(entry)) = timers.heap.pop() {
-                        due.push(entry.block);
+                    if let Some(Reverse(entry)) = timers.heap.pop()
+                        && let Some(block) = timers.blocks.get(&entry.block)
+                    {
+                        due.push(Weak::clone(block));
                     }
                 }
                 // Lock order: the heap is released before any context's timer
@@ -229,6 +264,6 @@ fn fire(watchdog: &Watchdog, block: &Arc<ControlBlock>, now: Instant) {
         block.term.request(Interrupt::Timeout(id));
     }
     if let Some(at) = next {
-        watchdog.push(at, Arc::downgrade(block));
+        watchdog.push(at, block);
     }
 }

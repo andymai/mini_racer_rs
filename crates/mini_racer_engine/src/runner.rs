@@ -298,6 +298,7 @@ pub fn run(block: &Arc<ControlBlock>, generation: &'static Generation, start: St
         let _ = block.channel.respond(Ok(Vec::new()));
     }
     drop(closing);
+    watchdog::forget(block, generation);
     block.phase.set(Phase::Exited);
 }
 
