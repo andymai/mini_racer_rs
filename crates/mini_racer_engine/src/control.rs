@@ -191,12 +191,12 @@ pub struct ContextConfig {
 
 /// The context's pending timeout and the earliest deadline the watchdog holds
 /// for it, so the watchdog keeps about one entry per context, not per dispatch.
-/// A nested script timed on its own has a slot apart, so the outermost
-/// dispatch's deadline outlives it.
+/// Nested scripts timed on their own have slots apart, innermost last, so
+/// the deadlines around each outlive it.
 #[derive(Default)]
 pub struct Timer {
     pub due: Option<(Instant, DispatchId)>,
-    pub nested: Option<(Instant, DispatchId)>,
+    pub nested: Vec<(Instant, DispatchId)>,
     pub queued: Option<Instant>,
 }
 

@@ -97,7 +97,7 @@ pub fn schedule_nested(
     block: &Arc<ControlBlock>,
     id: DispatchId,
 ) -> Result<(), EngineError> {
-    arm(after, block, |timer, at| timer.nested = Some((at, id)))
+    arm(after, block, |timer, at| timer.nested.push((at, id)))
 }
 
 fn arm(
@@ -123,12 +123,18 @@ fn arm(
     Ok(())
 }
 
-/// Whether the outermost dispatch's own timeout fires within `after` from now.
+/// Whether the outermost dispatch's own timeout, or a nested script's, fires
+/// within `after` from now.
 pub fn ends_within(block: &ControlBlock, after: Duration) -> bool {
     let Some(deadline) = Instant::now().checked_add(after) else {
         return true;
     };
-    lock(&block.timer).due.is_some_and(|(at, _)| at <= deadline)
+    let timer = lock(&block.timer);
+    timer
+        .due
+        .iter()
+        .chain(&timer.nested)
+        .any(|(at, _)| *at <= deadline)
 }
 
 /// Bounds work `dispatch` does after its timeout fired with the timeout again.
@@ -157,10 +163,7 @@ pub fn clear(block: &ControlBlock, dispatch: DispatchId) {
 
 /// Forgets a nested script's own timeout once the script is over.
 pub fn clear_nested(block: &ControlBlock, id: DispatchId) {
-    let mut timer = lock(&block.timer);
-    if timer.nested.is_some_and(|(_, due)| due == id) {
-        timer.nested = None;
-    }
+    lock(&block.timer).nested.retain(|(_, due)| *due != id);
 }
 
 fn run(watchdog: &Watchdog) {
@@ -199,23 +202,30 @@ fn run(watchdog: &Watchdog) {
 }
 
 fn fire(watchdog: &Watchdog, block: &Arc<ControlBlock>, now: Instant) {
-    let mut guard = lock(&block.timer);
-    let timer = &mut *guard;
-    let fired = [&mut timer.due, &mut timer.nested].map(|slot| {
-        let (at, id) = (*slot)?;
-        (at <= now).then(|| {
-            *slot = None;
-            id
-        })
+    let mut timer = lock(&block.timer);
+    let mut fired = Vec::new();
+    if let Some((at, id)) = timer.due
+        && at <= now
+    {
+        timer.due = None;
+        fired.push(id);
+    }
+    timer.nested.retain(|&(at, id)| {
+        let due = at <= now;
+        if due {
+            fired.push(id);
+        }
+        !due
     });
-    let next = [timer.due, timer.nested]
-        .into_iter()
-        .flatten()
-        .map(|(at, _)| at)
+    let next = timer
+        .due
+        .iter()
+        .chain(&timer.nested)
+        .map(|(at, _)| *at)
         .min();
     timer.queued = next;
-    drop(guard);
-    for id in fired.into_iter().flatten() {
+    drop(timer);
+    for id in fired {
         block.term.request(Interrupt::Timeout(id));
     }
     if let Some(at) = next {

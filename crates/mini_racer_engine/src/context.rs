@@ -630,9 +630,9 @@ impl ContextHandle {
     }
 
     // A nested script gets a timeout of its own, the context's tightened by
-    // the script's, unless the outermost script's ends it first: in an untimed
-    // dispatch always, as with `timeout:`, and in a script when its own is the
-    // shorter.
+    // the script's, unless a script around it ends first: in an untimed
+    // dispatch always, as with `timeout:`, and otherwise when its own is the
+    // shortest.
     fn nested(
         &self,
         block: &Arc<ControlBlock>,
