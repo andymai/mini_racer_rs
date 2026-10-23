@@ -125,7 +125,8 @@ impl DispatchKind {
 }
 
 /// A request to terminate. Timeouts and cancellations name the dispatch they
-/// belong to and are dropped if it has already ended.
+/// belong to and are dropped if it has already ended; an exhausted heap is
+/// dropped when none is armed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Interrupt {
     Stop,
@@ -352,13 +353,17 @@ impl<T: Terminator> TermCell<T> {
     }
 
     /// Records `interrupt` and terminates the armed dispatch. Returns false
-    /// when the interrupt names a dispatch that is no longer armed.
+    /// when the interrupt names a dispatch that is no longer armed, or is an
+    /// exhausted heap with none armed, which has no script to end.
     pub fn request(&self, interrupt: Interrupt) -> bool {
         let mut state = lock(&self.state);
         if let Some(id) = interrupt.dispatch()
             && state.armed.map(|armed| armed.id) != Some(id)
             && !(matches!(interrupt, Interrupt::Timeout(_)) && state.nested_timer == Some(id))
         {
+            return false;
+        }
+        if interrupt == Interrupt::HeapExhausted && state.armed.is_none() {
             return false;
         }
         state.causes = state.causes.with(interrupt.cause());
@@ -649,10 +654,13 @@ mod tests {
     const EXHAUSTED: Option<Halt> = Some(Halt::Terminated(TerminationCause::HeapExhausted));
 
     // Whatever kind of dispatch the heap filled up in, and however it ended,
-    // the next script runs.
+    // the next script runs; with none armed, it is not recorded at all.
     #[test]
     fn an_exhausted_heap_ends_with_its_dispatch() {
         let (cell, calls) = cell();
+        assert!(!cell.request(Interrupt::HeapExhausted));
+        assert_eq!(calls.terminate.get(), 0);
+        assert_eq!(run(&cell, DispatchKind::Script), None);
         let id = cell
             .begin(DispatchKind::Maintenance)
             .expect("nothing armed");
@@ -1057,10 +1065,10 @@ mod tests {
     fn a_dispose_or_an_exhausted_heap_is_never_lifted() {
         let (exhausted, calls) = cell();
         exhausted.request(Interrupt::Stop);
-        exhausted.request(Interrupt::HeapExhausted);
         let outer = exhausted
             .begin(DispatchKind::Script)
             .expect("nothing armed");
+        exhausted.request(Interrupt::HeapExhausted);
         assert!(!exhausted.spend(exhausted.mark(), true));
         assert!(exhausted.refuses(DispatchKind::Script));
         assert_eq!(calls.cancel.get(), 0);
@@ -1228,9 +1236,9 @@ mod tests {
             Some(Halt::Terminated(TerminationCause::MaxMemory))
         );
 
-        cell.request(Interrupt::HeapExhausted);
+        assert!(!cell.request(Interrupt::HeapExhausted));
         cell.relocked();
-        assert!(cell.refuses(DispatchKind::Script));
+        assert!(!cell.refuses(DispatchKind::Script));
     }
 
     // mini_racer's restore_termination: a nested script that reports a stop
