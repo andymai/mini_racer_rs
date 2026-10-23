@@ -147,9 +147,10 @@ fn first(sizing: [bool; SIZING.len()]) -> Option<&'static str> {
 // even when it starts with a dash. It sets a size before it finds a negation
 // or characters after the number wrong, goes on past a negative size, and
 // stops at an unknown flag or other errors only after setting what came
-// before. So every argument up to `--` counts, a following argument both as a
-// value and as a flag, and a size or a boolean is cleared only by a flag that
-// is that one argument, which V8 must read whole.
+// before. So every argument up to a `--` V8 cannot take as a flag's value
+// counts, a following argument both as a value and as a flag, and a size or a
+// boolean is cleared only by a flag that is that one argument, which V8 must
+// read whole.
 fn read_sizing(flag: &str, before: [bool; SIZING.len()]) -> [bool; SIZING.len()] {
     // C's isspace, which V8 splits at.
     let space = |c: char| matches!(c, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r');
@@ -163,10 +164,13 @@ fn read_sizing(flag: &str, before: [bool; SIZING.len()]) -> [bool; SIZING.len()]
         *set = false;
         return sizing;
     }
+    let mut previous: Option<&str> = None;
     for (at, arg) in args.iter().enumerate() {
-        if *arg == "--" {
+        let takes_value = previous.is_some_and(|flag| flag.starts_with('-') && !flag.contains('='));
+        if *arg == "--" && !takes_value {
             break;
         }
+        previous = Some(arg);
         let Some((index, read)) = parse(arg) else {
             continue;
         };
@@ -391,7 +395,9 @@ mod tests {
             (b"initial_heap_size", Some(b"64"), NONE),
             (b"optimize_for_size", None, NONE),
             (b"MAX_OLD_SPACE_SIZE", Some(b"64"), NONE),
-            (b"use_strict -- --max-heap-size=64", None, NONE),
+            (b"stack_size=1 -- --max-heap-size=64", None, NONE),
+            // A flag of another kind might take the `--` as its value.
+            (b"logfile -- --max-heap-size=64", None, HEAP),
         ] {
             assert_eq!(
                 sizing_after(&[(name, value)]),
