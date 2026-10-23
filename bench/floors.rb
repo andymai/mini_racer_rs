@@ -9,7 +9,7 @@ module BenchFloors
   FLOOR = 0.8
   ROUND_TRIP_FLOOR = 2.0
   ROUND_TRIPS = ["eval round trip p50 (us)", "call round trip p50 (us)", "call with timeout p50 (us)",
-                 "callback round trip p50 (us)",].freeze
+                 "call in a timeout scope p50 (us)", "callback round trip p50 (us)",].freeze
   # Tail latency on a shared runner moves with its neighbors, not with the gem.
   TAIL = /\bp99/
 

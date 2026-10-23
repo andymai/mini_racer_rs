@@ -65,6 +65,16 @@ fn within(
     }
 }
 
+/// Milliseconds as `timeout:` takes them: an Integer up to 2**31 - 1, where 0
+/// means no timeout. `MiniRacerRs.timeout` takes the same.
+pub fn timeout(value: &OptionValue) -> Result<Option<Duration>, OptionError> {
+    let ms = within(value, "timeout", 0..=INT32_MAX)?;
+    Ok(u64::try_from(ms)
+        .ok()
+        .filter(|ms| *ms > 0)
+        .map(Duration::from_millis))
+}
+
 /// `Context.new` keywords in the order given; `mini_racer` 0.22.1 checks them
 /// last to first and raises on the first bad one.
 pub fn configure(
@@ -74,13 +84,7 @@ pub fn configure(
     let mut refused = None;
     for (key, value) in options.rev() {
         match key.as_str() {
-            "timeout" => {
-                let ms = within(&value, "timeout", 0..=INT32_MAX)?;
-                config.timeout = u64::try_from(ms)
-                    .ok()
-                    .filter(|ms| *ms > 0)
-                    .map(Duration::from_millis);
-            }
+            "timeout" => config.timeout = timeout(&value)?,
             "marshal_stack_depth" => {
                 fixnum(&value)?;
             }

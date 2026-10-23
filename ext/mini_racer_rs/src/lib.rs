@@ -21,6 +21,7 @@ mod rb_raw;
 mod snapshot;
 mod source_maps;
 mod spin;
+mod timeout;
 
 use magnus::{Error, Module, Ruby};
 
@@ -49,6 +50,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     context::init(ruby, racer)?;
     snapshot::init(ruby, racer)?;
     source_maps::init(rs)?;
+    timeout::init(ruby, rs)?;
     counters::init(rs)?;
     fork::init(ruby, rs)?;
     Ok(())
