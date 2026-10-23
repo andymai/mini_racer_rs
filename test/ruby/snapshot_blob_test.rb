@@ -54,7 +54,7 @@ class SnapshotBlobTest < Minitest::Test
     assert_equal "snapshot context section is invalid", error.message
   end
 
-  # Each section starts at an offset in the header, the startup section at
+  # Each section starts at an offset in the header, V8 15.2's read-only one at
   # the first 8-byte boundary after it, and ends where the next one starts.
   def sections(bytes)
     contexts = word(bytes, 0)
@@ -65,11 +65,22 @@ class SnapshotBlobTest < Minitest::Test
 
   def with_payload(bytes, section, length) = resummed(bytes.dup.tap { |b| b[section + 4, 4] = [length].pack("V") })
 
+  # V8 opens every section with its magic number, which the engine pins as
+  # SnapshotBlob::MAGIC and every section must carry whole; on a target whose
+  # V8 differs this fails, and so does every blob it loads.
+  def test_every_section_of_a_blob_v8_writes_opens_with_the_pinned_magic_number
+    good = blob
+
+    sections(good).map(&:first).each { |start| assert_equal 0xC0DE06C1, word(good, start), "at #{start}" }
+    assert_equal 1, MiniRacer::Context.new(snapshot: MiniRacer::Snapshot.load(good)).eval("a")
+  end
+
   # Deviation behavior:invalid-snapshot@ruby: mini_racer 0.22.2 hands V8 a
   # blob whose checksum matches, and V8 reads a section's payload for as long
   # as the section's header says, past the section's end.
   def test_load_refuses_a_section_whose_payload_runs_past_it
     good = blob
+    # mini_racer's messages call the section word 80 starts the read-only one.
     kinds = %w[startup read-only shared-heap context]
     sections(good).each_with_index do |(start, finish), index|
       overlong = with_payload(good, start, finish - start - 8 + 1)

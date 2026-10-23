@@ -177,23 +177,47 @@ fn every_blob_v8_writes_is_accepted() {
     assert_eq!(SnapshotBlob::check(&[]), Ok(()));
 }
 
+// Where V8 15.2 starts each section: the read-only one at the first 8-byte
+// boundary past the header, then the ones words 80, 84 and 88 on name.
 struct Layout {
     blob: Vec<u8>,
-    startup: usize,
     read_only: usize,
+    startup: usize,
     shared_heap: usize,
     last: usize,
+    sections: Vec<(usize, usize)>,
 }
 
 fn layout() -> Layout {
     let blob = snapshot("var a = 1", None).expect("snapshot");
     let contexts = word(&blob, 0);
+    let mut starts = vec![(88 + 4 * contexts).next_multiple_of(8)];
+    starts.extend(
+        [80, 84]
+            .into_iter()
+            .chain((0..contexts).map(|i| 88 + 4 * i))
+            .map(|at| word(&blob, at)),
+    );
+    let ends = starts.iter().skip(1).copied().chain([blob.len()]);
     Layout {
-        startup: (88 + 4 * contexts).next_multiple_of(8),
-        read_only: word(&blob, 80),
-        shared_heap: word(&blob, 84),
-        last: word(&blob, 88 + 4 * (contexts - 1)),
+        read_only: starts[0],
+        startup: starts[1],
+        shared_heap: starts[2],
+        last: starts[starts.len() - 1],
+        sections: starts.iter().copied().zip(ends).collect(),
         blob,
+    }
+}
+
+// What a damaged section is refused with, in V8's order of sections, by the
+// names mini_racer's messages give them: the section word 80 starts is its
+// read-only one, the one before it its startup one.
+const fn refusal(section: usize) -> InvalidSnapshot {
+    match section {
+        0 => InvalidSnapshot::Startup,
+        1 => InvalidSnapshot::ReadOnly,
+        2 => InvalidSnapshot::SharedHeap,
+        _ => InvalidSnapshot::Context,
     }
 }
 
@@ -226,14 +250,14 @@ fn assert_refused(refused: &[(Vec<u8>, InvalidSnapshot)]) {
 fn refuses_a_header_as_mini_racer_does() {
     let Layout {
         blob,
-        startup,
         read_only,
+        startup,
         shared_heap,
         ..
     } = layout();
     let len = blob.len();
     let half = len / 2;
-    let cut_in_half = if read_only > half {
+    let cut_in_half = if startup > half {
         InvalidSnapshot::ReadOnly
     } else if shared_heap > half {
         InvalidSnapshot::SharedHeap
@@ -267,7 +291,7 @@ fn refuses_a_header_as_mini_racer_does() {
             InvalidSnapshot::ContextTable,
         ),
         (
-            changed(&blob, |b| set_word(b, 80, offset(startup))),
+            changed(&blob, |b| set_word(b, 80, offset(read_only))),
             InvalidSnapshot::ReadOnly,
         ),
         (
@@ -277,7 +301,7 @@ fn refuses_a_header_as_mini_racer_does() {
         (
             changed(&blob, |b| {
                 set_word(b, 80, offset(shared_heap));
-                set_word(b, 84, offset(read_only));
+                set_word(b, 84, offset(startup));
             }),
             InvalidSnapshot::SharedHeap,
         ),
@@ -290,20 +314,22 @@ fn refuses_a_header_as_mini_racer_does() {
 }
 
 // mini_racer's checksum; then, past it, a section V8 aborts on or reads past
-// the end of, whose checksum anyone can make match, which mini_racer hands V8.
+// the end of, whose checksum anyone can make match, which mini_racer hands V8:
+// one whose magic number differs from V8's in any bit, the same wrong one in
+// every section included, or whose payload runs past it.
 #[test]
 fn refuses_a_damaged_blob_as_mini_racer_does_and_one_v8_aborts_on() {
     let Layout {
         blob,
-        startup,
         read_only,
-        shared_heap,
         last,
+        sections,
+        ..
     } = layout();
     let len = blob.len();
     let mut refused = vec![
         (
-            changed(&blob, |b| b[startup] ^= 1),
+            changed(&blob, |b| b[read_only] ^= 1),
             InvalidSnapshot::Checksum,
         ),
         (changed(&blob, |b| b[last] ^= 1), InvalidSnapshot::Checksum),
@@ -313,40 +339,43 @@ fn refuses_a_damaged_blob_as_mini_racer_does_and_one_v8_aborts_on() {
             InvalidSnapshot::Checksum,
         ),
         (
-            resummed(&blob, |b| b[startup + 3] ^= 1),
-            InvalidSnapshot::Startup,
+            resummed(&blob, |b| {
+                for &(start, _) in &sections {
+                    set_word(b, start, SnapshotBlob::MAGIC ^ 1);
+                }
+            }),
+            refusal(0),
         ),
         (
-            resummed(&blob, |b| b[read_only + 3] ^= 1),
-            InvalidSnapshot::ReadOnly,
+            resummed(&blob, |b| set_word(b, sections[1].0 + 4, 1 << 31)),
+            refusal(1),
         ),
-        (
-            resummed(&blob, |b| set_word(b, read_only + 4, 1 << 31)),
-            InvalidSnapshot::ReadOnly,
-        ),
-        (
-            overlong(&blob, startup, read_only),
-            InvalidSnapshot::Startup,
-        ),
-        (
-            overlong(&blob, read_only, shared_heap),
-            InvalidSnapshot::ReadOnly,
-        ),
-        (
-            overlong(&blob, shared_heap, word(&blob, 88)),
-            InvalidSnapshot::SharedHeap,
-        ),
-        (overlong(&blob, last, len), InvalidSnapshot::Context),
-        (
-            resummed(&blob, |b| b[shared_heap] ^= 1),
-            InvalidSnapshot::SharedHeap,
-        ),
-        (resummed(&blob, |b| b[last] ^= 1), InvalidSnapshot::Context),
     ];
+    for (index, &(start, end)) in sections.iter().enumerate() {
+        for bit in [0, 9, 31] {
+            let damaged = resummed(&blob, |b| b[start + bit / 8] ^= 1 << (bit % 8));
+            refused.push((damaged, refusal(index)));
+        }
+        refused.push((overlong(&blob, start, end), refusal(index)));
+    }
     for cut in [last + 8, last + 4, len - 1] {
         refused.push((blob[..cut].to_vec(), InvalidSnapshot::Checksum));
     }
     assert_refused(&refused);
+}
+
+// Every section of every blob V8 writes opens with the one word the check
+// expects, so a v8 crate whose table is another size fails here first.
+#[test]
+fn every_section_opens_with_v8s_magic_number() {
+    let Layout { blob, sections, .. } = layout();
+    for (start, _) in sections {
+        assert_eq!(
+            word(&blob, start),
+            SnapshotBlob::MAGIC as usize,
+            "at {start}"
+        );
+    }
 }
 
 // Once its checksum matches, what a section holds within its bounds is V8's
@@ -366,8 +395,8 @@ fn leaves_what_a_section_holds_to_v8_once_its_checksum_matches() {
     });
     assert_eq!(SnapshotBlob::check(&filled), Ok(()));
     assert_eq!(eval_in(&filled, "a + 1"), 42);
-    let read_only = word(&blob, 80);
-    let damaged = resummed(&blob, |b| b[read_only + 4096] ^= 1);
+    let startup = word(&blob, 80);
+    let damaged = resummed(&blob, |b| b[startup + 4096] ^= 1);
     assert_eq!(SnapshotBlob::check(&damaged), Ok(()));
     let adler = changed(&blob, |b| set_word(b, 8, checksum(&blob, ADLER)));
     assert_eq!(eval_in(&adler, "a + 1"), 42);

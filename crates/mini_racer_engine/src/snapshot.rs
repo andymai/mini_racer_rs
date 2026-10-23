@@ -13,24 +13,24 @@ pub const PRISTINE: usize = 0;
 
 // How V8 15.2 lays a blob out (`SnapshotImpl` in v8/src/snapshot/snapshot.cc):
 // little-endian words for its context count, whether it can be rehashed and
-// two checksums, its version string, then the offsets of its sections. The
-// startup section starts at the first 8-byte boundary after the header, and
-// each section opens with V8's magic number and its payload's length.
+// two checksums, its version string, then the offsets of its startup section,
+// its shared heap section and each context's. The read-only section comes
+// first, at the first 8-byte boundary after the header, and each section opens
+// with V8's magic number and its payload's length. mini_racer's messages, which
+// the refusals keep, call the section word 80 starts the read-only one and the
+// one before it the startup one.
 const CONTEXTS: usize = 0;
 const REHASHABLE: usize = 4;
 const CHECKSUM: usize = 8;
 // The checksum covers everything after its own word.
 const CHECKSUMMED: usize = 12;
 const VERSION_END: usize = 16 + 64;
-const READ_ONLY: usize = 80;
+const STARTUP: usize = 80;
 const SHARED_HEAP: usize = 84;
 const FIRST_CONTEXT: usize = 88;
 const WORD: usize = 4;
 const ALIGNMENT: usize = 8;
 const SECTION_HEADER: usize = 8;
-// V8's magic number is 0xC0DE0000 exclusive-ored with a table size under 2^16,
-// so this is its top half.
-const MAGIC_HIGH: usize = 0xC0DE;
 // V8 checksums a blob with zlib's Adler-32 when built with zlib, as
 // libv8-node's is, and with its own Fletcher-32 otherwise, as the v8 crate's
 // is; mini_racer accepts either.
@@ -81,6 +81,12 @@ const INTL_REFUSED: &str = "Intl is not supported in Snapshot.new scripts";
 pub struct SnapshotBlob(Arc<[u8]>);
 
 impl SnapshotBlob {
+    /// The word V8 opens each section of a blob with, which its deserializer
+    /// checks: `SerializedData::kMagicNumber`, 0xC0DE0000 exclusive-ored with
+    /// the size of V8's external reference table, here V8 15.2's in the v8
+    /// crate 152.2.0.
+    pub const MAGIC: u32 = 0xC0DE_06C1;
+
     pub fn new(bytes: &[u8]) -> Result<Self, InvalidSnapshot> {
         Self::check(bytes)?;
         Ok(Self(Arc::from(bytes)))
@@ -153,8 +159,8 @@ fn word(bytes: &[u8], at: usize) -> Option<usize> {
     usize::try_from(u32::from_le_bytes(word.try_into().ok()?)).ok()
 }
 
-// Where each section starts, from the startup section to the end of the blob,
-// with `mini_racer`'s checks on the header and the offsets in its order.
+// Where each section starts, from the read-only section to the end of the
+// blob, with `mini_racer`'s checks on the header and the offsets in its order.
 fn section_ends(bytes: &[u8]) -> Result<Vec<usize>, InvalidSnapshot> {
     let len = bytes.len();
     let read = |at| word(bytes, at).ok_or(InvalidSnapshot::TooShort);
@@ -168,19 +174,19 @@ fn section_ends(bytes: &[u8]) -> Result<Vec<usize>, InvalidSnapshot> {
     if contexts > (len - FIRST_CONTEXT) / WORD {
         return Err(InvalidSnapshot::ContextTable);
     }
-    let startup = (FIRST_CONTEXT + contexts * WORD).next_multiple_of(ALIGNMENT);
-    if startup > len {
+    let read_only = (FIRST_CONTEXT + contexts * WORD).next_multiple_of(ALIGNMENT);
+    if read_only > len {
         return Err(InvalidSnapshot::ContextTable);
     }
-    let read_only = read(READ_ONLY)?;
-    if read_only <= startup || read_only > len {
+    let startup = read(STARTUP)?;
+    if startup <= read_only || startup > len {
         return Err(InvalidSnapshot::ReadOnly);
     }
     let shared_heap = read(SHARED_HEAP)?;
-    if shared_heap <= read_only || shared_heap > len {
+    if shared_heap <= startup || shared_heap > len {
         return Err(InvalidSnapshot::SharedHeap);
     }
-    let mut ends = vec![startup, read_only, shared_heap];
+    let mut ends = vec![read_only, startup, shared_heap];
     for index in 0..contexts {
         let offset = read(FIRST_CONTEXT + index * WORD)?;
         if ends.last().is_some_and(|previous| offset <= *previous) || offset >= len {
@@ -214,16 +220,11 @@ fn checksum(bytes: &[u8], modulus: u64) -> u64 {
     high << 16 | low
 }
 
-// V8 aborts on a section that does not open with its magic number, which every
-// section shares, and reads a section's payload for as long as its header says
-// without a check. `ends` starts at the startup section, so each pair of
-// neighbors bounds a section, in the order of mini_racer's messages.
+// V8 aborts on a section that does not open with its magic number, and reads a
+// section's payload for as long as its header says without a check. `ends`
+// starts at the read-only section, so each pair of neighbors bounds a section,
+// in the order of mini_racer's messages.
 fn sections_fit(bytes: &[u8], ends: &[usize]) -> Result<(), InvalidSnapshot> {
-    let magic = ends
-        .first()
-        .and_then(|start| word(bytes, *start))
-        .filter(|magic| magic >> 16 == MAGIC_HIGH)
-        .ok_or(InvalidSnapshot::Startup)?;
     for (index, bounds) in ends.windows(2).enumerate() {
         let refused = match index {
             0 => InvalidSnapshot::Startup,
@@ -236,7 +237,8 @@ fn sections_fit(bytes: &[u8], ends: &[usize]) -> Result<(), InvalidSnapshot> {
             .zip(bounds.get(1))
             .and_then(|(start, end)| bytes.get(*start..*end))
             .ok_or(refused)?;
-        let fits = word(section, 0) == Some(magic)
+        let magic = word(section, 0).and_then(|magic| u32::try_from(magic).ok());
+        let fits = magic == Some(SnapshotBlob::MAGIC)
             && word(section, WORD)
                 .zip(section.len().checked_sub(SECTION_HEADER))
                 .is_some_and(|(payload, room)| payload <= room);

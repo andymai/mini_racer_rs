@@ -43,8 +43,9 @@ pub enum InvalidSnapshot {
     NoContexts,
     #[error("snapshot context table is invalid")]
     ContextTable,
-    /// A startup section V8 aborts on or reads past, which `mini_racer`
-    /// hands V8.
+    /// The section before the one word 80 starts, V8 15.2's read-only one,
+    /// which V8 aborts on or reads past and `mini_racer` hands V8, named as
+    /// `mini_racer`'s messages name it.
     #[error("snapshot startup section is invalid")]
     Startup,
     #[error("snapshot read-only section is invalid")]
