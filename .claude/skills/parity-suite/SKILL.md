@@ -5,7 +5,7 @@ description: Use when running mini_racer's or ExecJS's test suite against mini_r
 
 # Parity Suite
 
-Parity means mini_racer 0.22.1's own tests pass unmodified. `vendor/mini_racer` is that release as a submodule and is never edited. `test/upstream/run.rb` runs its suite against this gem (or, with `--reference`, against the real mini_racer from `tools/reference`) and compares every result with the ledger. `--suite execjs` runs ExecJS 2.10.2's suite (`vendor/execjs`) the same way with `EXECJS_RUNTIME=MiniRacer`, against `test/upstream/execjs.status.toml`; its failures belong to milestone M8.
+Parity means mini_racer 0.22.1's own tests pass unmodified. `vendor/mini_racer` is that release as a submodule and is never edited. `test/upstream/run.rb` runs its suite against this gem (or, with `--reference`, against the real mini_racer from `tools/reference`) and compares every result with the ledger. `--suite execjs` runs ExecJS 2.10.2's suite (`vendor/execjs`) the same way with `EXECJS_RUNTIME=MiniRacer`, against `test/upstream/execjs.status.toml`.
 
 ## Quick reference
 
@@ -60,7 +60,7 @@ Locally, write runs into a fresh directory with `--out <dir>/<name>.jsonl` (one 
 
 `compat/surface.json` lists every public id of mini_racer 0.22.1 (constants, classes with their superclass, instance and singleton methods, keyword arguments, required standard libraries), reflected from the real gem on CRuby and TruffleRuby; an id found on one engine only ends in `@ruby` or `@truffleruby`. Keywords that upstream's C parses by hand are found by calling with each one (`KEYWORD_PROBES` in `tools/compat/reflect.rb`). `compat.toml` gives each id a status for CRuby: `done`, `todo:<milestone>`, or `deviation` with a `reason` (an `approved` date is the owner's to add). A surface deviation means the id is absent on purpose; a behavior difference gets its own `behavior:<kebab>` id, optionally engine-scoped. On TruffleRuby mini_racer_rs runs upstream's backend, so its surface must match exactly.
 
-What this gem adds under `MiniRacerRs` is reflected apart, as the candidate report's `extra_ids`, and recorded in `compat.toml`'s `[extra]` table by the same id grammar with `status = "done"`, or `"internal"` for what callers never use (`MiniRacerRs::Pins`, `ForkHook`); `COMPATIBILITY.md` lists them under Additions. On TruffleRuby the native extension never loads, so `MiniRacerRs` holds only `VERSION`, and an id the extension defines ends in `@ruby`.
+What this gem adds under `MiniRacerRs` is reflected apart, as the candidate report's `extra_ids`, and recorded in `compat.toml`'s `[extra]` table by the same id grammar with `status = "done"`, or `"internal"` for what callers never use (`MiniRacerRs::Pins`, `Spill`, `ForkHook`); `COMPATIBILITY.md` lists them under Additions. On TruffleRuby the native extension never loads, so `MiniRacerRs` holds only `VERSION`, and an id the extension defines ends in `@ruby`.
 
 | Task | Command |
 |---|---|

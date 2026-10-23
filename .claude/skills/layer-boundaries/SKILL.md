@@ -38,7 +38,7 @@ The engine never calls Ruby; the extension never names `v8` or `mini_racer_sync`
 
 **Adding a Ruby method or an extern "C" fn.** Define methods through `export!` in `ext/mini_racer_rs/src/lib.rs`. Every `extern "C"` body calls `guard()` (extension) or `catch_unwind` (engine).
 
-**Keeping a Ruby value in Rust.** Use `gc_root::StaticRoot` (or the collection types `gc_root` gains later); never a bare `Lazy`, `Opaque`, `BoxValue`, or `rb_gc_register_*`.
+**Keeping a Ruby value in Rust.** Use a `gc_root` type (`StaticRoot`, `OwnedRoot`, `OnceRoot`, `Pins`, `Spill`); never a bare `Lazy`, `Opaque`, `BoxValue`, or `rb_gc_register_*`.
 
 **Adding process-global state.** Declare it under `crates/mini_racer_engine/src/process.rs` or `crates/mini_racer_engine/src/process/`, so fork reconciliation can find it.
 

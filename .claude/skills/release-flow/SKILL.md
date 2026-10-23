@@ -26,13 +26,6 @@ A release is a merged release-please PR. Merging it tags `vX.Y.Z` and publishes 
 | Lockfiles after a version bump | `scripts/sync-release-locks.sh` |
 | Smoke-test an installed gem | `EXPECTED_PLATFORM=<platform or ruby> ruby release/smoke.rb`, from outside the checkout |
 
-## Before the first release
-
-1. The release-kun App secrets `RELEASE_KUN_APP_ID` and `RELEASE_KUN_APP_PRIVATE_KEY`, as Actions and Dependabot secrets. Without them the Release Please workflow only leaves a notice: workflows here may not create pull requests with `GITHUB_TOKEN`.
-2. A dry run on `main`, then a committed release/size-budget.toml with `max_bytes` set to the largest gem times 1.15, at most 75,000,000.
-3. Within 12 hours before the first tag: a pending trusted publisher on RubyGems.org for `mini_racer_rs`, repository andymai/mini_racer_rs, workflow file release.yml, environment `rubygems`. Pending publishers expire after 12 hours.
-4. Only then set `RELEASE_HOLD` to `false`.
-
 ## When something goes wrong
 
 | Symptom | Meaning | Next step |
