@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -174,6 +174,47 @@ pub struct ContextConfig {
     /// Has V8 report each exception that escapes a script, as `mini_racer`'s
     /// verbose `TryCatch` does: it prints where it happened to stdout.
     pub verbose_exceptions: bool,
+    /// The heap size, in bytes, V8 is given for the isolate. A script that
+    /// reaches it ends with `TerminationCause::HeapExhausted` where V8 would
+    /// abort the process, as long as what it allocates past the limit fits
+    /// in the room the runner lends V8 to end it.
+    pub heap_limit: Option<usize>,
+}
+
+/// What V8's near-heap-limit callback and the runner share for a context
+/// with a heap limit. The callback touches nothing else but the termination
+/// cell, so V8 may call it from any thread.
+#[derive(Default)]
+pub struct HeapWatch {
+    /// V8's limit for the old generation under the heap limit, which a hit
+    /// raises and the runner puts back.
+    pub old_generation: AtomicUsize,
+    /// V8's whole heap size limit under the heap limit, which the runner
+    /// checks once it has put the old generation's back.
+    pub reserved: AtomicUsize,
+    /// V8 called the callback since the runner last recovered.
+    pub hit: AtomicBool,
+    /// V8 terminated a script since the runner last recovered.
+    pub ended: AtomicBool,
+    /// The runner is collecting on its own, with no script to terminate.
+    pub collecting: AtomicBool,
+    /// A collection after a hit left the heap over its limit, so the context
+    /// runs no more JavaScript.
+    pub poisoned: AtomicBool,
+}
+
+impl HeapWatch {
+    /// For a forked child taking over the isolate this watched in its parent.
+    pub fn inherit(&self, parent: &Self) {
+        for (mine, theirs) in [
+            (&self.old_generation, &parent.old_generation),
+            (&self.reserved, &parent.reserved),
+        ] {
+            mine.store(theirs.load(Ordering::Relaxed), Ordering::Relaxed);
+        }
+        self.poisoned
+            .store(parent.poisoned.load(Ordering::Relaxed), Ordering::Relaxed);
+    }
 }
 
 /// The context's pending timeout and the earliest deadline the watchdog holds
@@ -205,6 +246,7 @@ pub struct ControlBlock {
     // An idle single-threaded runner leaves its isolate here, its only owner
     // then, so a forked child can hand it to a runner of its own.
     pub custody: Mutex<Option<v8::SharedIsolate>>,
+    pub heap: HeapWatch,
 }
 
 impl Drop for ControlBlock {
@@ -255,6 +297,7 @@ impl ControlBlock {
             isolate: OnceLock::new(),
             building: Mutex::new(None),
             custody: Mutex::new(None),
+            heap: HeapWatch::default(),
         }
     }
 }

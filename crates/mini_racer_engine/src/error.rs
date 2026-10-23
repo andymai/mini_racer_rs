@@ -8,6 +8,23 @@ pub enum FlagError {
     TooLong,
     #[error("platform already initialized")]
     AlreadyInitialized,
+    /// The flag sets a heap size V8 would use in place of the heap limit.
+    #[error("--{0} would override the heap limit")]
+    OverridesHeapLimit(&'static str),
+}
+
+/// Why `platform::set_heap_limit` refused a limit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum HeapLimitError {
+    #[error(
+        "heap limit must be from {} to {} bytes",
+        crate::process::platform::MIN_HEAP_LIMIT,
+        crate::process::platform::MAX_HEAP_LIMIT
+    )]
+    Range,
+    /// A flag already set sizes the heap in its place.
+    #[error("the heap limit would be overridden by --{0}")]
+    Overridden(&'static str),
 }
 
 /// Why a startup snapshot's blob is refused before V8 reads it, where V8
@@ -65,6 +82,26 @@ impl JsError {
         Self {
             kind: JsErrorKind::Terminated(cause),
             message: message.to_owned(),
+        }
+    }
+
+    /// A script that reached the context's heap limit of `limit` bytes.
+    pub(crate) fn heap_limit_reached(limit: usize) -> Self {
+        Self {
+            kind: JsErrorKind::Terminated(TerminationCause::HeapExhausted),
+            message: format!("heap limit of {limit} bytes reached"),
+        }
+    }
+
+    /// Any later script in a context whose heap a collection after a hit left
+    /// over its limit of `limit` bytes.
+    pub(crate) fn heap_limit_exceeded(limit: usize) -> Self {
+        Self {
+            kind: JsErrorKind::Terminated(TerminationCause::HeapExhausted),
+            message: format!(
+                "heap still over its limit of {limit} bytes after a collection: \
+                 this context runs no more JavaScript"
+            ),
         }
     }
 }

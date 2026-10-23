@@ -31,9 +31,10 @@ fn terminated(result: Result<Vec<u8>, EngineError>) -> bool {
     matches!(result, Err(EngineError::Js(js)) if matches!(js.kind, JsErrorKind::Terminated(_)))
 }
 
-// Every fourth context starts from one snapshot blob the threads share, and
-// every seventh loads one large script, read from the source contexts share,
-// so the leak checks cover both.
+// Every fourth context starts from one snapshot blob the threads share, every
+// seventh loads one large script, read from the source contexts share, and
+// every sixth round a context reaches its heap limit, so the leak checks
+// cover all three.
 pub fn churn() {
     let built = ContextHandle::create_snapshot("var shared = 1".into(), None, &mut Parking)
         .expect("snapshot");
@@ -80,6 +81,24 @@ pub fn churn() {
                     }
                     context.begin_dispose();
                     context.dispose(&mut Parking).expect("dispose");
+                    if round % 6 == 1 {
+                        let capped = ContextHandle::spawn(
+                            ContextConfig {
+                                heap_limit: Some(32 << 20),
+                                ..ContextConfig::default()
+                            },
+                            &mut Parking,
+                        )
+                        .expect("spawn");
+                        assert!(terminated(capped.eval(
+                            "<eval>".to_owned(),
+                            "const a = []; for (;;) a.push({i: a.length, s: 'k' + a.length})"
+                                .to_owned(),
+                            &mut Parking
+                        )));
+                        capped.begin_dispose();
+                        capped.dispose(&mut Parking).expect("dispose");
+                    }
                     if round % 5 == 0 {
                         let timed = ContextHandle::spawn(
                             ContextConfig {
