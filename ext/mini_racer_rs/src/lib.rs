@@ -10,6 +10,7 @@ mod fork;
 )]
 mod gc_root;
 mod guard;
+mod heap_limit;
 mod host;
 mod options;
 mod platform;
@@ -51,6 +52,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     context::init(ruby, racer)?;
     snapshot::init(ruby, racer)?;
     source_maps::init(rs)?;
+    heap_limit::init(rs)?;
     timeout::init(ruby, rs)?;
     counters::init(rs)?;
     pool::init(ruby, rs)?;

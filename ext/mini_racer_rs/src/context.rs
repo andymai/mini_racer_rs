@@ -12,6 +12,7 @@ use magnus::{
     Class, DataTypeFunctions, Error, Fixnum, Module, RArray, RHash, RModule, RString, Ruby, Symbol,
     TryConvert, TypedData, Value,
 };
+use mini_racer_engine::process::platform;
 use mini_racer_engine::{ContextConfig, ContextHandle, Counts, EngineError, JsText, ScriptOptions};
 
 use crate::encode;
@@ -185,7 +186,12 @@ fn config(ruby: &Ruby, keywords: RHash) -> Result<ContextConfig, Error> {
         pairs.push((key, value));
         Ok(ForEach::Continue)
     })?;
-    options::configure(pairs.into_iter()).map_err(|error| option_error(ruby, &error))
+    let config =
+        options::configure(pairs.into_iter()).map_err(|error| option_error(ruby, &error))?;
+    Ok(ContextConfig {
+        heap_limit: platform::heap_limit(),
+        ..config
+    })
 }
 
 pub fn option_error(ruby: &Ruby, error: &OptionError) -> Error {

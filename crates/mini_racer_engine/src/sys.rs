@@ -208,6 +208,32 @@ unsafe extern "C" fn after_gc(
     }
 }
 
+/// Has V8 ask `block` before it aborts the process at the isolate's heap
+/// limit. `block` must stay where it is for as long as the isolate can run:
+/// a runner holds its context's block until it has dropped the isolate, and a
+/// forked child that takes the isolate over registers its own block instead.
+pub fn watch_heap_limit(isolate: &mut v8::Isolate, block: &crate::control::ControlBlock) {
+    let data = std::ptr::from_ref(block).cast_mut().cast::<c_void>();
+    isolate.add_near_heap_limit_callback(near_heap_limit, data);
+}
+
+/// Undoes `watch_heap_limit`, which must have been called, and with a
+/// `limit` other than 0 puts the old generation's limit back to it, though
+/// V8 keeps it no lower than the heap's live size and a quarter.
+pub fn unwatch_heap_limit(isolate: &mut v8::Isolate, limit: usize) {
+    isolate.remove_near_heap_limit_callback(near_heap_limit, limit);
+}
+
+unsafe extern "C" fn near_heap_limit(data: *mut c_void, current: usize, initial: usize) -> usize {
+    let raised = std::panic::catch_unwind(|| {
+        // SAFETY: `data` is the control block `watch_heap_limit` registered,
+        // which outlives the registration as its doc comment requires.
+        let block = unsafe { &*data.cast::<crate::control::ControlBlock>() };
+        crate::runner::near_heap_limit(block, current, initial)
+    });
+    raised.unwrap_or_else(|_| std::process::abort())
+}
+
 /// Has V8 report the start and end of each collection on `isolate` for its
 /// runner's counters: scavenges, minor mark-sweeps and mark-compacts, not the
 /// start of incremental marking or the processing of weak callbacks, which
