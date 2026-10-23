@@ -80,11 +80,86 @@ pub fn mutex_lock(_ruby: &Ruby, mutex: magnus::Mutex) -> Result<(), Error> {
     mutex.lock()
 }
 
-// magnus yields under rb_protect, so a break, return or throw out of the block
-// comes back as the Err, which magnus resumes at the method entry once the
-// Rust frames below it have returned (I6).
-pub fn yield_block(ruby: &Ruby) -> Result<Value, Error> {
-    ruby.yield_values(())
+#[derive(Clone, Copy)]
+struct Setting {
+    receiver: rb_sys::VALUE,
+    method: rb_sys::ID,
+    set: [rb_sys::VALUE; 2],
+    restore: [rb_sys::VALUE; 2],
+}
+
+fn setting(data: rb_sys::VALUE) -> Option<Setting> {
+    // VALUE is as wide as a pointer, which rb-sys checks as it builds.
+    let address = usize::try_from(data).ok()?;
+    let setting = std::ptr::with_exposed_provenance::<Setting>(address);
+    // SAFETY: `data` is the address of the `Setting` that `yield_setting`
+    // keeps on its stack for the whole rb_ensure call.
+    Some(unsafe { *setting })
+}
+
+// A raise or a throw out of the call or the block leaves this frame, which
+// holds only copies of raw values, for rb_ensure's handler.
+unsafe extern "C" fn set_and_yield(data: rb_sys::VALUE) -> rb_sys::VALUE {
+    let Ok(Some(setting)) = guard(|| setting(data)) else {
+        return rb_sys::Qnil as rb_sys::VALUE;
+    };
+    // SAFETY: rb_ensure runs this holding the GVL; the receiver and arguments
+    // stay live on `yield_setting`'s stack, and rb_ensure's handler catches
+    // whatever the call raises or throws.
+    unsafe { rb_sys::rb_funcallv(setting.receiver, setting.method, 2, setting.set.as_ptr()) };
+    // SAFETY: as above, for the block of the method `yield_setting` serves.
+    unsafe { rb_sys::rb_yield(rb_sys::Qundef as rb_sys::VALUE) }
+}
+
+// rb_ensure keeps a pending break, throw or exception aside while this runs
+// and puts it back after, so a trap or interrupt handled inside the call
+// cannot clear it. One this call raises or throws instead replaces it, as in
+// Ruby's own ensure, and leaves this frame, which holds only copies of raw
+// values, for the protect around rb_ensure.
+unsafe extern "C" fn restore_setting(data: rb_sys::VALUE) -> rb_sys::VALUE {
+    let Ok(Some(setting)) = guard(|| setting(data)) else {
+        return rb_sys::Qnil as rb_sys::VALUE;
+    };
+    // SAFETY: rb_ensure runs this holding the GVL; the receiver and arguments
+    // stay live on `yield_setting`'s stack.
+    unsafe {
+        rb_sys::rb_funcallv(
+            setting.receiver,
+            setting.method,
+            2,
+            setting.restore.as_ptr(),
+        )
+    }
+}
+
+/// `receiver.method(key, value)`, then a yield to the block of the method
+/// Ruby is running, then `receiver.method(key, restored)` however the block
+/// ends, as an `ensure` clause runs. The protect around it catches whatever
+/// ends the block and resumes nothing, so a break, return or throw comes back
+/// as the Err with its state intact, for the method entry to resume once the
+/// Rust frames below it have returned (I6).
+pub fn yield_setting(
+    ruby: &Ruby,
+    receiver: Value,
+    method: impl IntoId,
+    key: Value,
+    (value, restored): (Value, Value),
+) -> Result<Value, Error> {
+    let setting = Setting {
+        receiver: receiver.as_raw(),
+        method: method.into_id_with(ruby).as_raw(),
+        set: [key.as_raw(), value.as_raw()],
+        restore: [key.as_raw(), restored.as_raw()],
+    };
+    let data = std::ptr::addr_of!(setting).expose_provenance() as rb_sys::VALUE;
+    let raw = protect(|| {
+        // SAFETY: the `&Ruby` argument proves this thread holds the GVL;
+        // `setting` outlives the call, and `protect` catches whatever
+        // rb_ensure resumes once the restoring call has run.
+        unsafe { rb_sys::rb_ensure(Some(set_and_yield), data, Some(restore_setting), data) }
+    })?;
+    // SAFETY: `raw` is the live value the block returned.
+    Ok(unsafe { Value::from_raw(raw) })
 }
 
 // Ruby's GC cannot see an isolate's native memory, so it is reported here;

@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
-use magnus::value::{LazyId, ReprValue};
+use magnus::value::{IntoId, LazyId, ReprValue, StaticSymbol};
 use magnus::{
     Class, DataTypeFunctions, Error, Module, Object, RClass, RModule, Ruby, TryConvert, TypedData,
     Value,
@@ -105,7 +105,7 @@ fn timeout(ruby: &Ruby, milliseconds: Value) -> Result<Value, Error> {
         ));
     }
     let Some(budget) = budget else {
-        return rb_raw::yield_block(ruby);
+        return ruby.yield_values(());
     };
     let fiber = FIBER.get(ruby);
     let previous: Value = fiber.funcall(*AREF, (*KEY,))?;
@@ -119,13 +119,14 @@ fn timeout(ruby: &Ruby, milliseconds: Value) -> Result<Value, Error> {
     });
     let stored = ruby.obj_wrap(TimeoutScope(Arc::clone(&scope)));
     OPEN.fetch_add(1, Ordering::Relaxed);
-    let result = fiber
-        .funcall::<_, _, Value>(*ASET, (*KEY, stored))
-        .and_then(|_| {
-            let result = rb_raw::yield_block(ruby);
-            let restored = fiber.funcall::<_, _, Value>(*ASET, (*KEY, previous));
-            result.and_then(|value| restored.map(|_| value))
-        });
+    let key = StaticSymbol::from((*KEY).into_id_with(ruby)).as_value();
+    let result = rb_raw::yield_setting(
+        ruby,
+        fiber.as_value(),
+        *ASET,
+        key,
+        (stored.as_value(), previous),
+    );
     scope.close();
     result
 }
