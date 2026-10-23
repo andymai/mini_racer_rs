@@ -317,6 +317,50 @@ class PoolCheckoutTest < Minitest::Test
 
     assert_operator spans.map(&:first).max, :<, spans.map(&:last).min
   end
+end
+
+class PoolTurnsTest < Minitest::Test
+  include PoolHelpers
+  include RubyProcess
+
+  def now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+  # A thread that checks its context in and at once asks again would take it
+  # back before a woken waiter ran, so a freed context goes to the checkout
+  # that has waited longest, and a new one waits behind those waiting.
+  # A thread that checks its context in and at once asks again would take it
+  # back before a woken waiter ran, so a freed context goes to the checkout
+  # that has waited longest, and a new one waits behind those waiting. The
+  # threads all wait before the first context is freed: a thread alone with
+  # the GVL checks out with no one waiting until its time slice ends.
+  def test_waiting_checkouts_take_turns
+    contexts = pool
+    %i[block break].each do |ending|
+      stop = false
+      counts = Array.new(4, 0)
+      threads = contexts.with do
+        started = Array.new(4) do |index|
+          Thread.new do
+            until stop
+              if ending == :break
+                contexts.with { |context| break context.eval("1") }
+              else
+                contexts.with { |context| context.eval("1") }
+              end
+              counts[index] += 1
+            end
+          end
+        end
+        sleep 0.01 until started.all? { _1.status == "sleep" }
+        started
+      end
+      sleep 0.5
+      stop = true
+      threads.each(&:join)
+
+      assert_operator counts.min, :>=, counts.max / 2, "#{ending}: #{counts.inspect}"
+    end
+  end
 
   def test_contexts_stay_put_through_compaction
     skip "needs GC.compact" unless GC.respond_to?(:compact)
@@ -327,6 +371,38 @@ class PoolCheckoutTest < Minitest::Test
 
       assert_equal(i, contexts.with { _1.eval(i.to_s) })
     end
+  end
+
+  # The pool is held only by a class, never by a local that would pin it, so
+  # compaction moves it before the thread that builds each replacement runs.
+  def test_a_pool_moved_by_compaction_before_its_thread_runs
+    skip "needs CRuby's GC.verify_compaction_references" unless GC.respond_to?(:verify_compaction_references)
+    code = <<~RUBY
+      require "mini_racer"
+      class Holder
+        class << self
+          attr_reader :pool
+
+          def make
+            @pool = MiniRacerRs::Pool.new(size: 1, max_uses: 1) { _1.eval("var n = 41") }
+            nil
+          end
+
+          def use = pool.with { _1.eval("n + 1") }
+        end
+      end
+      Holder.make
+      5.times do
+        Holder.use
+        GC.verify_compaction_references(expand_heap: true, toward: :empty)
+      end
+      puts Holder.use
+      Holder.pool.shutdown
+    RUBY
+    stdout, stderr, status = run_ruby(code)
+
+    assert_predicate status, :success?, stderr
+    assert_equal "42\n", stdout
   end
 end
 

@@ -1,4 +1,5 @@
-use std::cell::{Cell, OnceCell};
+use std::cell::{Cell, OnceCell, RefCell};
+use std::collections::VecDeque;
 
 use magnus::error::ErrorType;
 use magnus::gc::Marker;
@@ -19,7 +20,7 @@ use crate::{errors, export, rb_raw};
 const SHUT_DOWN: &str = "the context pool is shut down";
 // How long a waiting checkout sleeps before it looks at the slots again
 // unwoken: a checkout that ended in a break, a throw or Thread#kill leaves its
-// context idle without waking anyone.
+// context idle without handing it on.
 const RESCAN_SECONDS: f64 = 0.1;
 
 static SHUTDOWN_ERROR: OnceRoot<ExceptionClass> = OnceRoot::new();
@@ -32,6 +33,8 @@ enum Phase {
     Pending,
     Building,
     Idle,
+    // Handed to the waiting checkout whose queue `holder` holds.
+    Reserved,
     InUse,
     // The last build raised; the next checkout raises that and starts another.
     Failed,
@@ -44,7 +47,8 @@ struct Slot {
     // The context while idle, in use or pending disposal; the exception while
     // failed.
     value: OwnedRoot<Value>,
-    // The fiber that checked the context out, whose nested checkouts reuse it.
+    // The fiber that checked the context out, whose nested checkouts reuse
+    // it, or the queue of the waiting checkout it is reserved for.
     holder: OwnedRoot<Value>,
     uses: Cell<u64>,
     spent: Cell<bool>,
@@ -64,10 +68,11 @@ pub struct Pool {
     max_uses: Cell<Option<u64>>,
     options: OwnedRoot<RHash>,
     setup: OwnedRoot<Value>,
-    // A Thread::Queue that only wakes waiting checkouts, since Queue#pop
-    // parks a fiber under a scheduler and the thread otherwise; the slots
-    // say which contexts are free.
-    wakeups: OwnedRoot<Value>,
+    // Waiting checkouts in arrival order, each by a Thread::Queue of its own
+    // that it pops, which parks a fiber under a scheduler and the thread
+    // otherwise. A freed context goes to the first of them, and a checkout
+    // that finds any waiting waits behind them, so none is passed over.
+    waiting: RefCell<VecDeque<OwnedRoot<Value>>>,
     epoch: Cell<u64>,
     shut_down: Cell<bool>,
 }
@@ -76,7 +81,14 @@ impl DataTypeFunctions for Pool {
     fn mark(&self, marker: &Marker) {
         self.options.mark(marker);
         self.setup.mark(marker);
-        self.wakeups.mark(marker);
+        // As for gc_root::Pins: a borrow at mark time would leave a queue
+        // unmarked, and no borrow spans a Ruby call.
+        let Ok(waiting) = self.waiting.try_borrow() else {
+            std::process::abort();
+        };
+        for queue in waiting.iter() {
+            queue.mark(marker);
+        }
         for slot in self.slots.get().iter().flat_map(|slots| slots.iter()) {
             slot.value.mark(marker);
             slot.holder.mark(marker);
@@ -181,7 +193,6 @@ impl Pool {
         }
         rb_self.max_uses.set(limits.max_uses);
         rb_self.epoch.set(fork::epoch());
-        rb_self.wakeups.set(ruby, thread_queue(ruby)?);
         let slots = rb_self.slots.get_or_init(|| {
             (0..limits.size)
                 .map(|_| Slot {
@@ -245,11 +256,12 @@ impl Pool {
     }
 
     // A forked child forgets every context its parent built, disposing none,
-    // since they belong to the parent's runners, and builds its own.
-    fn reconcile(&self, ruby: &Ruby) -> Result<(), Error> {
+    // since they belong to the parent's runners, and builds its own; the
+    // checkouts that waited there are gone with the parent's other threads.
+    fn reconcile(&self, ruby: &Ruby) {
         let epoch = fork::epoch();
         if self.epoch.replace(epoch) == epoch {
-            return Ok(());
+            return;
         }
         let phase = if self.shut_down.get() {
             Phase::Closed
@@ -263,8 +275,37 @@ impl Pool {
             slot.spent.set(false);
             slot.phase.set(phase);
         }
-        self.wakeups.get(ruby).map_or(Ok(()), |wakeups| {
-            wakeups.funcall::<_, _, Value>("clear", ()).map(drop)
+        self.waiting.borrow_mut().clear();
+    }
+
+    fn first_waiting(&self, ruby: &Ruby) -> Option<Value> {
+        self.waiting
+            .borrow()
+            .front()
+            .and_then(|queue| queue.get(ruby))
+    }
+
+    fn enlist(&self, ruby: &Ruby, queue: Value) {
+        let root = OwnedRoot::default();
+        root.set(ruby, queue);
+        self.waiting.borrow_mut().push_back(root);
+    }
+
+    fn delist(&self, ruby: &Ruby, queue: Value) -> bool {
+        let mut waiting = self.waiting.borrow_mut();
+        let found = waiting
+            .iter()
+            .position(|listed| listed.get(ruby).is_some_and(|listed| same(listed, queue)));
+        found.and_then(|index| waiting.remove(index)).is_some()
+    }
+
+    fn reserved_for(&self, ruby: &Ruby, queue: Value) -> Option<(usize, &Slot)> {
+        self.slots.get()?.iter().enumerate().find(|(_, slot)| {
+            slot.phase.get() == Phase::Reserved
+                && slot
+                    .holder
+                    .get(ruby)
+                    .is_some_and(|holder| same(holder, queue))
         })
     }
 
@@ -279,7 +320,7 @@ impl Pool {
             ));
         }
         let slots = rb_self.slots(ruby)?;
-        rb_self.reconcile(ruby)?;
+        rb_self.reconcile(ruby);
         rb_self.refuse_if_shut_down(ruby)?;
         let fiber = ruby.fiber_current().as_value();
         let held = slots.iter().find(|slot| {
@@ -287,7 +328,7 @@ impl Pool {
                 && slot
                     .holder
                     .get(ruby)
-                    .is_some_and(|holder| rb_raw::identity(holder) == rb_raw::identity(fiber))
+                    .is_some_and(|holder| same(holder, fiber))
         });
         if let Some(slot) = held {
             return Self::nested(ruby, slot);
@@ -321,69 +362,147 @@ impl Pool {
         })
     }
 
+    // Once a slot is marked in use, nothing calls a Ruby method before the
+    // block's ensure is in place, so no interrupt can strand the slot.
     fn checkout(
         &self,
         ruby: &Ruby,
         rb_self: Obj<Self>,
         fiber: Value,
     ) -> Result<(usize, Value), Error> {
-        loop {
-            self.reconcile(ruby)?;
-            self.refuse_if_shut_down(ruby)?;
-            if let Some(taken) = self.take(ruby, rb_self, fiber)? {
-                return Ok(taken);
+        self.start_pending(ruby, rb_self)?;
+        if self.waiting.borrow().is_empty() {
+            let slots = self.slots(ruby)?;
+            if let Some(index) = slots
+                .iter()
+                .position(|slot| slot.phase.get() == Phase::Failed)
+            {
+                return Err(self.failed(ruby, rb_self, index));
             }
-            let wakeups = self.wakeups.get(ruby).ok_or_else(|| uninitialized(ruby))?;
-            // Shutdown closes the queue, whose pop then returns nil at once.
-            let popped =
-                wakeups.funcall::<_, _, Value>("pop", (kwargs!("timeout" => RESCAN_SECONDS),));
-            if let Err(error) = popped {
-                // Ruby may raise into this checkout after its pop took a
-                // wakeup, which then passes to the next waiter.
-                if !jumped(&error) {
-                    self.settle(ruby, rb_self)?;
-                }
-                return Err(error);
+            if let Some(index) = slots
+                .iter()
+                .position(|slot| slot.phase.get() == Phase::Idle)
+            {
+                return self.take(ruby, index, fiber);
             }
+        }
+        let queue = thread_queue(ruby)?;
+        self.enlist(ruby, queue);
+        let waited = self.wait_in_turn(ruby, rb_self, fiber, queue);
+        // A context handed to this checkout that it did not take goes to the
+        // next in line, unless a break, throw or Thread#kill is under way,
+        // when the others' rescans find it.
+        let handed_back = self.leave(ruby, queue);
+        match waited {
+            Err(error) if jumped(&error) => Err(error),
+            Err(error) if handed_back => Err(self.hand_off(ruby).err().unwrap_or(error)),
+            waited => waited,
         }
     }
 
-    // A failed build is raised to the next checkout, after another is started.
-    fn take(
+    fn wait_in_turn(
         &self,
         ruby: &Ruby,
         rb_self: Obj<Self>,
         fiber: Value,
-    ) -> Result<Option<(usize, Value)>, Error> {
+        queue: Value,
+    ) -> Result<(usize, Value), Error> {
+        loop {
+            self.reconcile(ruby);
+            self.refuse_if_shut_down(ruby)?;
+            if self.reserved_for(ruby, queue).is_none() && !self.is_listed(ruby, queue) {
+                self.enlist(ruby, queue);
+            }
+            self.start_pending(ruby, rb_self)?;
+            self.hand_off(ruby)?;
+            if let Some((index, _)) = self.reserved_for(ruby, queue) {
+                return self.take(ruby, index, fiber);
+            }
+            if self
+                .first_waiting(ruby)
+                .is_some_and(|first| same(first, queue))
+                && let Some(index) = self
+                    .slots(ruby)?
+                    .iter()
+                    .position(|slot| slot.phase.get() == Phase::Failed)
+            {
+                return Err(self.failed(ruby, rb_self, index));
+            }
+            queue.funcall::<_, _, Value>("pop", (kwargs!("timeout" => RESCAN_SECONDS),))?;
+        }
+    }
+
+    fn is_listed(&self, ruby: &Ruby, queue: Value) -> bool {
+        self.waiting
+            .borrow()
+            .iter()
+            .any(|listed| listed.get(ruby).is_some_and(|listed| same(listed, queue)))
+    }
+
+    // Makes no Ruby call. Whether it gave back a context handed to it.
+    fn leave(&self, ruby: &Ruby, queue: Value) -> bool {
+        self.delist(ruby, queue);
+        let Some((_, slot)) = self.reserved_for(ruby, queue) else {
+            return false;
+        };
+        slot.holder.take(ruby);
+        slot.phase.set(Phase::Idle);
+        true
+    }
+
+    // Gives each free context to the first waiting checkout and wakes it; a
+    // failed build wakes the first to raise it.
+    fn hand_off(&self, ruby: &Ruby) -> Result<(), Error> {
+        if self.shut_down.get() {
+            return Ok(());
+        }
         let slots = self.slots(ruby)?;
-        let mut idle = None;
-        for (index, slot) in slots.iter().enumerate() {
-            match slot.phase.get() {
-                Phase::Pending => self.start(ruby, rb_self, index),
-                Phase::Failed => {
-                    let raised = slot.value.take(ruby).and_then(Exception::from_value);
-                    self.start(ruby, rb_self, index);
-                    return Err(raised.map_or_else(
-                        || errors::internal(ruby, "a pool context failed to build"),
-                        Error::from,
-                    ));
-                }
-                Phase::Idle if idle.is_none() => idle = Some((index, slot)),
-                _ => {}
+        while let Some(first) = self.first_waiting(ruby) {
+            if let Some(slot) = slots.iter().find(|slot| slot.phase.get() == Phase::Idle) {
+                self.delist(ruby, first);
+                slot.holder.set(ruby, first);
+                slot.phase.set(Phase::Reserved);
+            } else if !slots.iter().any(|slot| slot.phase.get() == Phase::Failed) {
+                return Ok(());
+            }
+            first.funcall::<_, _, Value>("push", (true,))?;
+            if slots.iter().any(|slot| slot.phase.get() == Phase::Failed) {
+                return Ok(());
             }
         }
-        let Some((index, slot)) = idle else {
-            return Ok(None);
-        };
-        let Some(context) = slot.value.get(ruby) else {
-            self.start(ruby, rb_self, index);
-            return Ok(None);
-        };
+        Ok(())
+    }
+
+    fn take(&self, ruby: &Ruby, index: usize, fiber: Value) -> Result<(usize, Value), Error> {
+        let slot = self.slot(index).ok_or_else(|| uninitialized(ruby))?;
+        let context = slot
+            .value
+            .get(ruby)
+            .ok_or_else(|| errors::internal(ruby, "the pool's context is missing"))?;
         slot.phase.set(Phase::InUse);
         slot.holder.set(ruby, fiber);
         slot.uses.set(slot.uses.get().saturating_add(1));
         slot.spent.set(false);
-        Ok(Some((index, context)))
+        Ok((index, context))
+    }
+
+    // A failed build is raised to the checkout that finds it, after another
+    // is started.
+    fn failed(&self, ruby: &Ruby, rb_self: Obj<Self>, index: usize) -> Error {
+        let raised = self
+            .slot(index)
+            .and_then(|slot| slot.value.take(ruby))
+            .and_then(Exception::from_value);
+        if let Some(slot) = self.slot(index) {
+            slot.phase.set(Phase::Pending);
+        }
+        if let Err(error) = self.start_pending(ruby, rb_self) {
+            return error;
+        }
+        raised.map_or_else(
+            || errors::internal(ruby, "a pool context failed to build"),
+            Error::from,
+        )
     }
 
     // Runs inside the ensure of the checkout's block, where a Ruby method
@@ -418,68 +537,69 @@ impl Pool {
         });
     }
 
-    // Starts a thread for each pending slot, or after shutdown disposes its
-    // context here, then wakes a waiting checkout if one can take a slot.
+    // Starts the threads pending slots wait for, or after shutdown disposes
+    // their contexts here, then hands what is free to waiting checkouts.
     fn settle(&self, ruby: &Ruby, rb_self: Obj<Self>) -> Result<(), Error> {
-        self.reconcile(ruby)?;
+        self.reconcile(ruby);
+        self.start_pending(ruby, rb_self)?;
+        self.hand_off(ruby)
+    }
+
+    fn start_pending(&self, ruby: &Ruby, rb_self: Obj<Self>) -> Result<(), Error> {
         let slots = self.slots(ruby)?;
         let mut failed: Option<Error> = None;
         for (index, slot) in slots.iter().enumerate() {
-            if slot.phase.get() != Phase::Pending {
+            if slot.phase.get() != Phase::Pending || failed.as_ref().is_some_and(jumped) {
                 continue;
             }
-            if !self.shut_down.get() {
-                self.start(ruby, rb_self, index);
-            } else if !failed.as_ref().is_some_and(jumped) {
+            let started = if self.shut_down.get() {
                 slot.phase.set(Phase::Closed);
-                if let Some(context) = slot.value.take(ruby)
-                    && let Err(error) = dispose(context)
-                {
-                    failed.get_or_insert(error);
-                }
+                slot.value.take(ruby).map_or(Ok(()), dispose)
+            } else {
+                self.start(ruby, rb_self, index)
+            };
+            if let Err(error) = started {
+                failed.get_or_insert(error);
             }
         }
-        if let Some(error) = failed {
-            return Err(error);
-        }
-        if self.shut_down.get()
-            || !slots
-                .iter()
-                .any(|slot| matches!(slot.phase.get(), Phase::Idle | Phase::Failed))
-        {
-            return Ok(());
-        }
-        let wakeups = self.wakeups.get(ruby).ok_or_else(|| uninitialized(ruby))?;
-        let waiting = wakeups.funcall::<_, _, usize>("num_waiting", ())?;
-        let woken = wakeups.funcall::<_, _, usize>("size", ())?;
-        if waiting > woken {
-            wakeups.funcall::<_, _, Value>("push", (true,))?;
-        }
-        Ok(())
+        failed.map_or(Ok(()), Err)
     }
 
     // Replacements are built on a thread of the pool's own, off the request
     // path: it waits on the runners with the GVL released, and a fork leaves
     // it behind, so a child rebuilds whatever its parent's threads were
     // building.
-    fn start(&self, ruby: &Ruby, rb_self: Obj<Self>, index: usize) {
+    fn start(&self, ruby: &Ruby, rb_self: Obj<Self>, index: usize) -> Result<(), Error> {
         let Some(slot) = self.slot(index) else {
-            return;
+            return Ok(());
         };
         slot.phase.set(Phase::Building);
         let spawned = gc_root::spawn(ruby, rb_self, move |ruby, pool: Obj<Self>| {
             pool.replace(ruby, pool, index);
         });
-        if let Err(error) = spawned {
-            slot.value.take(ruby);
-            match error.error_type() {
-                ErrorType::Exception(exception) => {
-                    slot.value.set(ruby, exception.as_value());
-                    slot.phase.set(Phase::Failed);
-                }
-                _ => slot.phase.set(Phase::Pending),
+        let Err(error) = spawned else {
+            return Ok(());
+        };
+        let refused = match error.error_type() {
+            ErrorType::Exception(exception)
+                if exception.is_kind_of(ruby.exception_thread_error()) =>
+            {
+                Some(*exception)
             }
-        }
+            _ => None,
+        };
+        let Some(refused) = refused else {
+            // An interrupt raised while the thread was made; the slot waits
+            // for the next checkout.
+            slot.phase.set(Phase::Pending);
+            return Err(error);
+        };
+        // Ruby could not start a thread: the next checkout raises why, after
+        // the retired context, if any, is disposed here.
+        let retired = slot.value.take(ruby);
+        slot.value.set(ruby, refused.as_value());
+        slot.phase.set(Phase::Failed);
+        retired.map_or(Ok(()), dispose)
     }
 
     // On the pool's thread: dispose what the slot retired, then build its
@@ -530,12 +650,15 @@ impl Pool {
     // those in use when their checkout ends, and those being built once built.
     fn shutdown(ruby: &Ruby, rb_self: Obj<Self>) -> Result<(), Error> {
         let slots = rb_self.slots(ruby)?;
-        rb_self.reconcile(ruby)?;
+        rb_self.reconcile(ruby);
         // Called again, it finishes disposing what an interrupt stopped.
         if !rb_self.shut_down.replace(true) {
             for slot in slots {
                 match slot.phase.get() {
-                    Phase::Idle => slot.phase.set(Phase::Pending),
+                    Phase::Idle | Phase::Reserved => {
+                        slot.holder.take(ruby);
+                        slot.phase.set(Phase::Pending);
+                    }
                     Phase::Failed => {
                         slot.value.take(ruby);
                         slot.phase.set(Phase::Closed);
@@ -543,10 +666,21 @@ impl Pool {
                     Phase::Pending | Phase::Building | Phase::InUse | Phase::Closed => {}
                 }
             }
-            if let Some(wakeups) = rb_self.wakeups.get(ruby) {
-                wakeups.funcall::<_, _, Value>("close", ())?;
-            }
         }
-        rb_self.settle(ruby, rb_self)
+        let waiting: Vec<Value> = rb_self
+            .waiting
+            .borrow()
+            .iter()
+            .filter_map(|queue| queue.get(ruby))
+            .collect();
+        for queue in waiting {
+            queue.funcall::<_, _, Value>("push", (true,))?;
+        }
+        rb_self.start_pending(ruby, rb_self)
     }
+}
+
+// By identity; both values are pinned, by the pool's mark or this stack.
+fn same(left: Value, right: Value) -> bool {
+    rb_raw::identity(left) == rb_raw::identity(right)
 }

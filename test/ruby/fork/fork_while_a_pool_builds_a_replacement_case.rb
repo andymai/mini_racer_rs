@@ -14,8 +14,12 @@ end
 pool.with { 1 }
 sleep 0.01 until built.size == 2
 sleep 0.05
+replacement = built[1]
 child do
-  raise "child answer" unless pool.with { _1.eval("answer") } == 42
+  context, answer = pool.with { [_1, _1.eval("answer")] }
+  raise "the child took the replacement its parent was building" if context.equal?(replacement)
+  raise "child answer #{answer.inspect}" unless answer == 42
 end
-raise "parent answer" unless pool.with { _1.eval("answer") } == 42
-raise "the parent built #{built.size}" unless built.size >= 2
+context, answer = pool.with { [_1, _1.eval("answer")] }
+raise "the parent did not get the replacement it was building" unless context.equal?(replacement)
+raise "parent answer #{answer.inspect}" unless answer == 42

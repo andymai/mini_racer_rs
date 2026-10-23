@@ -5,7 +5,9 @@ use std::sync::OnceLock;
 use magnus::gc::Marker;
 use magnus::typed_data::Obj;
 use magnus::value::{Lazy, Opaque, ReprValue};
-use magnus::{Class, DataTypeFunctions, Error, Module, Object, RModule, Ruby, TypedData, Value};
+use magnus::{
+    Class, DataTypeFunctions, Error, Module, Object, RModule, Ruby, TryConvert, TypedData, Value,
+};
 
 use crate::rb_raw;
 
@@ -181,17 +183,22 @@ const SPAWNED: &str = "spawned_with";
 /// Starts a Ruby thread that runs `run` with `value`, which the thread object
 /// keeps alive until the thread ends. `run` must handle whatever its Ruby
 /// calls raise.
-pub fn spawn<T: ReprValue + 'static>(
+pub fn spawn<T: ReprValue + TryConvert>(
     ruby: &Ruby,
     value: T,
     run: impl FnOnce(&Ruby, T) + Send + 'static,
 ) -> Result<(), Error> {
-    let held = Opaque::from(value);
-    // The new thread waits for the GVL this one holds until the variable is
-    // set, and `value` lives on this stack until then.
+    // The thread reads `value` back from its own instance variable, which
+    // compaction updates if the value moves before the thread first runs; a
+    // copy held here would go stale. The thread waits for the GVL this one
+    // holds until the variable is set.
     let thread = rb_raw::thread_create(
         ruby,
-        Box::new(move |ruby: &Ruby| run(ruby, ruby.get_inner(held))),
+        Box::new(move |ruby: &Ruby| {
+            if let Ok(value) = ruby.thread_current().ivar_get::<_, T>(SPAWNED) {
+                run(ruby, value);
+            }
+        }),
     )?;
     thread.ivar_set(SPAWNED, value.as_value())
 }
