@@ -2,7 +2,7 @@
 
 ## Method
 
-All tables except the production bundle section use the Ruby 3.4 extension from the published mini_racer_rs 1.5.1 `x86_64-linux-gnu` gem against mini_racer 0.22.2, measured over 5 runs on Ruby 3.4.2 and Linux on an AMD Ryzen 9 7950X3D. The CPU governor was set to `performance`, with both gems pinned to CPUs 0 through 7 using `taskset` (`bench/run.rb --cpus 0-7`). The production bundle section uses commit `2513a48`, measured the same way against mini_racer 0.22.1.
+All tables use the Ruby 3.4 extension from the published mini_racer_rs 1.5.1 `x86_64-linux-gnu` gem against mini_racer 0.22.2, measured over 5 runs on Ruby 3.4.2 and Linux on an AMD Ryzen 9 7950X3D. The CPU governor was set to `performance`, with both gems pinned to CPUs 0 through 7 using `taskset` (`bench/run.rb --cpus 0-7`). The production bundle section comes from a second run measured the same way.
 
 Each run starts mini_racer 0.22.2 with libv8-node 24.12.0.1, then starts mini_racer_rs as a separate process. Tables report medians across runs. Workload tables report the median of each run's median. The harness checks that both gems produce identical output for every workload.
 
@@ -27,14 +27,14 @@ The 8.2 MB MUI bundle loads and renders once in a new context in 103.98 ms again
 
 ## A production server rendering bundle
 
-This section uses a 44 MB production server rendering bundle kept outside the repository and loaded through ExecJS in the same way that react-rails loads a bundle. Its table compares commit `2513a48` with mini_racer 0.22.1.
+This section uses a 44 MB production server rendering bundle kept outside the repository and loaded through ExecJS in the same way that react-rails loads a bundle. Its table comes from a second run of the same gem against mini_racer 0.22.2.
 
-| case | mini_racer 0.22.1 | mini_racer_rs | ratio | note |
+| case | mini_racer 0.22.2 | mini_racer_rs | ratio | note |
 |---|---:|---:|---:|---|
-| Load a 44 MB production server rendering bundle into a new context, through ExecJS | 982.80 ms | 215.01 ms | 4.57x |  |
-| RSS per context with that bundle loaded, 5 live | 300.93 MB | 135.89 MB | 2.21x |  |
+| Load a 44 MB production server rendering bundle into a new context, through ExecJS | 964.83 ms | 105.25 ms | 9.17x |  |
+| RSS per context with that bundle loaded, 5 live | 300.92 MB | 44.33 MB | 6.79x |  |
 
-The bundle loads into a new context in 215.01 ms against 982.80 ms, or 4.57x faster, because mini_racer_rs compiles it from the code cache from its third load on. With 5 contexts holding it, each uses 135.89 MB of resident memory against 300.93 MB, or 2.21x less. After an eval of 1 MiB or more, a snapshot build, or a low-memory collection, mini_racer_rs returns freed malloc memory to the system with `malloc_trim` on glibc. To include another bundle, set `MINI_RACER_RS_BENCH_SSR_BUNDLE` to its file, `MINI_RACER_RS_BENCH_SSR_PRELUDE` to a file containing the globals it needs first, and `MINI_RACER_RS_BENCH_SSR_CALL` to the JavaScript expression that renders. The output omits the bundle's path, name, and error messages.
+The bundle loads into a new context in 105.25 ms against 964.83 ms, or 9.17x faster, because mini_racer_rs compiles it from the code cache from its third load on. With 5 contexts holding it, each uses 44.33 MB of resident memory against 300.92 MB, or 6.79x less. After an eval of 1 MiB or more, a snapshot build, or a low-memory collection, mini_racer_rs returns freed malloc memory to the system with `malloc_trim` on glibc. To include another bundle, set `MINI_RACER_RS_BENCH_SSR_BUNDLE` to its file, `MINI_RACER_RS_BENCH_SSR_PRELUDE` to a file containing the globals it needs first, and `MINI_RACER_RS_BENCH_SSR_CALL` to the JavaScript expression that renders. The output omits the bundle's path, name, and error messages.
 
 ## Per-call costs, startup and payloads
 

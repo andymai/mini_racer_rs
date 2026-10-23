@@ -23,7 +23,7 @@ mini_racer_rs implements the `MiniRacer` API from mini_racer 0.22.2. It defines 
 
 - **Round trips:** 5 to 9 times faster (0.75 µs vs 6.50 µs per call).
 - **Babel through ExecJS:** 1.93x faster (5.09 ms vs 9.85 ms).
-- **Bundle load:** 4.6x faster for a 44 MB production server rendering bundle (215 ms vs 983 ms).
+- **Bundle load:** 9.2x faster for a 44 MB production server rendering bundle (105 ms vs 965 ms).
 - **Memory:** A context holding the MUI bundle uses 43 MB vs 110 MB.
 - **Forks:** After loading and rendering React: 20 of 20 clean mini_racer_rs exits vs 20 of 20 mini_racer aborts.
 - **V8:** V8 15.2.124.1 vs V8 13.6.233.17 in mini_racer 0.22.2.
@@ -33,7 +33,7 @@ mini_racer_rs implements the `MiniRacer` API from mini_racer 0.22.2. It defines 
 - **Callback jumps:** A `throw` out of an attached callback ends the script with `Error: terminated` and continues after `eval`; mini_racer 0.22.2 crashes with a segmentation fault.
 - **Checks:** Script-enforced crate boundaries, four fenced `unsafe` modules, loom, wire-codec fuzzing, nightly sanitizers and mini_racer differential tests.
 
-The round trip, Babel, memory, and fiber scheduler numbers compare with mini_racer 0.22.2, while the bundle load and fork numbers compare with mini_racer 0.22.1. See [Benchmarks](#benchmarks) for the method.
+The round trip, Babel, memory, fiber scheduler, and bundle load numbers compare with mini_racer 0.22.2, while the fork numbers compare with mini_racer 0.22.1. See [Benchmarks](#benchmarks) for the method.
 
 ## Install
 
@@ -212,7 +212,7 @@ Before forking, evaluate each bundle of 1 MiB or more twice in the master, then 
 
 For Ruby's `fork`, `IO.popen("-")`, or `Process.daemon`, mini_racer_rs waits for context runners, pauses its worker pool and waits for running tasks. An async `WebAssembly.compile` in a new default-mode child completes on the child's own pool. On Ubuntu 24.04 with glibc 2.39, 20 of 20 mini_racer 0.22.1 children aborted with signal 6 after React rendering; all mini_racer_rs children exited cleanly. mini_racer 0.22.2 has the same fork handling. On Fedora, `test/stress/fork_busy.rb` aborted with mini_racer 0.22.2 in 3 of 3 runs, after 5, 14 and 19 forks, when an evaluating parent thread raised `TypeError`. mini_racer_rs completed 300 forks per run on Fedora and Ubuntu.
 
-With `mini_racer` 0.22.1, each worker compiles the bundle from source on its first load because it has no code cache.
+With `mini_racer` 0.22.2, each worker compiles the bundle from source on its first load because it has no code cache.
 
 ## Benchmarks
 
@@ -226,11 +226,11 @@ With `mini_racer` 0.22.1, each worker compiles the bundle from source on its fir
 | Autoprefixer on Bootstrap's 280 KB stylesheet, through ExecJS | 26.0 ms | 24.0 ms | 1.1x |
 | MUI dashboard server render of 200 rows and 299 icons (469 KB of HTML), through ExecJS | 31.4 ms | 29.2 ms | 1.1x |
 | MUI in a new context: load the 8.2 MB bundle and render once, through ExecJS | 164 ms | 104 ms | 1.6x |
-| Load a 44 MB production server rendering bundle into a new context, through ExecJS (`2513a48` against mini_racer 0.22.1) | 983 ms | 215 ms | 4.6x |
+| Load a 44 MB production server rendering bundle into a new context, through ExecJS | 965 ms | 105 ms | 9.2x |
 
-Results are medians of 5 runs. Every workload produced identical output in both gems. The eight library workloads use one run of the Ruby 3.4 extension from the published mini_racer_rs 1.5.1 `x86_64-linux-gnu` gem against mini_racer 0.22.2. The 44 MB production bundle load uses commit `2513a48` against mini_racer 0.22.1. Benchmarks ran on Ruby 3.4.2 and Linux with an AMD Ryzen 9 7950X3D. The governor was `performance`. Both gems were pinned to CPUs 0 through 7.
+Results are medians of 5 runs. Every workload produced identical output in both gems. The eight library workloads use one run of the Ruby 3.4 extension from the published mini_racer_rs 1.5.1 `x86_64-linux-gnu` gem against mini_racer 0.22.2. The 44 MB production bundle load uses a second run of the same gem against mini_racer 0.22.2. Benchmarks ran on Ruby 3.4.2 and Linux with an AMD Ryzen 9 7950X3D. The governor was `performance`. Both gems were pinned to CPUs 0 through 7.
 
-The per-call and memory figures below come from the same run of that extension on the same machine. One watchdog thread serves the whole process, making a call with `timeout:` fast. Scripts of 1 MiB or more use a process-wide V8 code cache. Contexts loading the same large script share one source copy.
+The per-call and memory figures below come from the first run of that extension on the same machine, except the production bundle row, which comes from the second run. One watchdog thread serves the whole process, making a call with `timeout:` fast. Scripts of 1 MiB or more use a process-wide V8 code cache. Contexts loading the same large script share one source copy.
 
 | Measure | mini_racer 0.22.2 | mini_racer_rs |
 |---|---:|---:|
@@ -243,7 +243,7 @@ The per-call and memory figures below come from the same run of that extension o
 | startup plus Babel | 44.8 ms | 13.3 ms |
 | context holding Babel | 28.5 MB | 15.0 MB |
 | context holding the 8.2 MB MUI bundle | 110 MB | 43 MB |
-| context holding the 44 MB production bundle, at commit `2513a48` before sources were shared, against mini_racer 0.22.1 | 301 MB | 136 MB |
+| context holding the 44 MB production bundle | 301 MB | 44 MB |
 | peak resident memory with 20,000 contexts left to Ruby's garbage collector | 2,918 MB | 108 MB |
 
 ```sh
