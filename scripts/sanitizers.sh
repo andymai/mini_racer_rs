@@ -22,7 +22,10 @@ ASAN_OPTIONS=detect_leaks=1 LSAN_OPTIONS="suppressions=$PWD/.github/sanitizers/l
   asan -p mini_racer_engine --test teardown --test teardown_single_threaded
 # A dropped handle shuts its runner down asynchronously, so other test processes
 # can exit with isolates still alive; only the teardown tests above check leaks.
-ASAN_OPTIONS=detect_leaks=0 asan -p mini_racer_engine -p mini_racer_sync --lib --tests
+# ASan's quarantine keeps freed memory resident, which the snapshot memory test
+# reads to see a blob's bytes freed.
+ASAN_OPTIONS=detect_leaks=0 asan -p mini_racer_engine -p mini_racer_sync --lib --tests \
+  -- --skip a_weak_blob_keeps_none_of_its_bytes
 RUSTFLAGS="-Zsanitizer=thread" TSAN_OPTIONS=halt_on_error=1 \
   cargo "+$toolchain" test -Zbuild-std --locked -p mini_racer_sync --lib --target "$target" --target-dir target/tsan
 echo "Sanitizer runs are clean."
