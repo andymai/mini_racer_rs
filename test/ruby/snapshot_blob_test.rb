@@ -91,23 +91,6 @@ class SnapshotBlobTest < Minitest::Test
     end
   end
 
-  # mini_racer warms an empty snapshot up from V8's own, and keeps none of the
-  # warmup's state.
-  def test_a_warmup_of_an_empty_snapshot_starts_from_v8s_own
-    [MiniRacer::Snapshot.load(""), MiniRacer::Snapshot.allocate].each do |snapshot|
-      snapshot.warmup!("var b = 1; function g() { return 2 } g()")
-
-      assert_operator snapshot.size, :>, 0
-      assert_equal %w[undefined undefined], MiniRacer::Context.new(snapshot: snapshot).eval("[typeof b, typeof g]")
-    end
-  end
-
-  def test_an_empty_blob_starts_a_context_without_a_snapshot
-    context = MiniRacer::Context.new(snapshot: MiniRacer::Snapshot.load(""))
-
-    assert_equal "undefined", context.eval("typeof a")
-  end
-
   # mini_racer hands out a copy, so changing it changes no context made after,
   # and no warmup.
   def test_dump_hands_out_a_copy
@@ -139,5 +122,49 @@ class SnapshotBlobTest < Minitest::Test
     contexts += Array.new(4) { Thread.new { MiniRacer::Context.new(snapshot: snapshot) } }.map(&:value)
     snapshot.warmup!("f()")
     contexts << MiniRacer::Context.new(snapshot: snapshot)
+  end
+end
+
+# An empty snapshot, which stands for none.
+class EmptySnapshotTest < Minitest::Test
+  include RubyProcess
+
+  # mini_racer warms an empty snapshot up from V8's own, and keeps none of the
+  # warmup's state.
+  def test_a_warmup_of_an_empty_snapshot_starts_from_v8s_own
+    [MiniRacer::Snapshot.load(""), MiniRacer::Snapshot.allocate].each do |snapshot|
+      snapshot.warmup!("var b = 1; function g() { return 2 } g()")
+
+      assert_operator snapshot.size, :>, 0
+      assert_equal %w[undefined undefined], MiniRacer::Context.new(snapshot: snapshot).eval("[typeof b, typeof g]")
+    end
+  end
+
+  # A warmup of V8's own snapshot starts as Snapshot.new does, never from an
+  # empty blob, so it holds first thing in a process, on the single-threaded
+  # platform and in a forked child.
+  def test_a_warmup_of_an_empty_snapshot_holds_wherever_it_runs
+    warm = <<~RUBY
+      snapshot = MiniRacer::Snapshot.load("")
+      snapshot.warmup!("1")
+      p MiniRacer::Context.new(snapshot: snapshot).eval("1 + 1")
+    RUBY
+    {
+      "first" => warm,
+      "single" => "MiniRacer::Platform.set_flags!(:single_threaded)\nMiniRacer::Context.new.eval('1')\n#{warm}",
+      "forked" => "MiniRacer::Context.new.eval('1')\npid = fork { #{warm.tr("\n", ";")} exit!(0) }\n" \
+                  "exit!(Process.wait2(pid).last.exitstatus)",
+    }.each do |label, code|
+      out, err, status = run_ruby("require 'mini_racer'\n#{code}")
+
+      assert_predicate status, :success?, "#{label}: #{err}"
+      assert_equal "2\n", out, label
+    end
+  end
+
+  def test_an_empty_blob_starts_a_context_without_a_snapshot
+    context = MiniRacer::Context.new(snapshot: MiniRacer::Snapshot.load(""))
+
+    assert_equal "undefined", context.eval("typeof a")
   end
 end
