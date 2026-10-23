@@ -117,6 +117,21 @@ class HeapLimitTest < Minitest::Test
     assert_equal ([reached(48)] * 9) + ["ok:2"], lines
   end
 
+  def test_each_hit_counts_as_heap_exhausted
+    lines = capped(<<~RUBY)
+      context = MiniRacer::Context.new
+      2.times { context.eval(OBJECTS) rescue nil }
+      puts JSON.generate(MiniRacerRs.counters(context)[:terminated])
+      poisoned = MiniRacer::Context.new
+      poisoned.eval("globalThis.keep = []; for (;;) keep.push({i: keep.length, s: 'k' + keep.length});") rescue nil
+      poisoned.eval("1") rescue nil
+      puts JSON.generate(MiniRacerRs.counters(poisoned)[:terminated][:heap_exhausted])
+    RUBY
+
+    assert_equal [{ "stop" => 0, "timeout" => 0, "interrupt" => 0, "max_memory" => 0, "heap_exhausted" => 2 }, 2],
+                 lines
+  end
+
   def test_array_buffers_are_not_held_to_the_limit
     lines = capped(<<~RUBY)
       context = MiniRacer::Context.new

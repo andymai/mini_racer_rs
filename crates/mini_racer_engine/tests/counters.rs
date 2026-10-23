@@ -349,6 +349,30 @@ fn a_heap_past_max_memory_counts_as_max_memory() {
     );
 }
 
+#[test]
+fn a_heap_past_its_limit_counts_as_heap_exhausted() {
+    let context = spawn_with(ContextConfig {
+        heap_limit: Some(32 << 20),
+        ..ContextConfig::default()
+    });
+    for _ in 0..2 {
+        let grown = context.eval(
+            "<eval>",
+            "let a = []; while (true) { a.push(new Array(10000).fill(0)) }",
+            &mut Parking,
+        );
+        assert_eq!(terminated_by(grown), TerminationCause::HeapExhausted);
+    }
+
+    assert_eq!(
+        context.counters().terminated,
+        Terminations {
+            heap_exhausted: 2,
+            ..Terminations::default()
+        }
+    );
+}
+
 // The engine ends an abandoned nested dispatch without recording a cause, so
 // the dispatch around it runs on.
 #[test]
