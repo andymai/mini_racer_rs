@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.4.0](https://github.com/andymai/mini_racer_rs/compare/v1.3.0...v1.4.0) (2026-10-23)
+
+
+### Features
+
+* add MiniRacerRs::Pool for ready contexts replaced off the request path ([#131](https://github.com/andymai/mini_racer_rs/issues/131)) ([9087488](https://github.com/andymai/mini_racer_rs/commit/9087488faacc37d362a28efd6181b972f9ee0d30))
+* add MiniRacerRs.heap_limit so heap exhaustion raises instead of aborting ([#130](https://github.com/andymai/mini_racer_rs/issues/130)) ([f58d1e0](https://github.com/andymai/mini_racer_rs/commit/f58d1e052b2e93b9d750d08b058f769abc81c471))
+* add MiniRacerRs.timeout for per-call time budgets ([#128](https://github.com/andymai/mini_racer_rs/issues/128)) ([da4b529](https://github.com/andymai/mini_racer_rs/commit/da4b529c5ee685df57b3b35b26cbf41518aa667e))
+
 ## [1.3.0](https://github.com/andymai/mini_racer_rs/compare/v1.2.0...v1.3.0) (2026-10-23)
 
 
