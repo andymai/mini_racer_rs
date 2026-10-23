@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/andymai/mini_racer_rs/compare/v1.2.0...v1.3.0) (2026-10-23)
+
+
+### Features
+
+* add MiniRacerRs.counters for per-context activity counts ([#126](https://github.com/andymai/mini_racer_rs/issues/126)) ([d482a3f](https://github.com/andymai/mini_racer_rs/commit/d482a3fb9fb4ac5ba3c077e6d2deffe25402ef3d))
+
 ## [1.2.0](https://github.com/andymai/mini_racer_rs/compare/v1.1.1...v1.2.0) (2026-10-22)
 
 
