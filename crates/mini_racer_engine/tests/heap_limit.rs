@@ -5,7 +5,7 @@
 )]
 
 use std::process::Command;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use mini_racer_engine::process::platform;
 use mini_racer_engine::{
@@ -371,19 +371,28 @@ fn a_hit_in_leftover_microtasks_ends_with_the_script_that_left_them() {
     assert_eq!(eval(&timed, "1 + 1").expect("usable"), Out::Number(2.0));
 }
 
-// Whichever of a timeout and the limit ends the script, it ends with an error.
+// Whichever of a timeout and the limit ends the script, it ends with an error
+// and the context carries on. The timeouts span a tenth to three times how
+// long the script takes to reach the limit on this machine, so both happen.
 #[test]
 fn a_timeout_racing_a_hit_ends_the_script() {
+    let source = format!("(() => {{ {OBJECTS} }})()");
+    let started = Instant::now();
+    limit_reached(eval(&limited(LIMIT), &source), LIMIT);
+    let reached = started.elapsed();
     let mut causes = Vec::new();
-    for millis in (10..=200).step_by(10) {
+    for tenths in [1, 2, 3, 4, 6, 8, 10, 12, 16, 20, 25, 30] {
+        let timeout = (reached * tenths / 10).max(Duration::from_millis(1));
         let context = spawn(ContextConfig {
-            timeout: Some(Duration::from_millis(millis)),
+            timeout: Some(timeout),
             heap_limit: Some(LIMIT),
             ..ContextConfig::default()
         });
-        match eval(&context, &format!("(() => {{ {OBJECTS} }})()")) {
+        match eval(&context, &source) {
             Err(EngineError::Js(js)) => match js.kind {
-                JsErrorKind::Terminated(cause) => causes.push(cause),
+                JsErrorKind::Terminated(
+                    cause @ (TerminationCause::Timeout | TerminationCause::HeapExhausted),
+                ) => causes.push(cause),
                 other => panic!("{other:?}"),
             },
             other => panic!("{other:?}"),
@@ -392,7 +401,11 @@ fn a_timeout_racing_a_hit_ends_the_script() {
     }
     assert!(
         causes.contains(&TerminationCause::HeapExhausted),
-        "{causes:?}"
+        "{reached:?}: {causes:?}"
+    );
+    assert!(
+        causes.contains(&TerminationCause::Timeout),
+        "{reached:?}: {causes:?}"
     );
 }
 
