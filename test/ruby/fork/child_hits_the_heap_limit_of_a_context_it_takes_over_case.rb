@@ -13,7 +13,9 @@ REACHED = "heap limit of #{64 << 20} bytes reached".freeze
 
 context = MiniRacer::Context.new
 context.eval("1 + 1")
-child do
+# Each heap limit hit fills 64 MiB and collects in full, which on the slowest
+# CI runners takes seconds.
+child(within: 30) do
   3.times do
     error = raised(MiniRacerRs::HeapLimitError) { context.eval(OBJECTS) }
     raise "child: #{error.inspect}" unless error == REACHED

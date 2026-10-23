@@ -2,18 +2,18 @@
 
 # Loads this gem for a fork case and gives it `child`, which forks, runs the
 # block in the child and fails the case unless the child exits cleanly within
-# five seconds; `reap`, which waits that long for a child and kills it after;
-# `raised`, the message of the error a block raises; and `skip_case`, which
-# exits with the code ForkTest reports as a skip, or fails under CI so a leg
-# missing a prerequisite cannot drop the case without a word.
+# five seconds or the `within:` it is given; `reap`, which waits for a child
+# and kills it after; `raised`, the message of the error a block raises; and
+# `skip_case`, which exits with the code ForkTest reports as a skip, or fails
+# under CI so a leg missing a prerequisite cannot drop the case without a word.
 
 $LOAD_PATH.unshift File.expand_path("../../../lib", __dir__)
 require "mini_racer"
 
-def child(&)
+def child(within: 5, &)
   pid = fork do
     Thread.new do
-      sleep 5
+      sleep within
       warn "child timed out"
       exit! 99
     end
@@ -23,7 +23,8 @@ def child(&)
     warn "child: #{e.class}: #{e.message}"
     exit! 1
   end
-  status = reap(pid)
+  # A second past the child's own deadline, so a slow child reports itself.
+  status = reap(pid, within: within + 1)
   raise "child failed: #{status.inspect}" unless status.success?
 end
 
