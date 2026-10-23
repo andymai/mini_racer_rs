@@ -869,3 +869,57 @@ fn channel(error: ChannelError) -> EngineError {
         error => protocol(error),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    use mini_racer_sync::Phase;
+
+    use super::{ContextHandle, Held, Host, WaitHandle, WaitOutcome};
+    use crate::control::ContextConfig;
+
+    struct Parking;
+
+    impl Host for Parking {
+        fn wait(&mut self, wait: &WaitHandle<'_>) -> WaitOutcome {
+            self.wait_blocking(wait);
+            WaitOutcome::Ready
+        }
+
+        fn wait_blocking(&mut self, wait: &WaitHandle<'_>) {
+            while !wait.ready() {
+                wait.park();
+            }
+        }
+    }
+
+    // A weak reference keeps the block's allocation, which a thread that made
+    // the context and exited leaves in a malloc arena other threads take over.
+    #[test]
+    fn the_watchdog_lets_go_of_a_disposed_context_before_its_timeout() {
+        let context = ContextHandle::spawn(
+            ContextConfig {
+                timeout: Some(Duration::from_secs(600)),
+                ..ContextConfig::default()
+            },
+            &mut Parking,
+        )
+        .expect("spawn");
+        let Held::Block(block) = context.held() else {
+            panic!("a new context holds its block");
+        };
+        let block = Arc::clone(block);
+        let untimed = Arc::weak_count(&block);
+        context.eval("<eval>", "1", &mut Parking).expect("eval");
+        context.begin_dispose();
+        context.dispose(&mut Parking).expect("dispose");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while block.phase.get() != Phase::Exited {
+            assert!(Instant::now() < deadline, "the runner did not exit");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(Arc::weak_count(&block), untimed);
+    }
+}
