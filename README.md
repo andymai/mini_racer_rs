@@ -21,10 +21,10 @@ mini_racer_rs implements the `MiniRacer` API from mini_racer 0.22.1. It defines 
 
 ## Highlights
 
-- **Round trips:** 5 to 9 times faster (0.72 µs vs 6.51 µs per call).
-- **Babel through ExecJS:** 1.95x faster (5.15 ms vs 10.05 ms).
+- **Round trips:** 5 to 9 times faster (0.75 µs vs 6.45 µs per call).
+- **Babel through ExecJS:** 1.97x faster (5.11 ms vs 10.06 ms).
 - **Bundle load:** 4.6x faster for a 44 MB production server rendering bundle (215 ms vs 983 ms).
-- **Memory:** A context holding the MUI bundle uses 44 MB vs 110 MB.
+- **Memory:** A context holding the MUI bundle uses 43 MB vs 110 MB.
 - **Forks:** After loading and rendering React: 20 of 20 clean mini_racer_rs exits vs 20 of 20 mini_racer aborts.
 - **V8:** V8 15.2.124.1 vs V8 13.6.233.17 in mini_racer 0.22.1.
 - **No compiler:** Native gems cover glibc and musl Linux, including Alpine, and macOS, on both architectures, with Ruby 3.3, 3.4 and 4.0 extensions.
@@ -218,32 +218,33 @@ With `mini_racer` 0.22.1, each worker compiles the bundle from source on its fir
 
 | Workload | mini_racer 0.22.1 | mini_racer_rs | Ratio |
 |---|---:|---:|---:|
-| Babel transform of a 3 KB JSX component, through ExecJS | 10.1 ms | 5.2 ms | 2.0x |
-| Terser minify of a 78 KB library, through ExecJS | 51.1 ms | 52.0 ms | 1.0x |
-| React server render of 1,000 items (17 KB of HTML), through ExecJS | 191 µs | 174 µs | 1.1x |
-| React in a new context: load the bundle and render 1,000 items, through ExecJS | 11.9 ms | 11.8 ms | 1.0x |
-| Handlebars render of 50 rows, through `Context#call` | 49.1 µs | 34.9 µs | 1.4x |
-| Autoprefixer on Bootstrap's 280 KB stylesheet, through ExecJS | 26.3 ms | 23.7 ms | 1.1x |
-| MUI dashboard server render of 200 rows and 299 icons (469 KB of HTML), through ExecJS | 32.6 ms | 29.8 ms | 1.1x |
-| MUI in a new context: load the 8.2 MB bundle and render once, through ExecJS | 167 ms | 105 ms | 1.6x |
+| Babel transform of a 3 KB JSX component, through ExecJS | 10.1 ms | 5.1 ms | 2.0x |
+| Terser minify of a 78 KB library, through ExecJS | 51.4 ms | 50.9 ms | 1.0x |
+| React server render of 1,000 items (17 KB of HTML), through ExecJS | 192 µs | 182 µs | 1.1x |
+| React in a new context: load the bundle and render 1,000 items, through ExecJS | 11.8 ms | 11.8 ms | 1.0x |
+| Handlebars render of 50 rows, through `Context#call` | 49.0 µs | 34.7 µs | 1.4x |
+| Autoprefixer on Bootstrap's 280 KB stylesheet, through ExecJS | 26.2 ms | 23.8 ms | 1.1x |
+| MUI dashboard server render of 200 rows and 299 icons (469 KB of HTML), through ExecJS | 30.3 ms | 29.2 ms | 1.0x |
+| MUI in a new context: load the 8.2 MB bundle and render once, through ExecJS | 166 ms | 104 ms | 1.6x |
 | Load a 44 MB production server rendering bundle into a new context, through ExecJS | 983 ms | 215 ms | 4.6x |
 
-Results are medians of 5 runs. Every workload produced identical output in both gems. The eight library workloads use the release build of commit `220bfe7`. The 44 MB production bundle load uses commit `2513a48`. Benchmarks ran on Ruby 3.4.2 and Linux with an AMD Ryzen 9 7950X3D. The governor was `performance`. Both gems were pinned to CPUs 0 through 7.
+Results are medians of 5 runs. Every workload produced identical output in both gems. The eight library workloads use one run of the Ruby 3.4 extension from the published mini_racer_rs 1.4.0 `x86_64-linux-gnu` gem. The 44 MB production bundle load uses commit `2513a48`. Benchmarks ran on Ruby 3.4.2 and Linux with an AMD Ryzen 9 7950X3D. The governor was `performance`. Both gems were pinned to CPUs 0 through 7.
 
-The per-call and memory figures below were measured on the same machine. Startup plus Babel, Babel context and MUI context figures come from commit `220bfe7`. One watchdog thread serves the whole process, making a call with `timeout:` fast. Scripts of 1 MiB or more use a process-wide V8 code cache. Contexts loading the same large script share one source copy.
+The per-call and memory figures below come from the same run of that extension on the same machine. One watchdog thread serves the whole process, making a call with `timeout:` fast. Scripts of 1 MiB or more use a process-wide V8 code cache. Contexts loading the same large script share one source copy.
 
 | Measure | mini_racer 0.22.1 | mini_racer_rs |
 |---|---:|---:|
-| eval round trip | 6.91 µs | 1.09 µs |
-| call round trip | 6.51 µs | 0.72 µs |
-| callback round trip | 6.12 µs | 1.12 µs |
-| call on a context with `timeout:` | 20.48 µs | 0.76 µs |
+| eval round trip | 6.76 µs | 1.14 µs |
+| call round trip | 6.45 µs | 0.75 µs |
+| callback round trip | 6.06 µs | 1.11 µs |
+| call on a context with `timeout:` | 20.50 µs | 0.78 µs |
+| call inside `MiniRacerRs.timeout` (mini_racer: on a context with `timeout:`) | 20.61 µs | 0.85 µs |
 | Babel inside V8 | 10.3 ms | 5.3 ms |
-| startup plus Babel | 44.4 ms | 13.3 ms |
-| context holding Babel | 28.5 MB | 15.2 MB |
-| context holding the 8.2 MB MUI bundle | 110 MB | 44 MB |
+| startup plus Babel | 44.3 ms | 13.2 ms |
+| context holding Babel | 28.5 MB | 15.0 MB |
+| context holding the 8.2 MB MUI bundle | 110 MB | 43 MB |
 | context holding the 44 MB production bundle, at commit `2513a48` before sources were shared | 301 MB | 136 MB |
-| peak resident memory with 20,000 contexts left to Ruby's garbage collector | 2,920 MB | 102 MB |
+| peak resident memory with 20,000 contexts left to Ruby's garbage collector | 2,910 MB | 106 MB |
 
 ```sh
 bundle exec ruby bench/run.rb --cpus 0-7
