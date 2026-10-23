@@ -158,7 +158,7 @@ class ContextDeepResultsTest < Minitest::Test
   end
 
   # The decoder recurses once per level, so a deep result takes its frames
-  # over and over on a fiber's or a thread's smaller stack. mini_racer 0.22.1
+  # over and over on a fiber's or a thread's smaller stack. mini_racer 0.22.2
   # decodes each shape 95 deep in both at Ruby's default stack sizes, and
   # refuses 96.
   def test_objects_and_maps_nest_as_deep_inside_a_fiber_and_a_thread

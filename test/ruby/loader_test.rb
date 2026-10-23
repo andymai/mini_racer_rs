@@ -9,7 +9,7 @@ class LoaderTest < Minitest::Test
   LIB = File.expand_path("../../lib", __dir__)
 
   def test_version_constants
-    assert_equal "0.22.1", MiniRacer::VERSION
+    assert_equal "0.22.2", MiniRacer::VERSION
     assert_equal "~> 24.12.0.1", MiniRacer::LIBV8_NODE_VERSION
     assert_equal MiniRacerRs::VERSION, MiniRacerRs::NATIVE_VERSION
     assert_match(/\A15\.2\./, MiniRacerRs::V8_VERSION)

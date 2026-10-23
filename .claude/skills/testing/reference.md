@@ -15,7 +15,7 @@ A case starts with `require_relative "prelude"` (`test/ruby/fork/prelude.rb`), w
 - `raised(klass) { ... }` returns the message of the error the block raises, or nil;
 - `skip_case(reason)` prints the reason and exits 77, which ForkTest reports as a skip; with `CI` set it exits 1 instead, so a CI leg missing a prerequisite fails rather than dropping the case.
 
-The three cases that fork through Fiddle need `fiddle`. Ruby 4.0 ships without it, so the `Gemfile` installs it there (building it needs libffi's headers); Ruby 3.3 and 3.4 use their default gem. The case's top comment says what it proves and what mini_racer 0.22.1 does.
+The three cases that fork through Fiddle need `fiddle`. Ruby 4.0 ships without it, so the `Gemfile` installs it there (building it needs libffi's headers); Ruby 3.3 and 3.4 use their default gem. The case's top comment says what it proves and what mini_racer 0.22.2 does.
 
 ## Loom models
 
@@ -59,7 +59,7 @@ The churn bound is not zero because rusty_v8 leaks a 64-byte cell per isolate (d
 
 ## Observing the real gem
 
-To see what mini_racer 0.22.1 does, for a deviation's reason or a test's comment, install the reference bundle once (`cd tools/reference && BUNDLE_PATH=vendor/bundle bundle install`), then run a snippet against it from the repository root:
+To see what mini_racer 0.22.2 does, for a deviation's reason or a test's comment, install the reference bundle once (`cd tools/reference && BUNDLE_PATH=vendor/bundle bundle install`), then run a snippet against it from the repository root:
 
 ```bash
 BUNDLE_GEMFILE="$PWD/tools/reference/Gemfile" BUNDLE_PATH="$PWD/tools/reference/vendor/bundle" \

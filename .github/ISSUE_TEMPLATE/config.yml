@@ -3,6 +3,6 @@ contact_links:
   - name: Security report
     url: https://github.com/andymai/mini_racer_rs/security/advisories/new
     about: Report suspected vulnerabilities through GitHub private vulnerability reporting. Do not open a public issue.
-  - name: Deliberate differences from mini_racer 0.22.1
+  - name: Deliberate differences from mini_racer 0.22.2
     url: https://github.com/andymai/mini_racer_rs/blob/main/COMPATIBILITY.md
     about: Deliberate differences are documented in COMPATIBILITY.md.

@@ -7,7 +7,7 @@
 require "rtlcss"
 
 CSS = ".nav { padding-left: 1px; float: right; margin: 1px 2px 3px 4px }"
-# The real mini_racer 0.22.1 returns this for CSS.
+# The real mini_racer 0.22.2 returns this for CSS.
 FLIPPED = ".nav { padding-right: 1px; float: left; margin: 1px 4px 3px 2px }"
 
 specs = Gem.loaded_specs

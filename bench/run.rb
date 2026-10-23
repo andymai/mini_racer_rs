@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# mini_racer_rs against the real mini_racer 0.22.1: each implementation runs
+# mini_racer_rs against the real mini_racer 0.22.2: each implementation runs
 # bench/measure.rb in its own process, alternating, and the medians across runs
 # are compared; bench/floors.rb checks the ratios. The reference must support
 # every metric; a candidate metric it cannot run yet is reported, not failed.

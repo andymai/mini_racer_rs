@@ -10,7 +10,7 @@ class ShimTest < Minitest::Test
     spec = Gem::Specification.load(SHIM)
 
     assert_equal "mini_racer", spec.name
-    assert_equal Gem::Version.new("0.22.1"), spec.version
+    assert_equal Gem::Version.new("0.22.2"), spec.version
     assert_equal "true", spec.metadata["mini_racer_rs_shim"]
     assert_empty spec.files
   end

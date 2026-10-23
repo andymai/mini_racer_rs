@@ -1,7 +1,7 @@
 PATH
   remote: ../../../shim
   specs:
-    mini_racer (0.22.1)
+    mini_racer (0.22.2)
       mini_racer_rs (= 1.4.0)
 
 PATH
@@ -36,7 +36,7 @@ DEPENDENCIES
   rtlcss (= 0.2.1)
 
 CHECKSUMS
-  mini_racer (0.22.1)
+  mini_racer (0.22.2)
   mini_racer_rs (1.4.0)
   rake-compiler-dock (1.12.0) sha256=f13205c2738f3d2053afcd03491a9e4541b22a59a0bfc53fc8bc883bd8188023
   rb_sys (0.9.130) sha256=7d486d99c1da02635515deaf9860fc5aea90bb4ab2589b2deec7fdc7d3548615

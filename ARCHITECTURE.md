@@ -1,6 +1,6 @@
 # Architecture
 
-`mini_racer_rs` implements the `MiniRacer` Ruby API from mini_racer 0.22.1 in Rust, using V8 15.2 through `v8` (rusty_v8 152.2.0) and Ruby bindings through magnus and rb-sys. Rust owns behavior, while `lib/` defines vocabulary: constants, the error hierarchy, `MiniRacer::Binary`, the loader, `Context#load`, `Context#write_heap_snapshot`, and mini_racer's unchanged TruffleRuby backend in `lib/mini_racer/truffleruby.rb` and `lib/mini_racer/shared.rb`.
+`mini_racer_rs` implements the `MiniRacer` Ruby API from mini_racer 0.22.2 in Rust, using V8 15.2 through `v8` (rusty_v8 152.2.0) and Ruby bindings through magnus and rb-sys. Rust owns behavior, while `lib/` defines vocabulary: constants, the error hierarchy, `MiniRacer::Binary`, the loader, `Context#load`, `Context#write_heap_snapshot`, and mini_racer's unchanged TruffleRuby backend in `lib/mini_racer/truffleruby.rb` and `lib/mini_racer/shared.rb`.
 
 ## Crates
 
@@ -123,8 +123,8 @@ Under a fiber scheduler, a fiber waiting for its context parks through the sched
 
 ## How it is checked
 
-The unmodified mini_racer and ExecJS test suites run from submodules against per-platform ledgers in `test/upstream/`. Differential tests in `test/diff/` send the same generated values and the Babel, Terser, Handlebars, React, and MUI libraries to mini_racer 0.22.1 and this gem.
+The unmodified mini_racer and ExecJS test suites run from submodules against per-platform ledgers in `test/upstream/`. Differential tests in `test/diff/` send the same generated values and the Babel, Terser, Handlebars, React, and MUI libraries to mini_racer 0.22.2 and this gem.
 
 Loom models exercise the channel, termination, fork, per-isolate task queue, and worker task queue pause and resume protocols. cargo-fuzz targets cover the wire codec and source map parser. AddressSanitizer, ThreadSanitizer, fork and spawn stress, and garbage collection stress with compaction run in CI or nightly.
 
-Every difference from mini_racer 0.22.1 is recorded in `compat.toml` and listed in `COMPATIBILITY.md`.
+Every difference from mini_racer 0.22.2 is recorded in `compat.toml` and listed in `COMPATIBILITY.md`.

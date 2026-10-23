@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible problem and compare it with mini_racer 0.22.1.
+description: Report a reproducible problem and compare it with mini_racer 0.22.2.
 labels: [bug]
 body:
   - type: markdown
@@ -37,8 +37,8 @@ body:
   - type: textarea
     id: comparison
     attributes:
-      label: mini_racer 0.22.1 comparison
-      description: Run the same reproduction with mini_racer 0.22.1. Does it behave the same? Include its output, error, and backtrace. Deliberate differences are documented in `COMPATIBILITY.md`.
+      label: mini_racer 0.22.2 comparison
+      description: Run the same reproduction with mini_racer 0.22.2. Does it behave the same? Include its output, error, and backtrace. Deliberate differences are documented in `COMPATIBILITY.md`.
     validations:
       required: true
   - type: markdown

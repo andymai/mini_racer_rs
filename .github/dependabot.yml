@@ -38,7 +38,7 @@ updates:
         update-types: [minor, patch]
     ignore:
       - dependency-name: rb_sys
-      # mini_racer 0.22.1's suite runs on both bundles and requires ~> 5.0.
+      # mini_racer 0.22.2's suite runs on both bundles and requires ~> 5.0.
       - dependency-name: minitest
         update-types: [version-update:semver-major]
     open-pull-requests-limit: 5

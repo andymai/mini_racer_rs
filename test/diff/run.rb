@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# Differential run: the same cases go to the real mini_racer 0.22.1 and to
+# Differential run: the same cases go to the real mini_racer 0.22.2 and to
 # mini_racer_rs, and every outcome must match, match an accepted divergence, or
 # be a known gap in the ledger. --set consumers runs real libraries (Babel,
 # Terser, Handlebars, React) instead of generated values, against their own

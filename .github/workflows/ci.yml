@@ -483,7 +483,7 @@ jobs:
         run: bundle exec rake compat:check
       # Every Ruby 3.4 leg compares against the real gem, so a difference that
       # shows on one platform only (a crash, a conversion) is seen.
-      - name: Install the real mini_racer 0.22.1
+      - name: Install the real mini_racer 0.22.2
         if: matrix.ruby == '3.4'
         working-directory: tools/reference
         run: BUNDLE_PATH=vendor/bundle bundle install
@@ -639,7 +639,7 @@ jobs:
           bundler-cache: true
       - run: truffleruby-polyglot-get js
       - run: bundle exec ruby -Itest/ruby -Ilib test/ruby/harness_guard_test.rb
-      - name: Install the real mini_racer 0.22.1
+      - name: Install the real mini_racer 0.22.2
         working-directory: tools/reference
         run: BUNDLE_PATH=vendor/bundle bundle install
       # rake needs the lint group, which this job skips.

@@ -7,7 +7,7 @@ require "mini_racer"
 
 # ExecJS's `call` and react-rails' renders send a new source per call, which
 # the engine runs as a template compiled once per context. Every expected
-# value in these tests is what mini_racer 0.22.1 gives for the same source.
+# value in these tests is what mini_racer 0.22.2 gives for the same source.
 module FastCallsFixtures
   EXECJS = File.expand_path("../../vendor/execjs/lib", __dir__)
 
@@ -527,7 +527,7 @@ class FastCallsDeviationTest < Minitest::Test
     JSON.parse(out)
   end
 
-  # Deviation behavior:fast-calls@ruby: mini_racer 0.22.1 compiles every eval,
+  # Deviation behavior:fast-calls@ruby: mini_racer 0.22.2 compiles every eval,
   # so its bottom frame's CallSite#getScriptHash hashes the source and its
   # CallSite#getPosition is the source's (185 for this render), and a render's
   # wrapper, reached through `caller` or CallSite#getFunction, holds the

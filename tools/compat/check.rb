@@ -122,7 +122,7 @@ module CompatCheck
     on_engine = ids.select { |id| CompatSurface.applies?(id, engine) }
     applicable = on_engine.to_h { |id| [CompatSurface.split(id).first, id] }
     out = (present - applicable.keys).map do |id|
-      "EXTRA_SURFACE #{id}: mini_racer 0.22.1 has no such #{engine} surface"
+      "EXTRA_SURFACE #{id}: mini_racer 0.22.2 has no such #{engine} surface"
     end
     applicable.each do |base, id|
       entry = entries.fetch(id, {})
@@ -158,10 +158,10 @@ module CompatCheck
     expected = reference.fetch("ids")
     recorded = ids.select { |id| CompatSurface.applies?(id, engine) }.map { |id| CompatSurface.split(id).first }
     (expected - recorded).map do |id|
-      "SURFACE_DRIFT #{id}: mini_racer 0.22.1 has it on #{engine}; compat/surface.json does not"
+      "SURFACE_DRIFT #{id}: mini_racer 0.22.2 has it on #{engine}; compat/surface.json does not"
     end +
       (recorded - expected).map do |id|
-        "SURFACE_DRIFT #{id}: in compat/surface.json but not in mini_racer 0.22.1 on #{engine}"
+        "SURFACE_DRIFT #{id}: in compat/surface.json but not in mini_racer 0.22.2 on #{engine}"
       end
   end
 end

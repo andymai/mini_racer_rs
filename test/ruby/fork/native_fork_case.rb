@@ -3,7 +3,7 @@
 # A fork that skips Process._fork, here libc's fork() through Fiddle, as C
 # extensions may do: the engine cannot tell whether the child will run Ruby,
 # so it does not wait for the runners, and the child leaves every inherited
-# context to the parent, idle ones included. mini_racer 0.22.1's child uses
+# context to the parent, idle ones included. mini_racer 0.22.2's child uses
 # its idle contexts.
 require_relative "prelude"
 

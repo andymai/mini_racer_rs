@@ -3,7 +3,7 @@ name: Ledger generate
 # Produces the raw results that `rake ledger:merge` turns into
 # test/upstream/mini_racer.status.toml and, with SUITE=execjs,
 # test/upstream/execjs.status.toml: one reference run of the real mini_racer
-# 0.22.1 and three candidate seeds of each suite, on every leg CI checks.
+# 0.22.2 and three candidate seeds of each suite, on every leg CI checks.
 # Runs on demand, or on a PR while it carries the ledger-generate label; adding
 # any other label does not restart it.
 on:
@@ -48,7 +48,7 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           ruby: ${{ matrix.ruby }}
-      - name: Install the real mini_racer 0.22.1
+      - name: Install the real mini_racer 0.22.2
         working-directory: tools/reference
         run: BUNDLE_PATH=vendor/bundle bundle install
       - run: bundle exec rake compile
@@ -93,7 +93,7 @@ jobs:
           ruby-version: truffleruby+graalvm-40.0.0
           bundler-cache: true
       - run: truffleruby-polyglot-get js
-      - name: Install the real mini_racer 0.22.1
+      - name: Install the real mini_racer 0.22.2
         working-directory: tools/reference
         run: BUNDLE_PATH=vendor/bundle bundle install
       - name: Reference and candidate runs

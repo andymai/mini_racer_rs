@@ -1,4 +1,4 @@
-# Status of each public id of mini_racer 0.22.1 (compat/surface.json) in mini_racer_rs.
+# Status of each public id of mini_racer 0.22.2 (compat/surface.json) in mini_racer_rs.
 # A status describes CRuby; on TruffleRuby mini_racer_rs runs upstream's backend.
 # status = "done" | "todo:<milestone>" | "deviation" (with reason, then approved = "YYYY-MM-DD" once reviewed).
 # [extra] holds what mini_racer_rs adds under MiniRacerRs, as reflected: status = "done", or "internal"

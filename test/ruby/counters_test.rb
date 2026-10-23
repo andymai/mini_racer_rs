@@ -5,7 +5,7 @@ require "mini_racer"
 require "timeout"
 
 # MiniRacerRs.counters reads a context's counts from atomics: no dispatch, no
-# context lock. mini_racer 0.22.1 has no counterpart.
+# context lock. mini_racer 0.22.2 has no counterpart.
 module CounterHelpers
   NONE = { stop: 0, timeout: 0, interrupt: 0, max_memory: 0, heap_exhausted: 0 }.freeze
   COUNTED = %i[dispatches callbacks bytes_to_js bytes_from_js].freeze

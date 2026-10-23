@@ -3,7 +3,7 @@
 require "test_helper"
 require "mini_racer"
 
-# Where callbacks behave differently from mini_racer 0.22.1 by design; each
+# Where callbacks behave differently from mini_racer 0.22.2 by design; each
 # test names the compat.toml deviation it shows.
 class CallbackDeviationTest < Minitest::Test
   include RubyProcess
@@ -16,7 +16,7 @@ class CallbackDeviationTest < Minitest::Test
     @context&.dispose
   end
 
-  # Deviation behavior:object-ids@ruby: mini_racer 0.22.1 sends each occurrence
+  # Deviation behavior:object-ids@ruby: mini_racer 0.22.2 sends each occurrence
   # of a Time or MiniRacer::Binary as a separate object.
   def test_a_repeated_time_or_binary_reaches_javascript_as_one_object
     @context.eval("globalThis.same = (a, b) => a === b")
@@ -28,7 +28,7 @@ class CallbackDeviationTest < Minitest::Test
     refute @context.call("same", time, Time.at(0))
   end
 
-  # Deviation behavior:callback-reentry@ruby: mini_racer 0.22.1 lets any fiber
+  # Deviation behavior:callback-reentry@ruby: mini_racer 0.22.2 lets any fiber
   # on the thread call in, and hangs when a signal trap calls in while a
   # callback waits on the context.
   def test_only_the_callbacks_own_fiber_calls_back_in
@@ -60,7 +60,7 @@ class CallbackDeviationTest < Minitest::Test
     assert_equal "[7, [true, ThreadError], 4]\n", out
   end
 
-  # Deviation behavior:callback-error-text@ruby: mini_racer 0.22.1 reads the
+  # Deviation behavior:callback-error-text@ruby: mini_racer 0.22.2 reads the
   # message of an exception a callback raises as Latin-1, so "café" reaches
   # JavaScript as "cafÃ©".
   def test_a_callback_error_message_keeps_its_encoding
@@ -69,9 +69,10 @@ class CallbackDeviationTest < Minitest::Test
     assert_equal "café 東", @context.eval("try { raises() } catch (e) { e.message }")
   end
 
-  # Deviation behavior:callback-jump@ruby: mini_racer 0.22.1 deadlocks when a
-  # callback leaves by throw or Thread#kill. Here the script is terminated and
-  # the jump goes on once the eval has returned.
+  # Deviation behavior:callback-jump@ruby: mini_racer 0.22.2 crashes the
+  # process with a segmentation fault when a callback leaves by throw, and
+  # hands JavaScript an error it can catch when one calls Thread#kill. Here
+  # the script is terminated and the jump goes on once the eval has returned.
   def test_a_jump_out_of_a_callback_ends_the_script_and_continues
     out, err, status = run_ruby(<<~RUBY)
       Thread.new { sleep 10; warn "timed out"; exit!(99) }

@@ -75,7 +75,7 @@ pub fn timeout(value: &OptionValue) -> Result<Option<Duration>, OptionError> {
         .map(Duration::from_millis))
 }
 
-/// `Context.new` keywords in the order given; `mini_racer` 0.22.1 checks them
+/// `Context.new` keywords in the order given; `mini_racer` 0.22.2 checks them
 /// last to first and raises on the first bad one.
 pub fn configure(
     options: impl DoubleEndedIterator<Item = (String, OptionValue)>,

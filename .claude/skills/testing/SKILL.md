@@ -1,11 +1,11 @@
 ---
 name: testing
-description: Use when writing, placing or running a test in mini_racer_rs; when a fix or a deviation from mini_racer 0.22.1 needs a failing-first test; when adding a wire golden corpus entry, a loom model, a fork case, a differential corpus case, a consumer workload or a stress script; when a change moves an upstream suite result; or when choosing which commands to run before a PR.
+description: Use when writing, placing or running a test in mini_racer_rs; when a fix or a deviation from mini_racer 0.22.2 needs a failing-first test; when adding a wire golden corpus entry, a loom model, a fork case, a differential corpus case, a consumer workload or a stress script; when a change moves an upstream suite result; or when choosing which commands to run before a PR.
 ---
 
 # Testing
 
-A change gets a test at the lowest layer that can see it, and the suites above it stay green: mini_racer 0.22.1's own tests run unmodified against the ledgers, and the differential run compares outcomes with the real gem. The commands for each changed path are in `CLAUDE.md` under "Which tests to run".
+A change gets a test at the lowest layer that can see it, and the suites above it stay green: mini_racer 0.22.2's own tests run unmodified against the ledgers, and the differential run compares outcomes with the real gem. The commands for each changed path are in `CLAUDE.md` under "Which tests to run".
 
 ## Where a test goes
 
@@ -45,9 +45,9 @@ An upstream test that moves values between JavaScript and Ruby belongs in `test/
 
 ## Failing first
 
-A fix, and any behavior that differs from mini_racer 0.22.1, lands with a test that failed before the change (the PR template asks).
+A fix, and any behavior that differs from mini_racer 0.22.2, lands with a test that failed before the change (the PR template asks).
 
-1. Write the test for the behavior this gem will have. A deviation test opens with a comment naming its compat id and what mini_racer 0.22.1 does, as in `test/ruby/callback_deviation_test.rb`.
+1. Write the test for the behavior this gem will have. A deviation test opens with a comment naming its compat id and what mini_racer 0.22.2 does, as in `test/ruby/callback_deviation_test.rb`.
 2. Run it on the code before the change: commit the test alone first and run it on that commit. The stash is shared by every worktree, so do not park the change there. After touching Rust, `bundle exec rake compile` before every Ruby run, or the previous extension keeps loading. It must fail on its assertion, not on a load or name error.
 3. Restore the change, compile, run again: it passes.
 4. For a deviation, observe the real gem (reference.md), then add `[ids."behavior:<kebab>@ruby"]` to `compat.toml` with `status = "deviation"` and a `reason` stating both behaviors; the `approved` date is Andy's to add. The reason renders into `COMPATIBILITY.md`, so it is public prose and goes through `codex-write`. Run `bundle exec rake compat:render`, then `bundle exec rake compat:check`. A differential divergence it explains gets an entry in `test/diff/divergences.toml` naming that id.

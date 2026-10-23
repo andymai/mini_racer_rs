@@ -27,7 +27,7 @@ Every harness here writes its evidence to a known place. Read that first, reprod
 
 - Reproduce before theorizing. Loom models, fuzz inputs and the differential generator are deterministic: the same model, input or `--seed` fails the same way. The upstream suite's `--seed` fixes only the test order.
 - A hang is debugged from stacks, not from guesses: the upstream watchdog captures them, and `eu-stack -p <pid>` (Linux) or `sample <pid> 1` (macOS) shows a live process's native stacks.
-- `["crash","signal 6"]` on the reference side is mini_racer 0.22.1 aborting, as it does on some values; it is an outcome, not a harness failure.
+- `["crash","signal 6"]` on the reference side is mini_racer aborting; it is an outcome, not a harness failure.
 - Never silence a check to get green: no new LSan suppression without the upstream leak it matches, no ledger status change without the result it records, no `--no-verify`.
 
 ## Stale extension

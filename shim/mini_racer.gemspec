@@ -6,7 +6,7 @@ mini_racer_rs_version = version_rb[/VERSION = "([^"]+)"/, 1] or
 
 Gem::Specification.new do |spec|
   spec.name = "mini_racer"
-  spec.version = "0.22.1"
+  spec.version = "0.22.2"
   spec.authors = ["Andy Aragon"]
   spec.summary = "mini_racer_rs compatibility shim"
   spec.homepage = "https://github.com/andymai/mini_racer_rs"

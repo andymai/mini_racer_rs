@@ -58,7 +58,7 @@ class LedgerMergeTest < Minitest::Test
     ledger = merged({}, [row("reference", "error", message: "boom"), row("candidate", "error")])
 
     assert_equal "upstream-fail", ledger[ID]["status"]
-    assert_equal "mini_racer 0.22.1: error: boom", ledger[ID]["cause"]
+    assert_equal "mini_racer 0.22.2: error: boom", ledger[ID]["cause"]
   end
 
   def test_per_leg_milestones_and_timeouts_survive

@@ -130,7 +130,7 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           ruby: "3.4"
-      - name: Install the real mini_racer 0.22.1
+      - name: Install the real mini_racer 0.22.2
         working-directory: tools/reference
         run: BUNDLE_PATH=vendor/bundle bundle install
       - run: bundle exec rake compile
