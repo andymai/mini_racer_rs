@@ -19,6 +19,7 @@ class BenchFloorsTest < Minitest::Test
     misses = BenchFloors.misses(result({ "callback round trip p50 (us)" => { "ratio" => 1.9, "note" => "" } }))
 
     assert_equal({ "callback round trip p50 (us)" => "1.90x, floor 2.0x" }, misses)
+    assert_in_delta 2.0, BenchFloors.floor_for("call in a timeout scope p50 (us)")
   end
 
   def test_a_serde_case_below_the_floor_fails

@@ -92,6 +92,7 @@ What mini_racer_rs adds under `MiniRacerRs`. An internal id is not for callers.
 | `class:MiniRacerRs::Pool < Object` | done | n/a |
 | `class:MiniRacerRs::Pool::ShutdownError < MiniRacer::Error` | done | n/a |
 | `class:MiniRacerRs::Spill < Object` | internal | n/a |
+| `class:MiniRacerRs::TimeoutScope < Object` | internal | n/a |
 | `const:MiniRacerRs::NATIVE_VERSION` | done | n/a |
 | `const:MiniRacerRs::V8_VERSION` | done | n/a |
 | `const:MiniRacerRs::VERSION` | done | done |
@@ -103,6 +104,7 @@ What mini_racer_rs adds under `MiniRacerRs`. An internal id is not for callers.
 | `module:MiniRacerRs::ForkHook` | internal | n/a |
 | `smethod:MiniRacerRs.counters` | done | n/a |
 | `smethod:MiniRacerRs.register_source_map` | done | n/a |
+| `smethod:MiniRacerRs.timeout` | done | n/a |
 
 ## Deviations
 

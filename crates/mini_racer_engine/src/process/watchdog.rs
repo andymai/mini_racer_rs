@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use mini_racer_sync::{DispatchId, Interrupt, lock, wait, wait_timeout};
 
 use crate::EngineError;
-use crate::control::ControlBlock;
+use crate::control::{ControlBlock, Timer};
 
 struct Entry {
     at: Instant,
@@ -88,12 +88,29 @@ pub fn schedule(
     block: &Arc<ControlBlock>,
     dispatch: DispatchId,
 ) -> Result<(), EngineError> {
+    arm(after, block, |timer, at| timer.due = Some((at, dispatch)))
+}
+
+/// Arms the timeout a nested script runs under on its own.
+pub fn schedule_nested(
+    after: Duration,
+    block: &Arc<ControlBlock>,
+    id: DispatchId,
+) -> Result<(), EngineError> {
+    arm(after, block, |timer, at| timer.nested.push((at, id)))
+}
+
+fn arm(
+    after: Duration,
+    block: &Arc<ControlBlock>,
+    set: impl FnOnce(&mut Timer, Instant),
+) -> Result<(), EngineError> {
     let watchdog = current()?;
     let at = Instant::now()
         .checked_add(after)
         .ok_or_else(|| EngineError::Internal("timeout out of range".to_owned()))?;
     let mut timer = lock(&block.timer);
-    timer.due = Some((at, dispatch));
+    set(&mut timer, at);
     let wake = timer.queued.is_none_or(|queued| at < queued);
     if wake {
         timer.queued = Some(at);
@@ -104,6 +121,20 @@ pub fn schedule(
         watchdog.push(at, Arc::downgrade(block));
     }
     Ok(())
+}
+
+/// Whether the outermost dispatch's own timeout, or a nested script's, fires
+/// within `after` from now.
+pub fn ends_within(block: &ControlBlock, after: Duration) -> bool {
+    let Some(deadline) = Instant::now().checked_add(after) else {
+        return true;
+    };
+    let timer = lock(&block.timer);
+    timer
+        .due
+        .iter()
+        .chain(&timer.nested)
+        .any(|(at, _)| *at <= deadline)
 }
 
 /// Bounds work `dispatch` does after its timeout fired with the timeout again.
@@ -128,6 +159,11 @@ pub fn clear(block: &ControlBlock, dispatch: DispatchId) {
     if timer.due.is_some_and(|(_, due)| due == dispatch) {
         timer.due = None;
     }
+}
+
+/// Forgets a nested script's own timeout once the script is over.
+pub fn clear_nested(block: &ControlBlock, id: DispatchId) {
+    lock(&block.timer).nested.retain(|(_, due)| *due != id);
 }
 
 fn run(watchdog: &Watchdog) {
@@ -167,19 +203,32 @@ fn run(watchdog: &Watchdog) {
 
 fn fire(watchdog: &Watchdog, block: &Arc<ControlBlock>, now: Instant) {
     let mut timer = lock(&block.timer);
-    timer.queued = None;
-    let due = timer.due;
-    match due {
-        Some((at, _)) if at <= now => timer.due = None,
-        Some((at, _)) => timer.queued = Some(at),
-        None => {}
+    let mut fired = Vec::new();
+    if let Some((at, id)) = timer.due
+        && at <= now
+    {
+        timer.due = None;
+        fired.push(id);
     }
-    drop(timer);
-    match due {
-        Some((at, dispatch)) if at <= now => {
-            block.term.request(Interrupt::Timeout(dispatch));
+    timer.nested.retain(|&(at, id)| {
+        let due = at <= now;
+        if due {
+            fired.push(id);
         }
-        Some((at, _)) => watchdog.push(at, Arc::downgrade(block)),
-        None => {}
+        !due
+    });
+    let next = timer
+        .due
+        .iter()
+        .chain(&timer.nested)
+        .map(|(at, _)| *at)
+        .min();
+    timer.queued = next;
+    drop(timer);
+    for id in fired {
+        block.term.request(Interrupt::Timeout(id));
+    }
+    if let Some(at) = next {
+        watchdog.push(at, Arc::downgrade(block));
     }
 }
