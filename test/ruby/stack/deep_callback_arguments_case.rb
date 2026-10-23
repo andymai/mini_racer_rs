@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# A callback's arguments nested 95 deep, the arguments array included, decoded
+# A callback's arguments nested 96 deep, the arguments array included, decoded
 # on a fiber or a thread with from little more than Ruby's margin for a C
 # function left to room a release build decodes them in, and then the context
 # evaluates and disposes. A decoder that recurses
@@ -16,7 +16,7 @@ context = MiniRacer::Context.new
 context.attach("f", ->(value) { value.class.name })
 %i[fiber thread].each do |where|
   SHAPES.each do |shape, step|
-    source = "(() => { const v = #{nested(step, levels: 94)}; try { return f(v) } catch (e) { return e.message } })()"
+    source = "(() => { const v = #{nested(step, levels: 95)}; try { return f(v) } catch (e) { return e.message } })()"
     whole = context.eval(source)
     answers = GAPS.map do |gap|
       label = "#{shape}, #{gap} levels short of a #{where}'s limit"
