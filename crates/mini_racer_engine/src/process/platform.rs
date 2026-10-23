@@ -6,9 +6,11 @@ use crate::{FlagError, HeapLimitError};
 
 const MAX_FLAG_BYTES: usize = 256;
 
-/// The least heap limit `set_heap_limit` takes. V8 15.2 gives the young
-/// generation at least 6 MiB of a limit, and under 32 MiB a `Map` growing
-/// past the limit, or a `JSON.parse` hit twice, aborts the process.
+/// The least heap limit `set_heap_limit` takes.
+///
+/// V8 15.2 gives the young generation at least 6 MiB of a limit, and from
+/// 16 MiB down a `JSON.parse` whose result is about twice the limit aborts
+/// the process, past the room a hit lends.
 pub const MIN_HEAP_LIMIT: usize = 32 << 20;
 /// The most: the largest heap V8 sizes by default on a 64-bit host.
 pub const MAX_HEAP_LIMIT: usize = 4 << 30;

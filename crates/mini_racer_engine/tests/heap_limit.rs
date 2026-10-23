@@ -249,6 +249,18 @@ fn json_and_typed_arrays_past_the_limit_raise() {
     assert_eq!(eval(&context, "1 + 1").expect("usable"), Out::Number(2.0));
 }
 
+// V8 asks for room around its last-resort collection and retries an
+// allocation once, and a growing Map doubles its backing store in one.
+#[test]
+fn a_growing_map_raises_at_every_limit() {
+    let map = "(() => { const m = new Map(); for (let i = 0; ; i++) m.set(i, {i}); })()";
+    for mib in [40, 80, 160, 320] {
+        let context = limited(mib << 20);
+        limit_reached(eval(&context, map), mib << 20);
+        assert_eq!(eval(&context, "1 + 1").expect("usable"), Out::Number(2.0));
+    }
+}
+
 // An ArrayBuffer's backing store lives outside the heap.
 #[test]
 fn array_buffers_are_not_held_to_the_limit() {

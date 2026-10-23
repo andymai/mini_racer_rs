@@ -161,6 +161,21 @@ class HeapLimitPathsTest < Minitest::Test
     assert_equal [reached, reached, reached, "ok:2"], lines
   end
 
+  # V8 asks for room around its last-resort collection and retries an
+  # allocation once, and a growing Map doubles its backing store in one.
+  def test_a_growing_map_raises_at_every_limit
+    map = "(() => { const m = new Map(); for (let i = 0; ; i++) m.set(i, {i}); })()"
+    [[40, nil], [80, nil], [160, nil], [320, nil], [384, ":minor_ms"]].each do |mib, flags|
+      lines = capped(<<~RUBY, mib: mib, flags: flags)
+        context = MiniRacer::Context.new
+        puts JSON.generate(outcome { context.eval(#{map.dump}) })
+        puts JSON.generate(outcome { context.eval("1 + 1") })
+      RUBY
+
+      assert_equal [reached(mib), "ok:2"], lines, "#{mib} MiB #{flags}"
+    end
+  end
+
   # A pump reports no termination, as in mini_racer; a task that reaches the
   # limit leaves the context usable.
   def test_a_task_past_the_limit_leaves_the_context_usable

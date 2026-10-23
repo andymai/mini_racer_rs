@@ -318,12 +318,13 @@ pub fn check_heap(isolate: &mut v8::Isolate) {
 
 const EXHAUSTED: Option<Halt> = Some(Halt::Terminated(TerminationCause::HeapExhausted));
 
-// A hit lends V8 half the old generation's limit at a time, four times at
-// most, so a script past the heap limit can still be ended until the heap is
-// three times the limit; past that V8 aborts the process as it would without
-// one.
-const ROOM_DIVISOR: usize = 2;
-const RAISES: usize = 4;
+// A hit lends V8 room up to three times the old generation's limit, all at
+// once: V8 asks at most a few times per allocation, around its last-resort
+// collection, then retries the allocation once and aborts, so room lent a
+// share at a time ran out under one allocation, such as the backing store a
+// growing `Map` doubles into. Past that V8 aborts the process as it would
+// without a limit.
+const CEILING: usize = 3;
 
 // V8 is about to abort the process at the heap limit: the running script is
 // ended as out of memory, and V8 is lent room to unwind it. With no dispatch
@@ -337,9 +338,7 @@ pub fn near_heap_limit(block: &ControlBlock, current: usize, initial: usize) -> 
     if !watch.collecting.load(Ordering::Relaxed) {
         block.term.request(Interrupt::HeapExhausted);
     }
-    let room = initial / ROOM_DIVISOR;
-    let ceiling = initial.saturating_add(room.saturating_mul(RAISES));
-    current.saturating_add(room).min(ceiling).max(current)
+    initial.saturating_mul(CEILING).max(current)
 }
 
 // After a hit, a full collection, then the old generation's limit back to the
