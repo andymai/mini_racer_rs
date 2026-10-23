@@ -16,6 +16,9 @@ use crate::gc_root::{OnceRoot, Pins, StaticRoot};
 use crate::rb_raw::{self, RubyType};
 
 const BIGINT_MAX_WORDS: usize = (16 << 20) / 8;
+// mini_racer refuses a value nested deeper than this below the one it sends,
+// counting a call's arguments one level down.
+const MAX_DEPTH: u32 = 512;
 // mini_racer formats these messages into a 64-byte buffer.
 const MESSAGE_MAX_BYTES: usize = 63;
 
@@ -61,12 +64,22 @@ impl From<Error> for EncodeError {
 
 enum Item {
     // A pinned value, by its index in the holder.
-    Value(usize),
+    Value {
+        index: usize,
+        depth: u32,
+    },
     // A pinned key of a hash.
-    Key(usize),
+    Key {
+        index: usize,
+        depth: u32,
+    },
     // An element read when its turn comes, as serialize1 reads them, so a
     // to_time that changes the array is seen.
-    Element { array: usize, index: isize },
+    Element {
+        array: usize,
+        index: isize,
+        depth: u32,
+    },
     EndArray(u32),
     EndObject(u32),
 }
@@ -93,7 +106,7 @@ impl Hasher for Address {
 }
 
 // Iterative so a deeply nested argument cannot overflow the Ruby thread's
-// stack; how deep V8 then reads is V8's own limit.
+// stack.
 struct Encoder<'r, 'o> {
     ruby: &'r Ruby,
     // Made for the first value that holds others or can run Ruby code, before
@@ -122,7 +135,7 @@ pub fn encode(
 ) -> Result<Vec<u8>, Error> {
     let mut out = Vec::new();
     Encoder::new(ruby, &mut out)
-        .top(value)
+        .top(value, 0)
         .map_err(|error| error.raise(unsupported))?;
     Ok(out)
 }
@@ -142,7 +155,7 @@ pub fn call(
     encoder.writer.begin_array(count);
     encoder.string(name, Text::Name);
     args.iter()
-        .try_for_each(|&arg| encoder.top(arg))
+        .try_for_each(|&arg| encoder.top(arg, 1))
         .map_err(|error| error.raise(unsupported))?;
     encoder.writer.end_array(count);
     let (objects, properties) = (encoder.objects, encoder.properties);
@@ -180,6 +193,13 @@ enum Text {
 
 fn length(len: usize) -> u32 {
     u32::try_from(len).unwrap_or(u32::MAX)
+}
+
+fn within(depth: u32) -> Result<(), EncodeError> {
+    if depth > MAX_DEPTH {
+        return Err(EncodeError::unsupported("max depth exceeded"));
+    }
+    Ok(())
 }
 
 // The values whose encoding runs no Ruby code and holds no other value.
@@ -225,12 +245,12 @@ impl Encoder<'_, '_> {
     }
 
     // Writes an immediate at once; anything else waits, pinned, for `run`.
-    fn top(&mut self, value: Value) -> Result<(), EncodeError> {
+    fn top(&mut self, value: Value, depth: u32) -> Result<(), EncodeError> {
         if self.immediate(value, rb_raw::ruby_type(self.ruby, value)) {
             return Ok(());
         }
-        let root = self.pin(value);
-        self.work.push(Item::Value(root));
+        let index = self.pin(value);
+        self.work.push(Item::Value { index, depth });
         self.run()
     }
 
@@ -239,17 +259,22 @@ impl Encoder<'_, '_> {
             match item {
                 Item::EndArray(length) => self.writer.end_array(length),
                 Item::EndObject(count) => self.writer.end_object(count),
-                Item::Value(index) => self.value(self.pinned(index))?,
-                Item::Key(index) => {
+                Item::Value { index, depth } => self.value(self.pinned(index), depth)?,
+                Item::Key { index, depth } => {
+                    within(depth)?;
                     let key = self.pinned(index);
                     self.key(key, rb_raw::ruby_type(self.ruby, key));
                 }
-                Item::Element { array, index } => {
+                Item::Element {
+                    array,
+                    index,
+                    depth,
+                } => {
                     let element = RArray::from_value(self.pinned(array))
                         .map(|array| array.entry::<Value>(index))
                         .transpose()?
                         .unwrap_or_else(|| self.ruby.qnil().as_value());
-                    self.value(element)?;
+                    self.value(element, depth)?;
                 }
             }
         }
@@ -293,17 +318,15 @@ impl Encoder<'_, '_> {
         }
     }
 
-    fn value(&mut self, value: Value) -> Result<(), EncodeError> {
+    fn value(&mut self, value: Value, depth: u32) -> Result<(), EncodeError> {
+        within(depth)?;
         let kind = rb_raw::ruby_type(self.ruby, value);
         if self.immediate(value, kind) {
             return Ok(());
         }
         match kind {
-            RubyType::Array => {
-                self.array(value);
-                Ok(())
-            }
-            RubyType::Hash => self.hash(value),
+            RubyType::Array => self.array(value, depth),
+            RubyType::Hash => self.hash(value, depth),
             RubyType::Data => self.data(value),
             RubyType::Bignum => self.bigint(value),
             RubyType::Object => self.object(value),
@@ -322,13 +345,16 @@ impl Encoder<'_, '_> {
 
     // The leading immediates are written at once: reading one runs no code
     // that could change the array before its turn. The rest wait their turns.
-    fn array(&mut self, value: Value) {
+    fn array(&mut self, value: Value, depth: u32) -> Result<(), EncodeError> {
         if let Some(&id) = self.seen.get(&rb_raw::identity(value)) {
             self.writer.object_ref(id);
-            return;
+            return Ok(());
         }
         let array = RArray::from_value(value);
         let len = array.map_or(0, RArray::len);
+        if len > 0 {
+            within(depth.saturating_add(1))?;
+        }
         let count = length(len);
         let id = self.writer.begin_array(count);
         let pinned = self.pin(value);
@@ -348,21 +374,25 @@ impl Encoder<'_, '_> {
         }
         if next >= end {
             self.writer.end_array(count);
-            return;
+            return Ok(());
         }
         self.work.push(Item::EndArray(count));
         for index in (next..end).rev() {
             self.work.push(Item::Element {
                 array: pinned,
                 index,
+                depth: depth.saturating_add(1),
             });
         }
+        Ok(())
     }
 
     // mini_racer collects every pair before it writes one. Until a value that
     // is not an immediate, each pair is written as it is collected, which no
-    // Ruby code can tell apart; from there on, the pairs wait their turns.
-    fn hash(&mut self, value: Value) -> Result<(), EncodeError> {
+    // Ruby code can tell apart; from there on, the pairs wait their turns. It
+    // refuses a key that is not a String, a Symbol or an Integer before a key
+    // too deep.
+    fn hash(&mut self, value: Value, depth: u32) -> Result<(), EncodeError> {
         if let Some(&id) = self.seen.get(&rb_raw::identity(value)) {
             self.writer.object_ref(id);
             return Ok(());
@@ -376,6 +406,8 @@ impl Encoder<'_, '_> {
         let mut pairs = Vec::new();
         let mut keys_fit = true;
         let mut written = 0u32;
+        let inner = depth.saturating_add(1);
+        let too_deep = within(inner).is_err();
         hash.foreach(|key: Value, item: Value| {
             let key_kind = rb_raw::ruby_type(self.ruby, key);
             keys_fit &= matches!(
@@ -383,7 +415,11 @@ impl Encoder<'_, '_> {
                 RubyType::Fixnum | RubyType::String | RubyType::Symbol
             );
             let item_kind = rb_raw::ruby_type(self.ruby, item);
-            if keys_fit && pairs.is_empty() && immediate(item_kind) {
+            if too_deep {
+                if !keys_fit {
+                    return Ok(ForEach::Stop);
+                }
+            } else if keys_fit && pairs.is_empty() && immediate(item_kind) {
                 self.key(key, key_kind);
                 self.immediate(item, item_kind);
                 written = written.saturating_add(1);
@@ -395,6 +431,9 @@ impl Encoder<'_, '_> {
         if !keys_fit {
             return Err(EncodeError::unsupported("TODO serialize as Map"));
         }
+        if too_deep && !hash.is_empty() {
+            within(inner)?;
+        }
         let count = written.saturating_add(length(pairs.len()));
         if pairs.is_empty() {
             self.writer.end_object(count);
@@ -402,8 +441,14 @@ impl Encoder<'_, '_> {
         }
         self.work.push(Item::EndObject(count));
         for (key, item) in pairs.into_iter().rev() {
-            self.work.push(Item::Value(item));
-            self.work.push(Item::Key(key));
+            self.work.push(Item::Value {
+                index: item,
+                depth: inner,
+            });
+            self.work.push(Item::Key {
+                index: key,
+                depth: inner,
+            });
         }
         Ok(())
     }
