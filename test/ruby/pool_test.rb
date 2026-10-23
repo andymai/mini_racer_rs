@@ -472,6 +472,48 @@ class PoolTrapTest < Minitest::Test
     assert_predicate status, :success?, stderr
     assert_operator Float(stdout), :<, 20, "median ms from the trap's return to the wait's checkout"
   end
+
+  # A trap that leaves its checkout by break owes the wait it displaced a
+  # wakeup that no settle delivers then; the wait finds the context by its
+  # rescan and ends, and the next settle delivers the wakeup, collecting
+  # under GC.stress, while the queue it pushes to has no reference left but
+  # the pool's own.
+  def test_a_wakeup_owed_to_a_wait_that_has_ended_survives_collection
+    skip "needs CRuby and SIGUSR1" unless RUBY_ENGINE == "ruby" && Signal.list.key?("USR1")
+    code = <<~RUBY
+      require "mini_racer"
+      pool = MiniRacerRs::Pool.new(size: 1)
+      trap("USR1") { pool.with { break } }
+      3.times do
+        held = Queue.new
+        release = Queue.new
+        holder = Thread.new { pool.with { held << true; release.pop } }
+        held.pop
+        Thread.new do
+          sleep 0.01 until Thread.main.status == "sleep"
+          Process.kill("USR1", Process.pid)
+          sleep 0.05
+          release << true
+        end
+        pool.with do
+          Array.new(300).reduce([]) { |inner, _| [inner] }.inspect
+          GC.stress = true
+        end
+        GC.stress = false
+        GC.verify_internal_consistency
+        holder.join
+        sleep 0.02
+        GC.start
+        GC.verify_internal_consistency
+      end
+      puts pool.with { _1.eval("40 + 2") }
+      pool.shutdown
+    RUBY
+    stdout, stderr, status = run_ruby(code)
+
+    assert_predicate status, :success?, stderr
+    assert_equal "42\n", stdout
+  end
 end
 
 class PoolNestingTest < Minitest::Test

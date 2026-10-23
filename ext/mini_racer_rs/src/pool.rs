@@ -496,19 +496,20 @@ impl Pool {
     // thread back to sleep; so a thread of the pool's own pushes, once the
     // GVL is free.
     fn wake_owed(&self, ruby: &Ruby) -> Result<(), Error> {
-        let owed: Vec<Value> = self
-            .owed
-            .borrow_mut()
-            .drain(..)
-            .filter_map(|queue| queue.get(ruby))
-            .collect();
-        if owed.is_empty() {
+        let count = self.owed.borrow().len();
+        if count == 0 {
             return Ok(());
         }
-        let queues = ruby.ary_new_capa(owed.len());
-        for queue in owed {
-            queues.push(queue)?;
+        // The queues stay rooted in `owed` until the array holds them: making
+        // and filling it can collect, and a wait that has ended leaves its
+        // queue referenced by nothing else. The mark shares this borrow.
+        let queues = ruby.ary_new_capa(count);
+        for queue in self.owed.borrow().iter() {
+            if let Some(queue) = queue.get(ruby) {
+                queues.push(queue)?;
+            }
         }
+        self.owed.borrow_mut().clear();
         gc_root::spawn(ruby, queues, |_ruby, queues: RArray| {
             while let Ok(Some(queue)) = queues.shift::<Option<Value>>() {
                 let _ = queue.funcall::<_, _, Value>("push", (true,));
@@ -799,6 +800,7 @@ impl Pool {
         for queue in waiting {
             queue.funcall::<_, _, Value>("push", (true,))?;
         }
+        rb_self.wake_owed(ruby)?;
         rb_self.start_pending(ruby, rb_self)
     }
 }
