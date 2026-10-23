@@ -88,6 +88,7 @@ What mini_racer_rs adds under `MiniRacerRs`. An internal id is not for callers.
 
 | Id | CRuby | TruffleRuby |
 |---|---|---|
+| `class:MiniRacerRs::HeapLimitError < MiniRacer::V8OutOfMemoryError` | done | n/a |
 | `class:MiniRacerRs::Pins < Object` | internal | n/a |
 | `class:MiniRacerRs::Spill < Object` | internal | n/a |
 | `const:MiniRacerRs::NATIVE_VERSION` | done | n/a |
@@ -97,6 +98,8 @@ What mini_racer_rs adds under `MiniRacerRs`. An internal id is not for callers.
 | `imethod:MiniRacerRs::ForkHook#daemon` | internal | n/a |
 | `module:MiniRacerRs` | done | done |
 | `module:MiniRacerRs::ForkHook` | internal | n/a |
+| `smethod:MiniRacerRs.heap_limit` | done | n/a |
+| `smethod:MiniRacerRs.heap_limit=` | done | n/a |
 | `smethod:MiniRacerRs.register_source_map` | done | n/a |
 
 ## Deviations
