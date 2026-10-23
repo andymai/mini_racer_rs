@@ -525,9 +525,10 @@ fn a_late_timeout_never_terminates_the_next_dispatch() {
     });
 }
 
-// Model 20: an exhausted heap, which V8's near-heap-limit callback may
-// request from any thread, is reported by the dispatch it lands in or by
-// none, never by the next script, and leaves no termination behind.
+// Model 20: an exhausted heap that V8's near-heap-limit callback requests as
+// its dispatch ends is reported by that dispatch or dropped, and leaves no
+// termination behind for the next, which begins once the callback has
+// returned, as it does when V8 calls the callback on the runner.
 #[test]
 fn an_exhausted_heap_ends_with_its_dispatch() {
     loom::model(|| {
