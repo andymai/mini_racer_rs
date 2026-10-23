@@ -1,6 +1,6 @@
 use magnus::value::ReprValue;
 use magnus::{Class, Error, ExceptionClass, Module, Object, RModule, RObject, Ruby, Value};
-use mini_racer_engine::{EngineError, FlagError, JsErrorKind, TerminationCause};
+use mini_racer_engine::{EngineError, FlagError, HeapLimitError, JsErrorKind, TerminationCause};
 
 use crate::export;
 use crate::gc_root::StaticRoot;
@@ -58,6 +58,7 @@ roots! {
     PLATFORM_INITIALIZED = "MiniRacer"::"PlatformAlreadyInitialized";
     INTERNAL = "MiniRacer"::"InternalError";
     SNAPSHOT = "MiniRacer"::"SnapshotError";
+    HEAP_LIMIT = "MiniRacerRs"::"HeapLimitError";
 }
 
 pub fn engine(ruby: &Ruby, error: EngineError) -> Error {
@@ -72,9 +73,8 @@ pub fn engine(ruby: &Ruby, error: EngineError) -> Error {
                     | TerminationCause::Timeout
                     | TerminationCause::Cancelled,
                 ) => &TERMINATED,
-                JsErrorKind::Terminated(
-                    TerminationCause::MaxMemory | TerminationCause::HeapExhausted,
-                ) => &OUT_OF_MEMORY,
+                JsErrorKind::Terminated(TerminationCause::MaxMemory) => &OUT_OF_MEMORY,
+                JsErrorKind::Terminated(TerminationCause::HeapExhausted) => &HEAP_LIMIT,
                 // mini_racer raises its disposed error when a callback's
                 // exception escapes but none is kept for it.
                 JsErrorKind::HostException => {
@@ -96,13 +96,17 @@ pub fn engine(ruby: &Ruby, error: EngineError) -> Error {
 
 pub fn flag(ruby: &Ruby, error: FlagError) -> Error {
     match error {
-        FlagError::Nul | FlagError::TooLong => {
+        FlagError::Nul | FlagError::TooLong | FlagError::OverridesHeapLimit(_) => {
             raised(ruby, ruby.exception_arg_error(), error.to_string())
         }
         FlagError::AlreadyInitialized => {
             raised(ruby, PLATFORM_INITIALIZED.get(ruby), error.to_string())
         }
     }
+}
+
+pub fn heap_limit(ruby: &Ruby, error: HeapLimitError) -> Error {
+    Error::new(ruby.exception_arg_error(), error.to_string())
 }
 
 // A JavaScript error object decoded into Ruby keeps its cause here, as in
