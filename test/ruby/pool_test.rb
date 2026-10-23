@@ -516,6 +516,46 @@ class PoolTrapTest < Minitest::Test
   end
 end
 
+class PoolHeapLimitTest < Minitest::Test
+  include RubyProcess
+
+  # MiniRacerRs::HeapLimitError is a V8OutOfMemoryError, so a block that
+  # reaches the heap limit raises it to the caller and retires its context.
+  # Its own process, as every case that reaches a heap limit.
+  def test_a_block_that_reaches_the_heap_limit_raises_and_retires_its_context
+    code = <<~RUBY
+      require "mini_racer"
+      MiniRacerRs.heap_limit = 64 << 20
+      built = []
+      pool = MiniRacerRs::Pool.new(size: 1) do |context|
+        built << context
+        context.eval("var n = 41")
+      end
+      first = built.first
+      error = begin
+        pool.with { _1.eval("(() => { const a = []; for (;;) a.push({i: a.length, s: 'k' + a.length}); })()") }
+      rescue MiniRacerRs::HeapLimitError => e
+        e
+      end
+      second, answer = pool.with { [_1, _1.eval("n + 1")] }
+      disposed = begin
+        first.eval("1")
+        false
+      rescue MiniRacer::ContextDisposedError
+        true
+      end
+      pool.shutdown
+      p error.class, error.message, second.equal?(first), answer, built.size, disposed
+    RUBY
+    stdout, stderr, status = run_ruby(code)
+
+    assert_predicate status, :success?, stderr
+    reached = "\"heap limit of #{64 << 20} bytes reached\""
+
+    assert_equal ["MiniRacerRs::HeapLimitError", reached, "false", "42", "2", "true"], stdout.lines.map(&:chomp)
+  end
+end
+
 class PoolNestingTest < Minitest::Test
   include PoolHelpers
 
