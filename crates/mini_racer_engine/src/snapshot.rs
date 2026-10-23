@@ -77,8 +77,11 @@ const INTL_REFUSED: &str = "Intl is not supported in Snapshot.new scripts";
 /// V8 reads the blob for as long as an isolate made from it lives, whenever it
 /// makes a context from it or checks a code cache against it. Empty, it stands
 /// for no snapshot, as it does in `mini_racer`.
+// The bytes have an allocation of their own, freed with the last strong
+// reference: a `Weak` keeps its `Arc`'s allocation, and with it bytes kept
+// inline there.
 #[derive(Clone, Default, PartialEq, Eq)]
-pub struct SnapshotBlob(Arc<[u8]>);
+pub struct SnapshotBlob(Arc<Box<[u8]>>);
 
 impl SnapshotBlob {
     /// The word V8 opens each section of a blob with, which its deserializer
@@ -89,7 +92,7 @@ impl SnapshotBlob {
 
     pub fn new(bytes: &[u8]) -> Result<Self, InvalidSnapshot> {
         Self::check(bytes)?;
-        Ok(Self(Arc::from(bytes)))
+        Ok(Self(Arc::new(Box::from(bytes))))
     }
 
     /// Refuses a blob as `mini_racer` does, in its order: one too long for
@@ -137,7 +140,7 @@ impl SnapshotBlob {
 
 /// A `SnapshotBlob` that lives only while a context made from it does.
 #[derive(Debug, Clone)]
-pub struct WeakSnapshotBlob(Weak<[u8]>);
+pub struct WeakSnapshotBlob(Weak<Box<[u8]>>);
 
 impl WeakSnapshotBlob {
     #[must_use]
