@@ -29,8 +29,8 @@ mini_racer_rs implements the `MiniRacer` API from mini_racer 0.22.2. It defines 
 - **V8:** V8 15.2.124.1 vs V8 13.6.233.17 in mini_racer 0.22.2.
 - **No compiler:** Native gems cover glibc and musl Linux, including Alpine, and macOS, on both architectures, with Ruby 3.3, 3.4 and 4.0 extensions.
 - **Fiber scheduler:** Three 100 ms loops in separate contexts and fibers finish in 100 ms vs 300 ms.
-- **Upstream suites:** mini_racer passes 171 of 174 with 3 skipped by itself; ExecJS passes 197 of 198 with 1 skipped.
-- **Difficult values:** A `Map` with a function key returns an error Hash instead of aborting with SIGABRT.
+- **Upstream suites:** mini_racer passes 187 of 190 with 3 skipped by itself; ExecJS passes 197 of 198 with 1 skipped.
+- **Callback jumps:** A `throw` out of an attached callback ends the script with `Error: terminated` and continues after `eval`; mini_racer 0.22.2 crashes with a segmentation fault.
 - **Checks:** Script-enforced crate boundaries, four fenced `unsafe` modules, loom, wire-codec fuzzing, nightly sanitizers and mini_racer differential tests.
 
 These numbers compare with mini_racer 0.22.1. See [Benchmarks](#benchmarks) for the method.
@@ -177,7 +177,7 @@ The public API and require path stay the same. Changes include native installati
 
 - You're affected if an attached callback reenters its context from another fiber, including inside `Enumerator#next`. mini_racer_rs raises `ThreadError`; mini_racer allows it.
 
-- You're affected if a callback exits by `throw`, returns from a proc, or receives `Thread#kill`. The script ends with `Error: terminated`. The jump continues after `eval` returns. mini_racer hangs.
+- You're affected if an attached callback exits by `throw`, returns from a proc while its method is still running, or receives `Thread#kill`. mini_racer_rs ends the script with `Error: terminated`, then continues the jump after `eval` or `call` returns. In mini_racer 0.22.2, `throw` and `return` cause a segmentation fault. `Thread#kill` gives JavaScript a catchable `Error: Ruby exception`; the script continues, and the thread ends after `eval` returns.
 
 - You're affected if JavaScript reads a callback exception's non-ASCII message. mini_racer_rs passes UTF-8, such as `"café"`; mini_racer passes `"cafÃ©"`.
 
@@ -210,7 +210,7 @@ The repository tests the `path:` form of the shim with rtlcss in `test/consumers
 
 Before forking, evaluate each bundle of 1 MiB or more twice in the master, then dispose those contexts. Use the renderer's exact source text and file name. The second evaluation builds the process-wide V8 code cache. Matching evaluations compile from it, and forked children inherit it. For Babel's 2.3 MB bundle at commit `5e13c1c`, a forked child's first load took 60.8 ms without a parent load. It took 65.5 ms after one load and 25.0 ms after two. These are medians across 5 trials. Prime a `react-rails` app by building its server renderer twice. Children do not use parent contexts. Only the cache carries over.
 
-For Ruby's `fork`, `IO.popen("-")`, or `Process.daemon`, mini_racer_rs waits for context runners, pauses its worker pool and waits for running tasks. An async `WebAssembly.compile` in a new default-mode child completes on the child's own pool. On Ubuntu 24.04 with glibc 2.39, 20 of 20 mini_racer children aborted with signal 6 after React rendering; all mini_racer_rs children exited cleanly. On Fedora, mini_racer hung within 50 `test/stress/fork_busy.rb` forks; mini_racer_rs completed 300 per run on Fedora and Ubuntu.
+For Ruby's `fork`, `IO.popen("-")`, or `Process.daemon`, mini_racer_rs waits for context runners, pauses its worker pool and waits for running tasks. An async `WebAssembly.compile` in a new default-mode child completes on the child's own pool. On Ubuntu 24.04 with glibc 2.39, 20 of 20 mini_racer 0.22.1 children aborted with signal 6 after React rendering; all mini_racer_rs children exited cleanly. mini_racer 0.22.2 has the same fork handling. On Fedora, `test/stress/fork_busy.rb` aborted with mini_racer 0.22.2 in 3 of 3 runs, after 5, 14 and 19 forks, when an evaluating parent thread raised `TypeError`. mini_racer_rs completed 300 forks per run on Fedora and Ubuntu.
 
 With `mini_racer` 0.22.1, each worker compiles the bundle from source on its first load because it has no code cache.
 
