@@ -250,13 +250,14 @@ const RAISES: usize = 4;
 
 // V8 is about to abort the process at the heap limit: the running script is
 // ended as out of memory, and V8 is lent room to unwind it. With no dispatch
-// armed, or the runner collecting on its own, no script is running, and
-// `recover` settles the heap once the runner is done.
+// armed, which the termination cell checks, or the runner collecting on its
+// own, no script is running, and `recover` settles the heap once the runner
+// is done.
 pub fn near_heap_limit(block: &ControlBlock, current: usize, initial: usize) -> usize {
     let watch = &block.heap;
     watch.old_generation.store(initial, Ordering::Relaxed);
     watch.hit.store(true, Ordering::Relaxed);
-    if !watch.collecting.load(Ordering::Relaxed) && block.term.armed().is_some() {
+    if !watch.collecting.load(Ordering::Relaxed) {
         block.term.request(Interrupt::HeapExhausted);
     }
     let room = initial / ROOM_DIVISOR;
@@ -301,14 +302,26 @@ fn recover(isolate: &mut v8::Isolate, block: &ControlBlock) {
     }
 }
 
-// The most heap V8 15.2's `Heap::ConfigureHeap` reserves for the generations
-// `heap_limits` sized when no flag replaces them: the old one as given, and a
-// semi-space of a third of the young one, rounded up to a power of two.
-fn most_reserved(old_generation: usize, young_generation: usize) -> usize {
-    let semi_space = (young_generation / 3)
-        .checked_next_power_of_two()
-        .unwrap_or(usize::MAX);
-    old_generation.saturating_add(semi_space.saturating_mul(3))
+// The generations of a heap of `limit` bytes, with the old one's size.
+// `heap_limits` splits the limit, but V8 15.2's `Heap::ConfigureHeap` rounds
+// a third of the young generation, a semi-space, up to a power of two, which
+// can reserve a tenth more than the limit; rounded down here instead, the
+// heap V8 reserves is the limit, less its rounding of the old generation
+// down to a page. `heap_limits` also sets a code range of the limit's size,
+// which V8 aborts on unless it is a multiple of the allocation page, so the
+// code range is left at V8's own size, as for a context without a limit.
+fn sized(params: v8::CreateParams, limit: usize) -> (v8::CreateParams, usize) {
+    let params = params.heap_limits(0, limit);
+    let semi_space = (params.max_young_generation_size_in_bytes() / 3)
+        .checked_ilog2()
+        .map_or(0, |log| 1_usize << log);
+    let young_generation = semi_space.saturating_mul(3);
+    let old_generation = limit.saturating_sub(young_generation);
+    let params = params
+        .set_max_young_generation_size_in_bytes(young_generation)
+        .set_max_old_generation_size_in_bytes(old_generation)
+        .set_code_range_size_in_bytes(0);
+    (params, old_generation)
 }
 
 // Whether V8 would put the old generation's limit back where it started: no
@@ -364,24 +377,25 @@ fn serve(block: &Arc<ControlBlock>, generation: &'static Generation) -> bool {
         Some(blob) => params.snapshot_blob(sys::startup_data(blob)),
         None => params,
     };
-    let (params, most) = match block.config.heap_limit {
+    let params = match block.config.heap_limit {
         Some(limit) => {
-            let params = params.heap_limits(0, limit);
-            let old_generation = params.max_old_generation_size_in_bytes();
+            let (params, old_generation) = sized(params, limit);
             block
                 .heap
                 .old_generation
                 .store(old_generation, Ordering::Relaxed);
-            let most = most_reserved(old_generation, params.max_young_generation_size_in_bytes());
-            (params, Some(most))
+            params
         }
-        None => (params, None),
+        None => params,
     };
     let mut isolate = v8::Isolate::new(params);
     if block.config.max_memory.is_some() {
         sys::watch_heap(&mut isolate);
     }
-    let reserved = most.map(|_| isolate.get_heap_statistics().heap_size_limit());
+    let reserved = block
+        .config
+        .heap_limit
+        .map(|_| isolate.get_heap_statistics().heap_size_limit());
     if let Some(reserved) = reserved {
         block.heap.reserved.store(reserved, Ordering::Relaxed);
         sys::watch_heap_limit(&mut isolate, block);
@@ -390,7 +404,7 @@ fn serve(block: &Arc<ControlBlock>, generation: &'static Generation) -> bool {
     generation.tasks().register(key, &block.tasks);
     // V8 reads its own flags, so this catches any that sized the heap past
     // the limit, whatever `platform::read_sizing` made of them.
-    if reserved > most {
+    if reserved > block.config.heap_limit {
         retire(block, generation, key, isolate);
         return refuse(block, EngineError::HeapLimitOverridden);
     }

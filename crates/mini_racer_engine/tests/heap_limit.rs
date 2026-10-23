@@ -486,23 +486,33 @@ fn flags_that_size_the_heap_override_the_limit_and_are_refused() {
     }
 }
 
-// V8 rounds a semi-space up to a power of two, so a limit that is not a
-// round size can reserve a little more than itself; no flag is involved.
+// Whatever its size, a limit is the heap V8 reserves, less its rounding of
+// the old generation down to a 256 KiB page; V8 aborted the process on a code
+// range of the limit's size that was not a multiple of its allocation page.
 #[test]
 fn limits_of_any_size_are_taken_without_flags() {
     for limit in [
         platform::MIN_HEAP_LIMIT,
+        (32 << 20) + 1,
         33 << 20,
         50_000_001,
+        65 << 20,
+        100_000_000,
         100 << 20,
+        (127 << 20) + 1,
+        257 << 20,
+        300_000_000,
         333 << 20,
+        (512 << 20) + 99,
         1000 << 20,
+        (2 << 30) + 7,
         platform::MAX_HEAP_LIMIT,
     ] {
-        let context = limited(limit);
+        let reserved = heap_size_limit(&limited(limit));
+        assert!(reserved <= exactly(limit), "{limit}: {reserved}");
         assert!(
-            heap_size_limit(&context) <= exactly(limit + limit / 10),
-            "{limit}"
+            reserved > exactly(limit - (256 << 10)),
+            "{limit}: {reserved}"
         );
     }
 }

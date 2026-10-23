@@ -215,6 +215,27 @@ class HeapLimitSettingTest < Minitest::Test
     assert_equal [64 * MIB, nil, nil, [false, true], reached], lines
   end
 
+  # A limit of any size in range is the heap V8 reserves, less its rounding
+  # to a 256 KiB page, and holds.
+  def test_limits_of_any_size_are_the_heap_v8_reserves
+    lines = capped(<<~RUBY, mib: nil)
+      [100_000_000, 300_000_000, (127 << 20) + 1, (48 << 20) + 12_345].each do |limit|
+        MiniRacerRs.heap_limit = limit
+        context = MiniRacer::Context.new
+        reserved = context.heap_stats[:heap_size_limit]
+        puts JSON.generate([limit, reserved <= limit && reserved > limit - (256 << 10), MiniRacerRs.heap_limit])
+        puts JSON.generate(outcome { context.eval(OBJECTS) })
+        context.dispose
+      end
+    RUBY
+
+    expected = [100_000_000, 300_000_000, (127 * MIB) + 1, (48 * MIB) + 12_345].flat_map do |limit|
+      [[limit, true, limit], "MiniRacerRs::HeapLimitError:heap limit of #{limit} bytes reached"]
+    end
+
+    assert_equal expected, lines
+  end
+
   def test_the_limit_is_an_integer_within_its_range
     lines = capped(<<~RUBY)
       ["64", 6.4e7, true, false, :x, 0, -1, (32 << 20) - 1, (4 << 30) + 1, 2**70].each do |value|
