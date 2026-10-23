@@ -212,6 +212,18 @@ status = "pass"
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_attach_non_object"]
 status = "pass"
 
+[tests."test/mini_racer_test.rb#MiniRacerTest#test_attached_callback_exception_formatting_failure_does_not_hang"]
+status = "pass"
+
+[tests."test/mini_racer_test.rb#MiniRacerTest#test_attached_callback_exception_formatting_failure_does_not_hang".overrides."truffleruby-40.0-linux-x86_64"]
+status = "upstream-skip"
+
+[tests."test/mini_racer_test.rb#MiniRacerTest#test_attached_callback_result_serialization_failure_does_not_hang"]
+status = "pass"
+
+[tests."test/mini_racer_test.rb#MiniRacerTest#test_attached_callback_result_serialization_failure_does_not_hang".overrides."truffleruby-40.0-linux-x86_64"]
+status = "upstream-skip"
+
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_attached_exception_with_nul_message_does_not_deadlock_context"]
 status = "pass"
 
@@ -239,8 +251,32 @@ status = "upstream-skip"
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_binary_returns_uint8array"]
 status = "pass"
 
+[tests."test/mini_racer_test.rb#MiniRacerTest#test_call_nested_symbol_returns_serialization_error"]
+status = "pass"
+
+[tests."test/mini_racer_test.rb#MiniRacerTest#test_call_nested_symbol_returns_serialization_error".overrides."truffleruby-40.0-linux-x86_64"]
+status = "upstream-skip"
+
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_call_returns_unfrozen_string"]
 status = "pass"
+
+[tests."test/mini_racer_test.rb#MiniRacerTest#test_call_with_deep_ruby_graph_raises_depth_error"]
+status = "pass"
+
+[tests."test/mini_racer_test.rb#MiniRacerTest#test_call_with_deep_ruby_graph_raises_depth_error".overrides."truffleruby-40.0-linux-x86_64"]
+status = "upstream-skip"
+
+[tests."test/mini_racer_test.rb#MiniRacerTest#test_callback_exception_formatting_reentry_preserves_exception"]
+status = "pass"
+
+[tests."test/mini_racer_test.rb#MiniRacerTest#test_callback_exception_formatting_reentry_preserves_exception".overrides."truffleruby-40.0-linux-x86_64"]
+status = "upstream-skip"
+
+[tests."test/mini_racer_test.rb#MiniRacerTest#test_callback_internal_error_construction_failure_does_not_hang"]
+status = "pass"
+
+[tests."test/mini_racer_test.rb#MiniRacerTest#test_callback_internal_error_construction_failure_does_not_hang".overrides."truffleruby-40.0-linux-x86_64"]
+status = "upstream-skip"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_callback_string_arguments_are_not_frozen"]
 status = "pass"
@@ -290,6 +326,12 @@ status = "upstream-skip"
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_dispose_while_callback_is_running"]
 status = "pass"
 
+[tests."test/mini_racer_test.rb#MiniRacerTest#test_empty_loaded_snapshot_can_be_warmed_up"]
+status = "pass"
+
+[tests."test/mini_racer_test.rb#MiniRacerTest#test_empty_loaded_snapshot_can_be_warmed_up".overrides."truffleruby-40.0-linux-x86_64"]
+status = "upstream-skip"
+
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_ensure_gc"]
 status = "pass"
 
@@ -307,6 +349,12 @@ status = "upstream-skip"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_estimated_size_when_disposed"]
 status = "pass"
+
+[tests."test/mini_racer_test.rb#MiniRacerTest#test_eval_nested_symbol_returns_serialization_error"]
+status = "pass"
+
+[tests."test/mini_racer_test.rb#MiniRacerTest#test_eval_nested_symbol_returns_serialization_error".overrides."truffleruby-40.0-linux-x86_64"]
+status = "upstream-skip"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_eval_returns_unfrozen_string"]
 status = "pass"
@@ -429,6 +477,12 @@ status = "pass"
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_locale_us".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
 
+[tests."test/mini_racer_test.rb#MiniRacerTest#test_malformed_snapshot_blobs_raise_snapshot_error"]
+status = "pass"
+
+[tests."test/mini_racer_test.rb#MiniRacerTest#test_malformed_snapshot_blobs_raise_snapshot_error".overrides."truffleruby-40.0-linux-x86_64"]
+status = "upstream-skip"
+
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_map"]
 status = "pass"
 
@@ -504,9 +558,6 @@ status = "upstream-skip"
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_releasing_memory"]
 status = "pass"
 
-[tests."test/mini_racer_test.rb#MiniRacerTest#test_releasing_memory".overrides."truffleruby-40.0-linux-x86_64"]
-status = "pass"
-
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_return_arrays"]
 status = "pass"
 
@@ -561,16 +612,40 @@ status = "upstream-skip"
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_segfault"]
 status = "upstream-skip"
 
+[tests."test/mini_racer_test.rb#MiniRacerTest#test_single_threaded_callback_and_snapshot_faults_do_not_abort"]
+status = "pass"
+
+[tests."test/mini_racer_test.rb#MiniRacerTest#test_single_threaded_callback_and_snapshot_faults_do_not_abort".overrides."truffleruby-40.0-linux-x86_64"]
+status = "upstream-skip"
+
+[tests."test/mini_racer_test.rb#MiniRacerTest#test_snapshot_allows_locale_builtins_without_intl_access"]
+status = "pass"
+
+[tests."test/mini_racer_test.rb#MiniRacerTest#test_snapshot_allows_locale_builtins_without_intl_access".overrides."truffleruby-40.0-linux-x86_64"]
+status = "upstream-skip"
+
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_snapshot_dump"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_snapshot_dump".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
 
+[tests."test/mini_racer_test.rb#MiniRacerTest#test_snapshot_dump_does_not_expose_internal_blob"]
+status = "pass"
+
+[tests."test/mini_racer_test.rb#MiniRacerTest#test_snapshot_dump_does_not_expose_internal_blob".overrides."truffleruby-40.0-linux-x86_64"]
+status = "upstream-skip"
+
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_snapshot_exception_with_nul_message_preserves_message"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_snapshot_exception_with_nul_message_preserves_message".overrides."truffleruby-40.0-linux-x86_64"]
+status = "upstream-skip"
+
+[tests."test/mini_racer_test.rb#MiniRacerTest#test_snapshot_intl_descriptor_without_getter_is_snapshot_safe"]
+status = "pass"
+
+[tests."test/mini_racer_test.rb#MiniRacerTest#test_snapshot_intl_descriptor_without_getter_is_snapshot_safe".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_snapshot_load"]
@@ -585,10 +660,22 @@ status = "pass"
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_snapshot_load_with_non_binary_encoding".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
 
+[tests."test/mini_racer_test.rb#MiniRacerTest#test_snapshot_new_with_intl_does_not_abort"]
+status = "pass"
+
+[tests."test/mini_racer_test.rb#MiniRacerTest#test_snapshot_new_with_intl_does_not_abort".overrides."truffleruby-40.0-linux-x86_64"]
+status = "upstream-skip"
+
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_snapshot_size"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_snapshot_size".overrides."truffleruby-40.0-linux-x86_64"]
+status = "upstream-skip"
+
+[tests."test/mini_racer_test.rb#MiniRacerTest#test_snapshot_warmup_with_intl_does_not_abort"]
+status = "pass"
+
+[tests."test/mini_racer_test.rb#MiniRacerTest#test_snapshot_warmup_with_intl_does_not_abort".overrides."truffleruby-40.0-linux-x86_64"]
 status = "upstream-skip"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_snapshots_can_be_GCed_without_affecting_contexts_created_from_them"]
@@ -596,6 +683,12 @@ status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_snapshots_can_be_warmed_up_with_no_side_effects"]
 status = "pass"
+
+[tests."test/mini_racer_test.rb#MiniRacerTest#test_stop_during_exception_formatting_does_not_poison_context"]
+status = "pass"
+
+[tests."test/mini_racer_test.rb#MiniRacerTest#test_stop_during_exception_formatting_does_not_poison_context".overrides."truffleruby-40.0-linux-x86_64"]
+status = "upstream-skip"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_string_encoding"]
 status = "pass"
@@ -616,9 +709,6 @@ status = "pass"
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_timeout"]
-status = "pass"
-
-[tests."test/mini_racer_test.rb#MiniRacerTest#test_timeout".overrides."truffleruby-40.0-linux-x86_64"]
 status = "pass"
 
 [tests."test/mini_racer_test.rb#MiniRacerTest#test_timeout_in_ruby_land"]
@@ -775,7 +865,7 @@ status = "pass"
 status = "pass"
 
 [tests."test/test_object_identity_fix.rb#ObjectIdentityTest#test_same_ruby_object_multiple_times_shares_identity".overrides."truffleruby-40.0-linux-x86_64"]
-cause = "mini_racer 0.22.1: fail: Same Ruby object should share JS identity."
+cause = "mini_racer 0.22.2: fail: Same Ruby object should share JS identity."
 status = "upstream-fail"
 
 [tests."test/test_object_identity_fix.rb#ObjectIdentityTest#test_separate_identical_objects_remain_separate"]
