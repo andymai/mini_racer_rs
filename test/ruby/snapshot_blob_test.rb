@@ -3,78 +3,74 @@
 require "test_helper"
 require "mini_racer"
 
-# Blobs a snapshot is loaded from or a context starts from: the ones V8 would
-# abort on, and the one blob each snapshot shares with its contexts.
+# Blobs a snapshot is loaded from or a context starts from: the ones refused,
+# and the one blob each snapshot shares with its contexts.
 class SnapshotBlobTest < Minitest::Test
-  include RubyProcess
-
   def blob = MiniRacer::Snapshot.new("var a = 1").dump
 
-  # Deviation behavior:invalid-snapshot@ruby: mini_racer 0.22.1 loads any
-  # String, then aborts the process with a V8 fatal error, or a segmentation
-  # fault for a blob cut short in its last section, once a context or a warmup
-  # reads a blob too short for its header, from another V8, or truncated.
-  def test_load_refuses_a_blob_v8_would_abort_on
+  def word(bytes, at) = bytes.byteslice(at, 4).unpack1("V")
+
+  # What follows the checksum's own word, summed as V8 sums it without zlib.
+  def resummed(bytes)
+    low = high = 0
+    bytes.byteslice(12..).each_byte do |byte|
+      low = (low + byte) % 65_535
+      high = (high + low) % 65_535
+    end
+    bytes.dup.tap { |b| b[8, 4] = [(high << 16) | low].pack("V") }
+  end
+
+  # mini_racer's checks, in its order and with its messages.
+  def test_load_refuses_a_blob_as_mini_racer_does
     good = blob
-    other_version = good.dup.tap { |b| b.setbyte(16, b.getbyte(16) ^ 1) }
     refused = {
-      "garbage" => "invalid snapshot: truncated or corrupt",
-      good.byteslice(0, good.bytesize / 2) => "invalid snapshot: truncated or corrupt",
-      good.byteslice(0, good.bytesize - 16) => "invalid snapshot: truncated or corrupt",
-      other_version => /\Ainvalid snapshot: not made by V8 \d+\.\d+\.\S+\z/,
-      Random.new(1).bytes(good.bytesize) => /\Ainvalid snapshot: not made by V8 /,
+      "garbage" => "snapshot is too short",
+      good.byteslice(0, 88) => "snapshot context table is invalid",
+      good.dup.tap { |b| b.setbyte(16, b.getbyte(16) ^ 1) } => "snapshot version mismatch",
+      good.dup.tap { |b| b[4, 4] = [2].pack("V") } => "snapshot header is invalid",
+      good.dup.tap { |b| b[0, 4] = [0].pack("V") } => "snapshot has no contexts",
+      good.dup.tap { |b| b[84, 4] = [1 << 30].pack("V") } => "snapshot shared-heap section is invalid",
+      good.byteslice(0, good.bytesize - 16) => "snapshot checksum mismatch",
+      "#{good}\n" => "snapshot checksum mismatch",
+      good.dup.tap { |b| b.setbyte(b.bytesize - 1, b.getbyte(b.bytesize - 1) ^ 1) } => "snapshot checksum mismatch",
+      Random.new(1).bytes(good.bytesize) => "snapshot version mismatch",
     }
     refused.each do |bytes, message|
       error = assert_raises(MiniRacer::SnapshotError) { MiniRacer::Snapshot.load(bytes) }
-      assert_match message, error.message
+      assert_equal message, error.message
       assert_equal Encoding::BINARY, error.message.encoding
     end
   end
 
-  # Deviation behavior:invalid-snapshot@ruby: mini_racer 0.22.1 aborts here,
-  # once V8 reads the blob, so each case runs in a Ruby of its own.
-  def test_a_context_or_a_warmup_refuses_a_blob_its_dump_was_cut_down_to
-    out, err, status = run_ruby(<<~RUBY)
-      require "mini_racer"
-      snapshot = MiniRacer::Snapshot.new("var a = 1")
-      MiniRacer::Context.new(snapshot: snapshot).dispose
-      snapshot.dump.slice!(-16, 16)
-      [-> { MiniRacer::Context.new(snapshot: snapshot) }, -> { snapshot.warmup!("1") }].each do |use|
-        use.call
-        puts "used"
-      rescue MiniRacer::SnapshotError => e
-        puts e.message
-      end
-    RUBY
+  # Deviation behavior:invalid-snapshot@ruby: mini_racer 0.22.2 hands V8 a
+  # blob whose checksum matches, and V8 aborts the process on a section that
+  # does not open with its magic number.
+  def test_load_refuses_a_section_v8_aborts_on
+    good = blob
+    last_context = word(good, 88 + (4 * (word(good, 0) - 1)))
+    damaged = resummed(good.dup.tap { |b| b.setbyte(last_context + 3, b.getbyte(last_context + 3) ^ 1) })
 
-    assert_predicate status, :success?, err
-    assert_equal "invalid snapshot: truncated or corrupt\n" * 2, out
+    error = assert_raises(MiniRacer::SnapshotError) { MiniRacer::Snapshot.load(damaged) }
+    assert_equal "snapshot context section is invalid", error.message
   end
 
-  # Deviation behavior:invalid-snapshot@ruby: mini_racer 0.22.1 aborts the
-  # process, as V8 cannot warm up an empty blob once it has made an isolate.
-  def test_a_warmup_of_an_empty_snapshot_raises
-    out, err, status = run_ruby(<<~RUBY)
-      require "mini_racer"
-      [MiniRacer::Snapshot.load(""), MiniRacer::Snapshot.allocate].each do |snapshot|
-        snapshot.warmup!("1")
-        puts "warmed"
-      rescue MiniRacer::SnapshotError => e
-        puts e.message
-      end
-    RUBY
+  # V8 reads each section by the length it records, as mini_racer's does, once
+  # the checksum matches.
+  def test_a_blob_whose_checksum_matches_loads_with_bytes_after_its_last_section
+    snapshot = MiniRacer::Snapshot.load(resummed("#{blob}\n"))
 
-    assert_predicate status, :success?, err
-    assert_equal "invalid snapshot: empty\n" * 2, out
+    assert_equal 1, MiniRacer::Context.new(snapshot: snapshot).eval("a")
   end
 
-  # mini_racer's V8 reads a blob only once every option is accepted.
-  def test_an_option_error_comes_before_a_refused_blob
-    snapshot = MiniRacer::Snapshot.new("var a = 1")
-    snapshot.dump.slice!(-16, 16)
+  # mini_racer warms an empty snapshot up from V8's own, and keeps none of the
+  # warmup's state.
+  def test_a_warmup_of_an_empty_snapshot_starts_from_v8s_own
+    [MiniRacer::Snapshot.load(""), MiniRacer::Snapshot.allocate].each do |snapshot|
+      snapshot.warmup!("var b = 1; function g() { return 2 } g()")
 
-    assert_raises(TypeError) { MiniRacer::Context.new(snapshot: snapshot, timeout: "1") }
-    assert_raises(TypeError) { MiniRacer::Context.new(timeout: "1", snapshot: snapshot) }
+      assert_operator snapshot.size, :>, 0
+      assert_equal %w[undefined undefined], MiniRacer::Context.new(snapshot: snapshot).eval("[typeof b, typeof g]")
+    end
   end
 
   def test_an_empty_blob_starts_a_context_without_a_snapshot
@@ -83,23 +79,22 @@ class SnapshotBlobTest < Minitest::Test
     assert_equal "undefined", context.eval("typeof a")
   end
 
-  # V8 reads each section by the length it records, as mini_racer's does.
-  def test_a_blob_with_bytes_after_its_last_section_still_loads
-    snapshot = MiniRacer::Snapshot.load("#{blob}\n")
+  # mini_racer hands out a copy, so changing it changes no context made after,
+  # and no warmup.
+  def test_dump_hands_out_a_copy
+    snapshot = MiniRacer::Snapshot.new("var a = 1")
+    dumped = snapshot.dump
+    dumped.replace(MiniRacer::Snapshot.new("var a = 2").dump)
+    snapshot.dump.slice!(-16, 16)
+
+    refute_same snapshot.dump, snapshot.dump
+    assert_equal 1, MiniRacer::Context.new(snapshot: snapshot).eval("a")
+    snapshot.warmup!("a")
 
     assert_equal 1, MiniRacer::Context.new(snapshot: snapshot).eval("a")
-  end
+    allocated = MiniRacer::Snapshot.allocate
 
-  # mini_racer copies the blob `dump` hands out at each Context.new, so a
-  # context starts from what that String holds then, and contexts made before
-  # keep what they started from.
-  def test_a_context_starts_from_what_the_dumped_string_holds_now
-    first = MiniRacer::Snapshot.new("var a = 1")
-    earlier = MiniRacer::Context.new(snapshot: first)
-    first.dump.replace(MiniRacer::Snapshot.new("var a = 2").dump)
-
-    assert_equal 2, MiniRacer::Context.new(snapshot: first).eval("a")
-    assert_equal 1, earlier.eval("a")
+    refute_same allocated.dump, allocated.dump
   end
 
   def test_contexts_from_one_snapshot_outlive_it_and_its_warmups

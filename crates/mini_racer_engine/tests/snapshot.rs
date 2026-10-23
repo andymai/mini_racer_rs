@@ -108,6 +108,29 @@ fn changed(blob: &[u8], change: impl FnOnce(&mut Vec<u8>)) -> Vec<u8> {
     changed
 }
 
+// V8's checksum of what follows the checksum's own word, with the modulus of
+// zlib's Adler-32 or of V8's own Fletcher-32.
+fn checksum(blob: &[u8], modulus: u32) -> u32 {
+    let (mut low, mut high) = (0_u32, 0_u32);
+    for &byte in &blob[12..] {
+        low = (low + u32::from(byte)) % modulus;
+        high = (high + low) % modulus;
+    }
+    high << 16 | low
+}
+
+const ADLER: u32 = 65_521;
+const FLETCHER: u32 = 65_535;
+
+// Changed, then given the checksum that matches, as a blob damaged on purpose
+// would be.
+fn resummed(blob: &[u8], change: impl FnOnce(&mut Vec<u8>)) -> Vec<u8> {
+    let mut changed = changed(blob, change);
+    let sum = checksum(&changed, FLETCHER);
+    set_word(&mut changed, 8, sum);
+    changed
+}
+
 #[test]
 fn a_context_starts_from_its_snapshot() {
     let blob =
@@ -146,63 +169,39 @@ fn every_blob_v8_writes_is_accepted() {
     let built = snapshot("var a = 1", None).expect("snapshot");
     let empty = snapshot("", None).expect("snapshot");
     let warmed = snapshot("a + 1", Some(built.clone())).expect("warmup");
-    for blob in [&built, &empty, &warmed] {
+    let from_v8s_own = snapshot("1", Some(Vec::new())).expect("warmup");
+    for blob in [&built, &empty, &warmed, &from_v8s_own] {
         assert_eq!(SnapshotBlob::check(blob), Ok(()));
+        assert_eq!(word(blob, 8), checksum(blob, FLETCHER) as usize);
     }
     assert_eq!(SnapshotBlob::check(&[]), Ok(()));
 }
 
-// V8 aborts the process on each of these, or reads past the end of the blob;
-// on a damaged read-only section, only when no isolate of the process came first.
-#[test]
-fn refuses_a_blob_v8_would_abort_on() {
+struct Layout {
+    blob: Vec<u8>,
+    startup: usize,
+    read_only: usize,
+    shared_heap: usize,
+    last: usize,
+}
+
+fn layout() -> Layout {
     let blob = snapshot("var a = 1", None).expect("snapshot");
-    let len = blob.len();
-    let last = word(&blob, 88 + 4 * (word(&blob, 0) - 1));
-    let (startup, shared_heap) = (word(&blob, 80), word(&blob, 84));
-    let mut refused = vec![
-        (changed(&blob, |b| b[16] ^= 1), InvalidSnapshot::Version),
-        (b"garbage".to_vec(), InvalidSnapshot::Corrupt),
-        (blob[..81].to_vec(), InvalidSnapshot::Corrupt),
-        (blob[..80].to_vec(), InvalidSnapshot::Corrupt),
-        (
-            changed(&blob, |b| set_word(b, 0, 0)),
-            InvalidSnapshot::Corrupt,
-        ),
-        (
-            changed(&blob, |b| set_word(b, 0, u32::MAX)),
-            InvalidSnapshot::Corrupt,
-        ),
-        (
-            changed(&blob, |b| set_word(b, 4, 2)),
-            InvalidSnapshot::Corrupt,
-        ),
-        (
-            changed(&blob, |b| set_word(b, 84, 1 << 30)),
-            InvalidSnapshot::Corrupt,
-        ),
-        (
-            changed(&blob, |b| {
-                set_word(b, 80, u32::try_from(shared_heap).expect("an offset"));
-                set_word(b, 84, u32::try_from(startup).expect("an offset"));
-            }),
-            InvalidSnapshot::Corrupt,
-        ),
-        (changed(&blob, |b| b[96] ^= 1), InvalidSnapshot::Corrupt),
-        (changed(&blob, |b| b[last] ^= 1), InvalidSnapshot::Corrupt),
-    ];
-    for cut in [len / 2, last + 8, last + 4, len - 1] {
-        refused.push((blob[..cut].to_vec(), InvalidSnapshot::Corrupt));
+    let contexts = word(&blob, 0);
+    Layout {
+        startup: (88 + 4 * contexts).next_multiple_of(8),
+        read_only: word(&blob, 80),
+        shared_heap: word(&blob, 84),
+        last: word(&blob, 88 + 4 * (contexts - 1)),
+        blob,
     }
-    let mut random = vec![0_u8; len];
-    let mut state = 0x9E37_79B9_u32;
-    for byte in &mut random {
-        state ^= state << 13;
-        state ^= state >> 17;
-        state ^= state << 5;
-        *byte = state.to_le_bytes()[0];
-    }
-    refused.push((random, InvalidSnapshot::Version));
+}
+
+fn offset(at: usize) -> u32 {
+    u32::try_from(at).expect("an offset")
+}
+
+fn assert_refused(refused: &[(Vec<u8>, InvalidSnapshot)]) {
     for (index, (bytes, invalid)) in refused.iter().enumerate() {
         assert_eq!(SnapshotBlob::check(bytes), Err(*invalid), "case {index}");
         assert_eq!(
@@ -213,26 +212,218 @@ fn refuses_a_blob_v8_would_abort_on() {
     }
 }
 
-// V8 trusts each section's own payload length, so what lies past it, or a
-// damaged byte inside it, is V8's to read, as it is in mini_racer.
+// mini_racer's checks of the length, the version, the header and the offsets,
+// in its order and with its messages.
 #[test]
-fn leaves_what_a_section_holds_to_v8() {
+fn refuses_a_header_as_mini_racer_does() {
+    let Layout {
+        blob,
+        startup,
+        read_only,
+        shared_heap,
+        ..
+    } = layout();
+    let len = blob.len();
+    let half = len / 2;
+    let cut_in_half = if read_only > half {
+        InvalidSnapshot::ReadOnly
+    } else if shared_heap > half {
+        InvalidSnapshot::SharedHeap
+    } else {
+        InvalidSnapshot::Context
+    };
+    let mut random = vec![0_u8; len];
+    let mut state = 0x9E37_79B9_u32;
+    for byte in &mut random {
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        *byte = state.to_le_bytes()[0];
+    }
+    assert_refused(&[
+        (changed(&blob, |b| b[16] ^= 1), InvalidSnapshot::Version),
+        (random, InvalidSnapshot::Version),
+        (b"garbage".to_vec(), InvalidSnapshot::TooShort),
+        (blob[..87].to_vec(), InvalidSnapshot::TooShort),
+        (blob[..88].to_vec(), InvalidSnapshot::ContextTable),
+        (
+            changed(&blob, |b| set_word(b, 4, 2)),
+            InvalidSnapshot::Header,
+        ),
+        (
+            changed(&blob, |b| set_word(b, 0, 0)),
+            InvalidSnapshot::NoContexts,
+        ),
+        (
+            changed(&blob, |b| set_word(b, 0, u32::MAX)),
+            InvalidSnapshot::ContextTable,
+        ),
+        (
+            changed(&blob, |b| set_word(b, 80, offset(startup))),
+            InvalidSnapshot::ReadOnly,
+        ),
+        (
+            changed(&blob, |b| set_word(b, 84, 1 << 30)),
+            InvalidSnapshot::SharedHeap,
+        ),
+        (
+            changed(&blob, |b| {
+                set_word(b, 80, offset(shared_heap));
+                set_word(b, 84, offset(read_only));
+            }),
+            InvalidSnapshot::SharedHeap,
+        ),
+        (
+            changed(&blob, |b| set_word(b, 88, offset(len))),
+            InvalidSnapshot::Context,
+        ),
+        (blob[..half].to_vec(), cut_in_half),
+    ]);
+}
+
+// mini_racer's checksum; then, past it, a section V8 aborts on, which
+// mini_racer hands V8.
+#[test]
+fn refuses_a_damaged_blob_as_mini_racer_does_and_one_v8_aborts_on() {
+    let Layout {
+        blob,
+        startup,
+        read_only,
+        shared_heap,
+        last,
+    } = layout();
+    let len = blob.len();
+    let mut refused = vec![
+        (
+            changed(&blob, |b| b[startup] ^= 1),
+            InvalidSnapshot::Checksum,
+        ),
+        (changed(&blob, |b| b[last] ^= 1), InvalidSnapshot::Checksum),
+        (changed(&blob, |b| b[8] ^= 1), InvalidSnapshot::Checksum),
+        (
+            changed(&blob, |b| b.extend_from_slice(b"\n")),
+            InvalidSnapshot::Checksum,
+        ),
+        (
+            resummed(&blob, |b| b[startup + 3] ^= 1),
+            InvalidSnapshot::Startup,
+        ),
+        (
+            resummed(&blob, |b| b[read_only + 3] ^= 1),
+            InvalidSnapshot::ReadOnly,
+        ),
+        (
+            resummed(&blob, |b| set_word(b, read_only + 4, 1 << 31)),
+            InvalidSnapshot::ReadOnly,
+        ),
+        (
+            resummed(&blob, |b| b[shared_heap] ^= 1),
+            InvalidSnapshot::SharedHeap,
+        ),
+        (resummed(&blob, |b| b[last] ^= 1), InvalidSnapshot::Context),
+    ];
+    for cut in [last + 8, last + 4, len - 1] {
+        refused.push((blob[..cut].to_vec(), InvalidSnapshot::Checksum));
+    }
+    assert_refused(&refused);
+}
+
+// Once its checksum matches, what a section holds is V8's to read, as it is in
+// mini_racer: bytes past its end, a payload length V8 reads past, a damaged
+// byte. Either checksum mini_racer accepts will do.
+#[test]
+fn leaves_what_a_section_holds_to_v8_once_its_checksum_matches() {
     let blob = snapshot("var a = 41", None).expect("snapshot");
-    let longer = changed(&blob, |b| b.extend_from_slice(b"\n"));
+    let longer = resummed(&blob, |b| b.extend_from_slice(b"\n"));
     assert_eq!(eval_in(&longer, "a + 1"), 42);
-    let startup = word(&blob, 80);
-    let damaged = changed(&blob, |b| b[startup + 4096] ^= 1);
+    let startup = (88 + 4 * word(&blob, 0)).next_multiple_of(8);
+    let overlong = resummed(&blob, |b| {
+        set_word(b, startup + 4, i32::MAX.cast_unsigned());
+    });
+    assert_eq!(eval_in(&overlong, "a + 1"), 42);
+    let read_only = word(&blob, 80);
+    let damaged = resummed(&blob, |b| b[read_only + 4096] ^= 1);
     assert_eq!(SnapshotBlob::check(&damaged), Ok(()));
+    let adler = changed(&blob, |b| set_word(b, 8, checksum(&blob, ADLER)));
+    assert_eq!(eval_in(&adler, "a + 1"), 42);
+}
+
+// mini_racer warms an empty snapshot up from V8's own, keeping none of the
+// warmup's state.
+#[test]
+fn a_warmup_from_an_empty_blob_starts_from_v8s_own() {
+    let warmed =
+        snapshot("var b = 1; function g() { return 2 } g()", Some(Vec::new())).expect("warmup");
+    assert_ne!(warmed.len(), 0);
+    assert_eq!(eval_in(&warmed, "typeof b === 'undefined' ? 1 : 0"), 1);
+    assert_eq!(eval_in(&warmed, "1 + 1"), 2);
+}
+
+fn refused(code: &str) -> String {
+    match snapshot(code, None) {
+        Err(EngineError::Snapshot(message)) => message,
+        other => panic!("{code}: expected a snapshot error, got {other:?}"),
+    }
+}
+
+// mini_racer refuses a script that reads or writes the global Intl, whose
+// objects V8 cannot write into a blob, and puts Intl back after one that does
+// not; the locale methods of other built-ins never read it.
+#[test]
+fn a_script_may_not_touch_intl() {
+    const REFUSED: &str = "Intl is not supported in Snapshot.new scripts";
+    for code in [
+        "typeof Intl",
+        "Intl = 1",
+        "globalThis.x = new Intl.DateTimeFormat('en')",
+        "let c = new Intl.Collator('en')",
+    ] {
+        assert_eq!(refused(code), REFUSED, "{code}");
+    }
+    assert_eq!(
+        refused("Intl; throw 1"),
+        "Uncaught 1\n<snapshot>:1:6",
+        "the script's own error comes first"
+    );
+    for code in [
+        "(1234.5).toLocaleString('en')",
+        "'a'.localeCompare('b', 'en')",
+        "var d = Object.getOwnPropertyDescriptor(globalThis, 'Intl')",
+    ] {
+        let blob = snapshot(code, None).expect(code);
+        let restored = "var d = Object.getOwnPropertyDescriptor(globalThis, 'Intl'); \
+                        d.writable && !d.enumerable && d.configurable && \
+                        typeof Intl.DateTimeFormat === 'function' ? 1 : 0";
+        assert_eq!(eval_in(&blob, restored), 1, "{code}");
+    }
+    let deleted = snapshot("delete globalThis.Intl", None).expect("delete");
+    assert_eq!(eval_in(&deleted, "typeof Intl === 'undefined' ? 1 : 0"), 1);
+    let replaced = snapshot(
+        "Object.defineProperty(globalThis, 'Intl', { configurable: true, get() { return 7 } })",
+        None,
+    )
+    .expect("replace");
+    assert_eq!(eval_in(&replaced, "Intl"), 7);
+    let kept = snapshot(
+        "globalThis.d = Object.getOwnPropertyDescriptor(globalThis, 'Intl')",
+        None,
+    )
+    .expect("descriptor");
+    assert_eq!(eval_in(&kept, "d.get() === Intl ? 1 : 0"), 1);
 }
 
 #[test]
-fn a_warmup_from_an_empty_blob_is_refused() {
-    let refused =
-        ContextHandle::create_snapshot("1".into(), Some(SnapshotBlob::default()), &mut Parking);
-    assert!(matches!(
-        refused,
-        Err(EngineError::InvalidSnapshot(InvalidSnapshot::Empty))
-    ));
+fn a_warmup_may_touch_intl() {
+    let blob = snapshot("function f() { return 1 }", None).expect("snapshot");
+    let warmed = snapshot(
+        "var formatter = new Intl.DateTimeFormat('en'); f()",
+        Some(blob),
+    )
+    .expect("warmup");
+    assert_eq!(
+        eval_in(&warmed, "typeof formatter === 'undefined' ? f() : 0"),
+        1
+    );
 }
 
 // Every context reads the one blob, which outlives whoever made it and goes

@@ -27,18 +27,33 @@ pub enum HeapLimitError {
     Overridden(&'static str),
 }
 
-/// Why a startup snapshot's blob is refused before V8 reads it, where V8
-/// itself would abort the process.
+/// Why a startup snapshot's blob is refused before V8 reads it, in
+/// `mini_racer`'s words.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum InvalidSnapshot {
-    /// Shorter than its own header, or its sections do not fit in it.
-    #[error("invalid snapshot: truncated or corrupt")]
-    Corrupt,
-    #[error("invalid snapshot: not made by V8 {}", crate::process::v8_version())]
+    #[error("snapshot is too large")]
+    TooLarge,
+    #[error("snapshot is too short")]
+    TooShort,
+    #[error("snapshot version mismatch")]
     Version,
-    /// Empty, where a warmup needs a snapshot to start from.
-    #[error("invalid snapshot: empty")]
-    Empty,
+    #[error("snapshot header is invalid")]
+    Header,
+    #[error("snapshot has no contexts")]
+    NoContexts,
+    #[error("snapshot context table is invalid")]
+    ContextTable,
+    /// A startup section V8 aborts on, which `mini_racer` hands V8.
+    #[error("snapshot startup section is invalid")]
+    Startup,
+    #[error("snapshot read-only section is invalid")]
+    ReadOnly,
+    #[error("snapshot shared-heap section is invalid")]
+    SharedHeap,
+    #[error("snapshot context section is invalid")]
+    Context,
+    #[error("snapshot checksum mismatch")]
+    Checksum,
 }
 
 /// Why `SourceMaps::register` refused a map.

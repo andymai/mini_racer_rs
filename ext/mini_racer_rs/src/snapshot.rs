@@ -26,10 +26,8 @@ use crate::{context, errors, export, rb_raw};
 pub struct Snapshot {
     blob: OwnedRoot<RString>,
     // What contexts made from this snapshot start from, reused while one of
-    // them lives and `blob` holds the same bytes: `dump` hands `blob` out, and
-    // a context of mini_racer's starts from whatever it holds then. Held
-    // weakly, so once its contexts are gone a snapshot holds only `blob`, as
-    // mini_racer's does.
+    // them lives and `blob` holds the same bytes. Held weakly, so once its
+    // contexts are gone a snapshot holds only `blob`, as mini_racer's does.
     shared: RefCell<Option<WeakSnapshotBlob>>,
 }
 
@@ -96,8 +94,7 @@ impl Snapshot {
         self.shared.borrow_mut().take();
     }
 
-    // mini_racer allocates every snapshot with an empty blob it then hands
-    // out, so `dump` on one never built is that same String.
+    // mini_racer allocates every snapshot with an empty blob.
     fn blob(&self, ruby: &Ruby) -> RString {
         self.blob.get(ruby).unwrap_or_else(|| {
             let empty = ruby.str_from_slice(b"");
@@ -116,8 +113,10 @@ impl Snapshot {
         Ok(())
     }
 
+    // A copy, as mini_racer's is, so changing it changes nothing a context
+    // starts from.
     fn dump(ruby: &Ruby, rb_self: &Self) -> RString {
-        rb_self.blob(ruby)
+        rb_raw::str_dup(ruby, rb_self.blob(ruby))
     }
 
     fn size(ruby: &Ruby, rb_self: &Self) -> usize {
@@ -133,9 +132,6 @@ impl Snapshot {
         Ok(rb_self)
     }
 
-    // mini_racer keeps whatever it is given and aborts when V8 reads a bad
-    // blob; refused here, a stale blob read back from disk can be rescued
-    // and built again.
     fn load(ruby: &Ruby, class: RClass, blob: Value) -> Result<Obj<Self>, Error> {
         let blob = rb_raw::expect_string(ruby, blob)?;
         let copy = rb_raw::str_dup(ruby, blob);
