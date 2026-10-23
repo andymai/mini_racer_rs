@@ -299,6 +299,57 @@ class TimeoutScopeNestedTest < Minitest::Test
   end
 end
 
+# Scopes opened by callbacks nested in one another: whichever script's budget
+# ends first ends it, however deep, and each script around it carries on.
+class TimeoutScopeDeepTest < Minitest::Test
+  include TimeoutScopeFixtures
+
+  # Level i opens a scope of budgets[i] and runs level i + 1 on the context,
+  # the last one a script that never ends; each returns 0 once it rescues the
+  # termination of the script it ran.
+  def chain(*budgets)
+    @outcomes = []
+    names = budgets.each_index.map { "level#{_1}" }
+    budgets.each_with_index do |milliseconds, i|
+      code = names[i + 1] ? "#{names[i + 1]}() + 1" : SPIN
+      level = proc do
+        MiniRacerRs.timeout(milliseconds) { @context.eval(code) }
+      rescue MiniRacer::ScriptTerminatedError
+        @outcomes << names[i]
+        0
+      end
+      @context.attach(names[i], level)
+    end
+    "#{names.first}() + 1"
+  end
+
+  def assert_ends(source, result, outcomes)
+    started = now
+    value = begin
+      Timeout.timeout(5) { @context.eval(source) }
+    rescue Timeout::Error
+      :unbounded
+    end
+
+    assert_equal result, value
+    assert_operator now - started, :<, 2
+    assert_equal outcomes, @outcomes
+  end
+
+  def test_a_tighter_scope_inside_a_looser_one
+    assert_ends(chain(60_000, 50), 2, ["level1"])
+  end
+
+  def test_a_looser_scope_inside_a_tighter_one
+    assert_ends(chain(50, 60_000), 1, %w[level1 level0])
+  end
+
+  def test_the_tightest_of_three
+    assert_ends(chain(60_000, 30_000, 50), 3, ["level2"])
+    assert_ends(chain(60_000, 50, 30_000), 2, %w[level2 level1])
+  end
+end
+
 # A block left by break or throw resumes through the jump Ruby keeps pending,
 # so restoring the fiber's storage must neither clear it nor drop an
 # exception or a trap an interrupt brings meanwhile. Each case loops for a few
