@@ -62,9 +62,9 @@ body:
   - type: input
     id: v8
     attributes:
-      label: "`MiniRacerRs::V8_VERSION`"
+      label: "`MiniRacerRs::V8_VERSION` (CRuby)"
     validations:
-      required: true
+      required: false
   - type: input
     id: os
     attributes:
