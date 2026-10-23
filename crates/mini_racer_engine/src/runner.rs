@@ -239,6 +239,8 @@ pub fn check_heap(isolate: &mut v8::Isolate) {
     }
 }
 
+const EXHAUSTED: Option<Halt> = Some(Halt::Terminated(TerminationCause::HeapExhausted));
+
 // A hit lends V8 half the old generation's limit at a time, four times at
 // most, so a script past the heap limit can still be ended until the heap is
 // three times the limit; past that V8 aborts the process as it would without
@@ -763,6 +765,16 @@ fn handle(
             script(scope, runtime, depth, DispatchKind::Maintenance, |tc| {
                 unpoisoned(runtime)?;
                 tc.perform_microtask_checkpoint();
+                // Maintenance reports no cause, and an exhausted heap leaves
+                // none for the next script, so the checkpoint raises it.
+                if tc.has_terminated()
+                    && runtime.block.term.check(DispatchKind::Script) == EXHAUSTED
+                {
+                    return Err(halted(
+                        &runtime.block,
+                        Halt::Terminated(TerminationCause::HeapExhausted),
+                    ));
+                }
                 Ok(Vec::new())
             })
         }
@@ -869,7 +881,7 @@ fn script(
         // the timeout bounds them again here.
         Depth::Outermost(dispatch) if kind == DispatchKind::Script && tc.has_terminated() => {
             let verdict = term.settle(dispatch);
-            let exhausted = verdict == Some(Halt::Terminated(TerminationCause::HeapExhausted));
+            let exhausted = verdict == EXHAUSTED;
             if exhausted {
                 discard_microtasks(tc, term);
             }
@@ -880,7 +892,11 @@ fn script(
                 tc.reset();
                 tc.perform_microtask_checkpoint();
             }
-            if drains && (tc.has_terminated() || tc.is_execution_terminating()) {
+            // The microtasks it left reached the heap limit, which outranks
+            // every other cause: this script reports it, and nothing carries.
+            if drains && term.check(DispatchKind::Script) == EXHAUSTED {
+                term.end(dispatch)
+            } else if drains && (tc.has_terminated() || tc.is_execution_terminating()) {
                 term.spend(term.mark(), false);
                 match term.finish(dispatch) {
                     Some(Halt::Disposed) => Some(Halt::Disposed),

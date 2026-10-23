@@ -9,10 +9,10 @@ use std::time::Duration;
 
 use mini_racer_engine::process::platform;
 use mini_racer_engine::{
-    ContextConfig, ContextHandle, EngineError, Host, JsErrorKind, TerminationCause, WaitHandle,
-    WaitOutcome,
+    CallbackReply, ContextConfig, ContextHandle, EngineError, Host, JsErrorKind, TerminationCause,
+    WaitHandle, WaitOutcome,
 };
-use mini_racer_wire::{Begun, Container, Limits, Scalar, Text, Visitor, decode_value};
+use mini_racer_wire::{Begun, Container, Limits, Scalar, Text, Visitor, Writer, decode_value};
 
 const LIMIT: usize = 64 << 20;
 const OBJECTS: &str =
@@ -304,6 +304,59 @@ fn microtasks_a_hit_leaves_never_run() {
         Err(EngineError::Js(js)) if js.kind == JsErrorKind::Terminated(TerminationCause::Timeout)
     ));
     assert_eq!(text(&timed, "typeof ran"), "boolean");
+}
+
+// Large arrays, so the limit is reached within a few milliseconds.
+const HOG: &str = "const a = []; while (true) a.push(new Array(100000).fill(1));";
+
+// Stops the context from inside each callback, as a Ruby callback calling
+// `stop` does.
+struct Stopping<'a>(&'a ContextHandle);
+
+impl Host for Stopping<'_> {
+    fn wait(&mut self, wait: &WaitHandle<'_>) -> WaitOutcome {
+        Parking.wait(wait)
+    }
+
+    fn wait_blocking(&mut self, wait: &WaitHandle<'_>) {
+        Parking.wait_blocking(wait);
+    }
+
+    fn callback(&mut self, _request: &[u8]) -> CallbackReply {
+        self.0.stop().expect("live context");
+        let mut one = Vec::new();
+        Writer::new(&mut one).integer(1);
+        CallbackReply::Value(one)
+    }
+}
+
+// The limit outranks a stop or a timeout and ends with its dispatch, so the
+// script whose leftover microtasks reach it reports it, and the next runs.
+#[test]
+fn a_hit_in_leftover_microtasks_ends_with_the_script_that_left_them() {
+    let context = limited(LIMIT);
+    let mut request = Vec::new();
+    let mut writer = Writer::new(&mut request);
+    writer.begin_array(2);
+    writer.utf8(b"stopper");
+    writer.integer(0);
+    writer.end_array(2);
+    context.attach(request, &mut Parking).expect("attach");
+    let left = format!("Promise.resolve().then(() => {{ {HOG} }}); stopper(); 0");
+    let stopped = context
+        .eval("<eval>".to_owned(), left, &mut Stopping(&context))
+        .map(|bytes| decoded(&bytes).0);
+    limit_reached(stopped, LIMIT);
+    assert_eq!(eval(&context, "1 + 1").expect("usable"), Out::Number(2.0));
+
+    let timed = spawn(ContextConfig {
+        timeout: Some(Duration::from_millis(200)),
+        heap_limit: Some(LIMIT),
+        ..ContextConfig::default()
+    });
+    let left = format!("Promise.resolve().then(() => {{ {HOG} }}); while (true) {{}}");
+    limit_reached(eval(&timed, &left), LIMIT);
+    assert_eq!(eval(&timed, "1 + 1").expect("usable"), Out::Number(2.0));
 }
 
 // Whichever of a timeout and the limit ends the script, it ends with an error.
