@@ -1,5 +1,6 @@
 mod context;
 mod control;
+mod counters;
 mod error;
 mod fast_calls;
 mod notify;
@@ -18,6 +19,7 @@ mod text;
 
 pub use context::{ContextHandle, Host, Unparker, WaitHandle, WaitOutcome};
 pub use control::{CallRequest, CallbackReply, ContextConfig, JsText};
+pub use counters::{Counts, Terminations};
 pub use error::{
     EngineError, FlagError, HeapLimitError, InvalidSnapshot, JsError, JsErrorKind, SourceMapError,
     TerminationCause,

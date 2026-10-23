@@ -11,6 +11,7 @@ use mini_racer_sync::{
 use crate::control::{
     CallRequest, CallbackReply, ContextConfig, ControlBlock, Depth, JsText, Request, Wire,
 };
+use crate::counters::{Counters, Counts};
 use crate::notify::NotifyFd;
 use crate::process::fork::{self, Generation};
 use crate::process::platform::Mode;
@@ -498,6 +499,26 @@ impl ContextHandle {
         }
     }
 
+    /// Read from atomics, without a dispatch or taking an inherited context
+    /// over: in a forked child that has not, the counts it inherited, and
+    /// after a dispose, the last ones.
+    #[must_use]
+    pub fn counters(&self) -> Counts {
+        let epoch = fork::epoch();
+        let mut lineage = &self.lineage;
+        let mut counted = None;
+        loop {
+            if let Held::Block(block) = &lineage.held {
+                counted = Some(&block.counters);
+            }
+            match lineage.next.get() {
+                Some(next) if lineage.epoch != epoch => lineage = next,
+                _ => break,
+            }
+        }
+        counted.map_or_else(Counts::default, Counters::read)
+    }
+
     /// Answers without taking an inherited context over.
     #[must_use]
     pub fn is_disposed(&self) -> bool {
@@ -588,8 +609,15 @@ impl ContextHandle {
         self.session.owner.store(thread, Ordering::Release);
         let owning = Owning(&self.session.owner);
         let wait = WaitHandle::new(block);
-        let result = match block.channel.request(request(Depth::Outermost(dispatch))) {
-            Ok(()) => self.await_response(block, &wait, false, host),
+        let request = request(Depth::Outermost(dispatch));
+        let payload = request.payload();
+        let result = match block.channel.request(request) {
+            Ok(()) => {
+                if let Some(bytes) = payload {
+                    block.counters.dispatched(bytes);
+                }
+                self.await_response(block, &wait, false, host)
+            }
             Err(error) => Err(channel(error)),
         };
         drop(owning);
@@ -628,11 +656,15 @@ impl ContextHandle {
             return Err(error);
         }
         let wait = WaitHandle::new(block);
+        let payload = request.payload();
         let result = block
             .channel
             .request(request)
             .map_err(channel)
             .and_then(|()| {
+                if let Some(bytes) = payload {
+                    block.counters.dispatched(bytes);
+                }
                 let _waiting = Counted::enter(&self.session.waits);
                 self.await_response(block, &wait, true, host)
             });
@@ -687,17 +719,21 @@ impl ContextHandle {
                     if nested && cancelled {
                         block.term.release();
                     }
-                    return if disposed {
+                    let response = if disposed {
                         Err(EngineError::Disposed)
                     } else {
                         response
                     };
+                    block.counters.answered(&response, nested && cancelled);
+                    return response;
                 }
                 Ok(Some(ToRuby::Callback(request))) => {
+                    block.counters.asked(request.len());
                     let reply = if cancelled {
                         CallbackReply::Abort
                     } else {
                         let _running = Counted::enter(&self.session.callbacks);
+                        block.counters.called_back();
                         let reply = host.callback(&request);
                         if wait.forked() {
                             return Err(EngineError::Orphaned);
@@ -712,6 +748,7 @@ impl ContextHandle {
                     if matches!(reply, CallbackReply::Abort) && !cancelled {
                         abandon(&mut cancelled);
                     }
+                    block.counters.replied(&reply);
                     block.channel.reply(reply).map_err(channel)?;
                 }
                 Ok(None) => {}
@@ -781,7 +818,11 @@ fn adopt(inherited: &ControlBlock, carried: Inherited) -> Held {
     else {
         return orphaned(true, false);
     };
-    let block = Arc::new(ControlBlock::with_tasks(inherited.config.clone(), tasks));
+    let block = Arc::new(ControlBlock::adopted(
+        inherited.config.clone(),
+        tasks,
+        inherited.counters.inherited(),
+    ));
     *lock(&block.custody) = Some(isolate);
     block.term.adopt(carried);
     // The isolate keeps whatever termination V8 still held for it.

@@ -4,12 +4,13 @@
 
 ## Crates
 
-All four crates have `publish = false`. `scripts/check-boundaries.sh` enforces their layering against `layers.toml`.
+All five crates have `publish = false`. `scripts/check-boundaries.sh` enforces their layering against `layers.toml`.
 
 | Crate | Layer | Role |
 |---|---:|---|
 | `mini_racer_wire` | 0 | V8 wire format codec. It uses `forbid(unsafe_code)`. |
 | `mini_racer_sync` | 0 | Concurrency protocol types, checked with loom. It uses `forbid(unsafe_code)`. |
+| `mini_racer_sourcemap` | 0 | Source maps for JavaScript backtraces: parsing, lookup and rewriting frame locations. It uses `forbid(unsafe_code)`. |
 | `mini_racer_engine` | 1 | V8 process state, flags, and runners. This is the only crate that names `v8`. |
 | `mini_racer_rs` | 2 | Ruby extension built as a `cdylib`. This is the only crate that names magnus or rb-sys. |
 
@@ -27,7 +28,7 @@ The context handle in `crates/mini_racer_engine/src/context.rs` coordinates disp
 
 ## Values
 
-Values cross the channel in V8's serialization format. Results are decoded from format versions 13 through 16 by `mini_racer_wire`, using a visitor that constructs Ruby objects directly in `ext/mini_racer_rs/src/decode.rs`. There is no intermediate tree, nesting is limited to 96 levels, and repeated objects preserve their identity.
+Values cross the channel in V8's serialization format. Results are decoded from format versions 13 through 16 by `mini_racer_wire`, using a visitor that constructs Ruby objects directly in `ext/mini_racer_rs/src/decode.rs`. There is no intermediate tree, nesting is limited to 95 levels, and repeated objects preserve their identity.
 
 Arguments to `Context#call` travel in the other direction. `ext/mini_racer_rs/src/encode.rs` writes format version 15 directly from Ruby values.
 
@@ -90,13 +91,19 @@ The template is a top-level script like the original source. It replaces each JS
 
 `MINI_RACER_RS_FAST_CALLS=off`, set before the first context is created, disables fast calls process-wide; forked children retain the setting. Reflection-only differences are recorded under `behavior:fast-calls@ruby`.
 
+## Source maps
+
+On CRuby, `MiniRacerRs.register_source_map(bundle, map)` parses a version 3 source map once, without the GVL, into a process-wide registry of at most eight bundles found by content. Parsing, lookup, and frame rewriting live in the `mini_racer_sourcemap` crate, which has no unsafe code.
+
+Before a script runs, `runner::match_bundle` matches a UTF-8 source containing a registered bundle. The isolate then captures detailed stack traces, and `runner::relocated` rewrites matching `MiniRacer::RuntimeError` frames to original files, lines, and columns, keeping V8's positions for frames it cannot pair. A forked child starts from a copy of the registry.
+
 ## Forks
 
 With the `:single_threaded` platform flag, a runner serves its isolate as a `v8::SharedIsolate`. Between requests, the isolate remains unlocked in its control block.
 
 Hooks on `Process._fork` and `Process.daemon` in `ext/mini_racer_rs/src/fork.rs` cover Ruby `fork`, `IO.popen("-")`, and `Process.daemon`. Their `pthread_atfork` prepare handler waits up to 500 ms for every runner to become idle or parked, interrupting JavaScript after 50 ms. In every process, mini_racer_rs points V8's platform at a copied vtable whose worker-thread slots post to a pool it owns. V8's platform has one worker thread, which never receives a task. The pool has as many threads as V8 would run for the mode: the processors online, held to 1 through 16, or 1 under `:single_threaded`. Its threads start at the first worker task. In both modes, the prepare handler pauses the pool so no task starts, then waits up to 100 ms for running tasks to end. These waits are best effort. Past either bound, the fork proceeds, the child refuses every inherited context, and its new contexts are best effort. The parent resumes the pool when the fork returns. Each child starts its own pool and never touches its parent's; tasks queued in the parent's pool are not run in the child. Idle pool threads wait on a Rust standard library condition variable, which keeps no records on their stacks for a child to inherit. The pool lives in `crates/mini_racer_engine/src/process/workers.rs` and `crates/mini_racer_sync/src/workers.rs`; `crates/mini_racer_engine/src/sys.rs` copies the vtable and runs and deletes V8's tasks. The fork protocol is in `crates/mini_racer_engine/src/process/fork.rs` and `crates/mini_racer_sync/src/fork.rs`.
 
-In the child, each context that was idle receives a new runner around the same isolate. A context that was in use at the fork raises in the child. The child handler only increments a fork epoch, and processes are distinguished by that epoch rather than by pid. The child never frees or waits on inherited objects.
+Under `:single_threaded`, each context that was idle at the fork receives a new runner around the same isolate in the child. A context that was in use at the fork raises in the child. In the default mode, the child refuses every inherited context with `MiniRacer::RuntimeError`. The child handler only increments a fork epoch, and processes are distinguished by that epoch rather than by pid. The child never frees or waits on inherited objects.
 
 V8 marks its memory with `MADV_DONTFORK`. The `madvise` wrapper linked into the extension drops that flag, allowing the child to use the isolate it takes over. This wrapper lives in `crates/mini_racer_engine/src/sys.rs`.
 
@@ -116,8 +123,8 @@ Under a fiber scheduler, a fiber waiting for its context parks through the sched
 
 ## How it is checked
 
-The unmodified mini_racer and ExecJS test suites run from submodules against per-platform ledgers in `test/upstream/`. Differential tests in `test/diff/` send the same generated values and the Babel, Terser, Handlebars, and React libraries to mini_racer 0.22.1 and this gem.
+The unmodified mini_racer and ExecJS test suites run from submodules against per-platform ledgers in `test/upstream/`. Differential tests in `test/diff/` send the same generated values and the Babel, Terser, Handlebars, React, and MUI libraries to mini_racer 0.22.1 and this gem.
 
-Loom models exercise the channel, termination, and fork protocols. cargo-fuzz targets cover the wire codec. AddressSanitizer, ThreadSanitizer, fork and spawn stress, and garbage collection stress with compaction run in CI or nightly.
+Loom models exercise the channel, termination, fork, per-isolate task queue, and worker task queue pause and resume protocols. cargo-fuzz targets cover the wire codec and source map parser. AddressSanitizer, ThreadSanitizer, fork and spawn stress, and garbage collection stress with compaction run in CI or nightly.
 
 Every difference from mini_racer 0.22.1 is recorded in `compat.toml` and listed in `COMPATIBILITY.md`.

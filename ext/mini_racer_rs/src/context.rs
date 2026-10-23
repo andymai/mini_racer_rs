@@ -12,7 +12,7 @@ use magnus::{
     TypedData, Value,
 };
 use mini_racer_engine::process::platform;
-use mini_racer_engine::{ContextConfig, ContextHandle, EngineError, JsText};
+use mini_racer_engine::{ContextConfig, ContextHandle, Counts, EngineError, JsText};
 
 use crate::encode;
 use crate::gc_root::OwnedRoot;
@@ -202,6 +202,10 @@ fn config(ruby: &Ruby, keywords: RHash) -> Result<ContextConfig, Error> {
 }
 
 impl Context {
+    pub fn counters(&self, ruby: &Ruby) -> Result<Counts, Error> {
+        Ok(self.handle(ruby)?.counters())
+    }
+
     fn handle(&self, ruby: &Ruby) -> Result<&ContextHandle, Error> {
         self.handle
             .get()
