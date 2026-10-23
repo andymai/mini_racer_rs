@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 
 use mini_racer_sync::{Channel, DispatchId, Protocol, RunnerPhase, TermCell, Terminator, lock};
 
+use crate::counters::Counters;
 use crate::notify::NotifyFd;
 use crate::process::tasks::Tasks;
 use crate::{EngineError, SnapshotBlob};
@@ -51,6 +52,14 @@ impl JsText {
         match self {
             Self::Utf8(bytes) | Self::Latin1(bytes) => bytes.len(),
             Self::Utf16(units) => units.len(),
+        }
+    }
+
+    #[must_use]
+    pub const fn byte_len(&self) -> usize {
+        match self {
+            Self::Utf8(bytes) | Self::Latin1(bytes) => bytes.len(),
+            Self::Utf16(units) => units.len().saturating_mul(2),
         }
     }
 }
@@ -124,6 +133,39 @@ pub enum Request {
         depth: Depth,
     },
     Dispose,
+}
+
+impl Request {
+    /// The bytes a counted dispatch hands JavaScript; `None` for the
+    /// context's own setup and dispose, which no caller asked for.
+    pub const fn payload(&self) -> Option<usize> {
+        match self {
+            Self::Init { .. } | Self::Dispose => None,
+            Self::Eval { source, .. } => Some(source.byte_len()),
+            Self::Call { request, .. } => Some(request.bytes.len()),
+            Self::Attach { request, .. } => Some(request.len()),
+            Self::Snapshot { code, .. } => Some(code.byte_len()),
+            Self::LowMemoryNotification { .. }
+            | Self::MicrotaskCheckpoint { .. }
+            | Self::HeapStats { .. }
+            | Self::HeapSnapshot { .. }
+            | Self::PumpMessageLoop { .. } => Some(0),
+        }
+    }
+
+    /// Whether the runner's time on it counts as JavaScript's: the requests
+    /// that run scripts, not the heap's statistics, snapshot or full
+    /// collection, which can take far longer than the scripts.
+    pub const fn runs_script(&self) -> bool {
+        matches!(
+            self,
+            Self::Eval { .. }
+                | Self::Call { .. }
+                | Self::Attach { .. }
+                | Self::MicrotaskCheckpoint { .. }
+                | Self::PumpMessageLoop { .. }
+        )
+    }
 }
 
 pub struct IsolateTerminator {
@@ -205,6 +247,7 @@ pub struct ControlBlock {
     // An idle single-threaded runner leaves its isolate here, its only owner
     // then, so a forked child can hand it to a runner of its own.
     pub custody: Mutex<Option<v8::SharedIsolate>>,
+    pub counters: Counters,
 }
 
 impl Drop for ControlBlock {
@@ -238,11 +281,12 @@ impl ControlBlock {
     }
 
     pub fn new(config: ContextConfig) -> Self {
-        Self::with_tasks(config, Tasks::default())
+        Self::adopted(config, Tasks::default(), Counters::default())
     }
 
-    /// For a forked child taking over an idle context with its queued tasks.
-    pub fn with_tasks(config: ContextConfig, tasks: Tasks) -> Self {
+    /// For a forked child taking over an idle context with its queued tasks
+    /// and its counts.
+    pub fn adopted(config: ContextConfig, tasks: Tasks, counters: Counters) -> Self {
         Self {
             channel: Channel::default(),
             term: TermCell::default(),
@@ -255,6 +299,7 @@ impl ControlBlock {
             isolate: OnceLock::new(),
             building: Mutex::new(None),
             custody: Mutex::new(None),
+            counters,
         }
     }
 }

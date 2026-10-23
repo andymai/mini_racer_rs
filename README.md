@@ -102,6 +102,7 @@ ExecJS.eval("[1, 2].map(x => x * 2)")         # => [2, 4]
 | `Snapshot.new`, `#warmup!`, `#dump`, `Snapshot.load` | Creates, warms, serializes, and loads startup snapshots. |
 | `Platform.set_flags!(*flags)` | Sets V8 flags before the first context. |
 | `MiniRacerRs.register_source_map(bundle, map)` | Registers a source map for a bundle, so `MiniRacer::RuntimeError` backtraces show its original files and positions. CRuby only. |
+| `MiniRacerRs.counters(context)` | Returns per-context activity counters without dispatching or taking the context lock, including while a script runs and after disposal. CRuby only. |
 
 `Context.new` accepts these options:
 
@@ -119,6 +120,8 @@ ExecJS.eval("[1, 2].map(x => x * 2)")         # => [2, 4]
 V8 positions remain for async frames and frames after the tenth. They also remain for `eval`, `new Function`, uncovered positions, and frames outside the bundle. JavaScript-reformatted stacks also keep V8 positions.
 
 Detailed stack capture makes creating and throwing errors more expensive in affected contexts. Measured React and MUI server renders were unchanged. Registration is process wide and holds at most eight bundles. Maps cannot be removed. Registering a bundle again replaces its map. Trust bundles and maps like application code because source names appear in Ruby backtraces.
+
+**Counters.** `MiniRacerRs.counters(context)` returns a Hash of symbol-keyed counts for activity since context creation. It reads without a dispatch or the context lock, so another thread can inspect it while a script runs. After `dispose`, it returns the last counts. A forked child that takes a context over continues from the parent's counts. Values are read individually, so an in-flight request can appear in `dispatches` before its result bytes. Keys are `dispatches` (runner requests, including nested callback requests), `callbacks` (Ruby callables run for JavaScript), `bytes_to_js` (sources, requests, callback returns and errors), `bytes_from_js` (results and callback arguments), `js_ns` (runner time excluding callback, await task and fork waits), `gc_count` and `gc_ns` (V8 collections and time), and `terminated` (counts by `stop`, `timeout`, `interrupt`, `max_memory` and `heap_exhausted`). A non-context argument raises `TypeError`. CRuby only. In release builds, timing `js_ns` added about 30 ns to a roughly 0.72 µs call round trip. Counting alone measured within noise.
 
 ## Switching from mini_racer
 
