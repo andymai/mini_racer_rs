@@ -98,6 +98,7 @@ What mini_racer_rs adds under `MiniRacerRs`. An internal id is not for callers.
 | `imethod:MiniRacerRs::ForkHook#daemon` | internal | n/a |
 | `module:MiniRacerRs` | done | done |
 | `module:MiniRacerRs::ForkHook` | internal | n/a |
+| `smethod:MiniRacerRs.counters` | done | n/a |
 | `smethod:MiniRacerRs.register_source_map` | done | n/a |
 | `smethod:MiniRacerRs.timeout` | done | n/a |
 

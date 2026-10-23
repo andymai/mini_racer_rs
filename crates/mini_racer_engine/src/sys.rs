@@ -32,8 +32,8 @@ pub extern "C" fn __wrap_madvise(
 /// runner to drop.
 pub fn share(isolate: v8::OwnedIsolate) -> Result<v8::SharedIsolate, v8::OwnedIsolate> {
     // SAFETY: the runner calls this on the thread that created `isolate`, with
-    // no reference from `Global::open` live, and the only slot it sets, an
-    // `Arc<Runtime>`, is Send.
+    // no reference from `Global::open` live, and the only slots it sets, an
+    // `Arc<Runtime>` and its `Collections`, are Send.
     let shared = unsafe { isolate.try_into_shared() };
     shared.map_err(v8::IntoSharedError::into_isolate)
 }
@@ -204,6 +204,51 @@ unsafe extern "C" fn after_gc(
         crate::runner::check_heap(isolate);
     });
     if checked.is_err() {
+        std::process::abort();
+    }
+}
+
+/// Has V8 report the start and end of each collection on `isolate` for its
+/// runner's counters: scavenges, minor mark-sweeps and mark-compacts, not the
+/// start of incremental marking or the processing of weak callbacks, which
+/// collect nothing.
+pub fn count_collections(isolate: &mut v8::Isolate) {
+    let collections = v8::GCType::kGCTypeScavenge
+        | v8::GCType::kGCTypeMinorMarkSweep
+        | v8::GCType::kGCTypeMarkSweepCompact;
+    isolate.add_gc_prologue_callback(collection_began, std::ptr::null_mut(), collections);
+    isolate.add_gc_epilogue_callback(collection_ended, std::ptr::null_mut(), collections);
+}
+
+unsafe extern "C" fn collection_began(
+    isolate: v8::UnsafeRawIsolatePtr,
+    _type: v8::GCType,
+    _flags: v8::GCCallbackFlags,
+    _data: *mut c_void,
+) {
+    let counted = std::panic::catch_unwind(|| {
+        // SAFETY: V8 calls a GC prologue callback on the thread that has the
+        // isolate entered, with its own non-null pointer to it.
+        let isolate = unsafe { v8::Isolate::ref_from_raw_isolate_ptr(&isolate) };
+        crate::runner::collection_began(isolate);
+    });
+    if counted.is_err() {
+        std::process::abort();
+    }
+}
+
+unsafe extern "C" fn collection_ended(
+    isolate: v8::UnsafeRawIsolatePtr,
+    _type: v8::GCType,
+    _flags: v8::GCCallbackFlags,
+    _data: *mut c_void,
+) {
+    let counted = std::panic::catch_unwind(|| {
+        // SAFETY: as in `collection_began`, for the epilogue.
+        let isolate = unsafe { v8::Isolate::ref_from_raw_isolate_ptr(&isolate) };
+        crate::runner::collection_ended(isolate);
+    });
+    if counted.is_err() {
         std::process::abort();
     }
 }

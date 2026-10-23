@@ -1,10 +1,11 @@
 use std::borrow::Cow;
+use std::cell::Cell;
 use std::collections::hash_map::RandomState;
 use std::hash::BuildHasher;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use mini_racer_sourcemap::{Frame, Match, Placement, SourceMap};
 use mini_racer_sync::{
@@ -74,6 +75,58 @@ struct Runtime {
     frames: Mutex<Vec<v8::Global<v8::Array>>>,
     // Scripts that hold a bundle with a source map, latest last.
     matched: Mutex<Vec<Matched>>,
+    // When the runner's current stretch of JavaScript began, in nanoseconds
+    // after `clock`, or `STOPPED`; only the runner touches it.
+    clock: Instant,
+    since: AtomicU64,
+}
+
+const STOPPED: u64 = u64::MAX;
+
+// Times the runner's JavaScript: started for a request that runs scripts,
+// and paused while a callback waits for Ruby, an await sleeps until a task is
+// due or a script waits out a fork. Each restores what it found, so a request
+// nested in a callback is timed inside the pause.
+struct Timing<'a> {
+    runtime: &'a Runtime,
+    was_running: bool,
+}
+
+impl Drop for Timing<'_> {
+    fn drop(&mut self) {
+        self.runtime.switch(self.was_running);
+    }
+}
+
+// The collections V8 runs on a runner's isolate. Kept apart from the
+// runtime, which needs the isolate's contexts, so a collection while they
+// are made counts too.
+struct Collections {
+    block: Arc<ControlBlock>,
+    began: Cell<Option<Instant>>,
+}
+
+impl Collections {
+    fn new(block: &Arc<ControlBlock>) -> Self {
+        Self {
+            block: Arc::clone(block),
+            began: Cell::new(None),
+        }
+    }
+}
+
+pub fn collection_began(isolate: &v8::Isolate) {
+    if let Some(collections) = isolate.get_slot::<Collections>() {
+        collections.began.set(Some(Instant::now()));
+    }
+}
+
+pub fn collection_ended(isolate: &v8::Isolate) {
+    if let Some(collections) = isolate.get_slot::<Collections>()
+        && let Some(began) = collections.began.take()
+    {
+        collections.block.counters.collected(began.elapsed());
+    }
 }
 
 #[derive(Clone)]
@@ -168,6 +221,30 @@ impl Runtime {
             hoisting: Mutex::default(),
             frames: Mutex::default(),
             matched: Mutex::default(),
+            clock: Instant::now(),
+            since: AtomicU64::new(STOPPED),
+        }
+    }
+
+    // Charges the stretch running so far, if one is, and starts or stops the
+    // next; returns whether one was running. A load and a store, as only the
+    // runner writes either.
+    fn switch(&self, run: bool) -> bool {
+        let now = u64::try_from(self.clock.elapsed().as_nanos()).unwrap_or(STOPPED - 1);
+        let since = self.since.load(Ordering::Relaxed);
+        self.since
+            .store(if run { now } else { STOPPED }, Ordering::Relaxed);
+        if since == STOPPED {
+            return false;
+        }
+        self.block.counters.ran_js(now.saturating_sub(since));
+        true
+    }
+
+    fn timing(&self, run: bool) -> Timing<'_> {
+        Timing {
+            runtime: self,
+            was_running: self.switch(run),
         }
     }
 }
@@ -236,6 +313,7 @@ pub fn check_heap(isolate: &mut v8::Isolate) {
 
 pub fn park_for_fork(isolate: &v8::Isolate) {
     if let Some(runtime) = isolate.get_slot::<Arc<Runtime>>() {
+        let _paused = runtime.timing(false);
         runtime.generation.pause(&runtime.block);
     }
 }
@@ -264,6 +342,8 @@ fn serve(block: &Arc<ControlBlock>, generation: &'static Generation) -> bool {
         None => params,
     };
     let mut isolate = v8::Isolate::new(params);
+    isolate.set_slot(Collections::new(block));
+    sys::count_collections(&mut isolate);
     if block.config.max_memory.is_some() {
         sys::watch_heap(&mut isolate);
     }
@@ -329,6 +409,8 @@ fn adopt(
             lock(&runtime.matched).clone_from(&matched);
         }
         locker.set_slot(Arc::clone(&runtime));
+        // The parent's callbacks stay registered and now count here.
+        locker.set_slot(Collections::new(block));
         runtime
     };
     block
@@ -568,6 +650,7 @@ fn handle(
     runtime: &Runtime,
     request: Request,
 ) -> Result<Vec<u8>, EngineError> {
+    let _timing = request.runs_script().then(|| runtime.timing(true));
     match request {
         Request::Init { depth } => match depth {
             Depth::Outermost(dispatch) => ended(runtime, dispatch),
@@ -1325,6 +1408,7 @@ fn await_promise<'s>(
 // Waiting, the runner holds its isolate but runs nothing in it, so a fork need
 // not wait for it.
 fn wait_for_task(runtime: &Runtime) {
+    let _paused = runtime.timing(false);
     runtime.block.phase.set(Phase::Parked);
     runtime.block.tasks.wait();
     runtime.generation.resume(&runtime.block);
@@ -1594,6 +1678,7 @@ fn callback<'s>(
     let Some(bytes) = serialize::write(scope, request.into()) else {
         return;
     };
+    let waiting = runtime.timing(false);
     if runtime.block.channel.callback(bytes).is_err() {
         terminate(scope, runtime);
         return;
@@ -1623,6 +1708,7 @@ fn callback<'s>(
                 return;
             }
         };
+        drop(waiting);
         // A nested dispatch that was halted leaves its termination to unwind
         // this script too, as mini_racer restores it.
         let terminating = scope.is_execution_terminating();

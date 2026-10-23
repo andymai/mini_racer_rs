@@ -8,13 +8,13 @@ mini_racer_rs is published on RubyGems.org as a Rust implementation of the MiniR
 
 `MiniRacer::VERSION` remains `"0.22.1"`, and `MiniRacer::LIBV8_NODE_VERSION` retains mini_racer's value. These are parity constants, not the mini_racer_rs release version.
 
-`MiniRacerRs::NATIVE_VERSION` reports the compiled extension's version. `MiniRacerRs::V8_VERSION` reports the compiled-in V8 version string.
+On CRuby, `MiniRacerRs::NATIVE_VERSION` reports the compiled extension's version and `MiniRacerRs::V8_VERSION` reports the compiled-in V8 version string.
 
 The V8 version changes only in a minor release, never a patch, and the release notes call out the change and any message wording it changes. Security fixes land in the latest release only.
 
 ## Covered
 
-The public API covers the `MiniRacer` namespace defined by mini_racer 0.22.1, plus `MiniRacerRs.register_source_map` and the `MiniRacerRs` constants described above.
+The public API covers the `MiniRacer` namespace defined by mini_racer 0.22.1, the `MiniRacerRs` methods listed in the README's "API at a glance" table, and the `MiniRacerRs` constants described above. The keys returned by `MiniRacerRs.counters` and their meanings are also covered. A minor release may add keys.
 
 `COMPATIBILITY.md` lists the mini_racer 0.22.1 public surface and its status. Deliberate differences include a reason and a test. Compatibility is also checked against mini_racer's unmodified test suite.
 
@@ -22,7 +22,7 @@ The gem defines `MiniRacer` and provides `lib/mini_racer.rb`. Under Bundler, `re
 
 ## Not covered
 
-`MINI_RACER_RS_SPIN_US` is an unstable tuning interface. Its format is `<microseconds with the GVL>,<microseconds without>`. `MINI_RACER_RS_CODE_CACHE` is an unstable tuning interface. Set it to `off` before the first context is created to disable caching; forked children retain the parent's setting. `MINI_RACER_RS_FAST_CALLS` is an unstable tuning interface. Set it to `off` before the first context is created to send every eval down the normal path; the setting is read once per process, and forked children retain it.
+`MINI_RACER_RS_SPIN_US` is an unstable tuning interface. Its format is `<microseconds with the GVL>,<microseconds without>`. `MINI_RACER_RS_CODE_CACHE` is an unstable tuning interface. Set it to `off` before the first context is created to disable the process-wide code cache and shared copies of large sources; forked children retain the parent's setting. `MINI_RACER_RS_FAST_CALLS` is an unstable tuning interface. Set it to `off` before the first context is created to send every eval down the normal path; the setting is read once per process, and forked children retain it.
 
 The internal Rust crates are unstable. Files under `lib/mini_racer_rs/` are unstable except for what `require "mini_racer"` and `require "mini_racer_rs"` load.
 

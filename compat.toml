@@ -379,6 +379,9 @@ status = "done"
 [extra."module:MiniRacerRs::ForkHook@ruby"]
 status = "internal"
 
+[extra."smethod:MiniRacerRs.counters@ruby"]
+status = "done"
+
 [extra."smethod:MiniRacerRs.register_source_map@ruby"]
 status = "done"
 

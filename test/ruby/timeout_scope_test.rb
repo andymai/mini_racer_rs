@@ -297,6 +297,16 @@ class TimeoutScopeNestedTest < Minitest::Test
     assert_terminated { MiniRacerRs.timeout(50) { @context.eval("loose() + 1") } }
     assert_equal [:terminated], @outcomes
   end
+
+  # Each overrun counts once, for the dispatch it ended: the outermost eval,
+  # then the nested one, whose eval around it completes.
+  def test_overruns_count_as_timeouts
+    assert_terminated { MiniRacerRs.timeout(50) { @context.eval(SPIN) } }
+    assert_nested_ended { @context.eval("nest() + 1") }
+
+    assert_equal({ stop: 0, timeout: 2, interrupt: 0, max_memory: 0, heap_exhausted: 0 },
+                 MiniRacerRs.counters(@context)[:terminated],)
+  end
 end
 
 # Scopes opened by callbacks nested in one another: whichever script's budget

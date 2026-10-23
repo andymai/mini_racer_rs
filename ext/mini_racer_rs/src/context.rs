@@ -11,7 +11,7 @@ use magnus::{
     Class, DataTypeFunctions, Error, Fixnum, Module, RArray, RHash, RModule, RString, Ruby, Symbol,
     TypedData, Value,
 };
-use mini_racer_engine::{ContextConfig, ContextHandle, EngineError, JsText, ScriptOptions};
+use mini_racer_engine::{ContextConfig, ContextHandle, Counts, EngineError, JsText, ScriptOptions};
 
 use crate::encode;
 use crate::gc_root::OwnedRoot;
@@ -200,6 +200,10 @@ pub fn option_error(ruby: &Ruby, error: &OptionError) -> Error {
 }
 
 impl Context {
+    pub fn counters(&self, ruby: &Ruby) -> Result<Counts, Error> {
+        Ok(self.handle(ruby)?.counters())
+    }
+
     fn handle(&self, ruby: &Ruby) -> Result<&ContextHandle, Error> {
         self.handle
             .get()
