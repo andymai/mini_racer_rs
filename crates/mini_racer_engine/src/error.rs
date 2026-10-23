@@ -125,6 +125,9 @@ pub enum EngineError {
     InvalidSnapshot(#[from] InvalidSnapshot),
     #[error("internal error: {0}")]
     Internal(String),
+    /// V8's flags sized a context's heap past its heap limit.
+    #[error("the heap limit is overridden by a V8 flag")]
+    HeapLimitOverridden,
 }
 
 fn ebusy() -> String {

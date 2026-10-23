@@ -197,7 +197,12 @@ pub fn run(block: &Arc<ControlBlock>, generation: &'static Generation, start: St
         Start::Adopted => {
             let isolate = lock(&block.custody).take();
             isolate.map_or_else(
-                || refuse(block, "no isolate to take over"),
+                || {
+                    refuse(
+                        block,
+                        EngineError::Internal("no isolate to take over".to_owned()),
+                    )
+                },
                 |isolate| adopt(block, generation, isolate),
             )
         }
@@ -294,6 +299,16 @@ fn recover(isolate: &mut v8::Isolate, block: &ControlBlock) {
     }
 }
 
+// The most heap V8 15.2's `Heap::ConfigureHeap` reserves for the generations
+// `heap_limits` sized when no flag replaces them: the old one as given, and a
+// semi-space of a third of the young one, rounded up to a power of two.
+fn most_reserved(old_generation: usize, young_generation: usize) -> usize {
+    let semi_space = (young_generation / 3)
+        .checked_next_power_of_two()
+        .unwrap_or(usize::MAX);
+    old_generation.saturating_add(semi_space.saturating_mul(3))
+}
+
 // Whether V8 would put the old generation's limit back where it started: no
 // lower than the live heap and a quarter.
 fn fits(isolate: &mut v8::Isolate, watch: &HeapWatch) -> bool {
@@ -326,13 +341,11 @@ pub fn park_for_fork(isolate: &v8::Isolate) {
     }
 }
 
-fn refuse(block: &ControlBlock, message: &str) -> bool {
+fn refuse(block: &ControlBlock, error: EngineError) -> bool {
     // Holding no isolate, it never keeps a fork waiting.
     block.phase.set(Phase::Deposited);
     if receive(block).is_some() {
-        let _ = block
-            .channel
-            .respond(Err(EngineError::Internal(message.to_owned())));
+        let _ = block.channel.respond(Err(error));
     }
     false
 }
@@ -349,7 +362,7 @@ fn serve(block: &Arc<ControlBlock>, generation: &'static Generation) -> bool {
         Some(blob) => params.snapshot_blob(sys::startup_data(blob)),
         None => params,
     };
-    let params = match block.config.heap_limit {
+    let (params, most) = match block.config.heap_limit {
         Some(limit) => {
             let params = params.heap_limits(0, limit);
             let old_generation = params.max_old_generation_size_in_bytes();
@@ -357,28 +370,38 @@ fn serve(block: &Arc<ControlBlock>, generation: &'static Generation) -> bool {
                 .heap
                 .old_generation
                 .store(old_generation, Ordering::Relaxed);
-            params
+            let most = most_reserved(old_generation, params.max_young_generation_size_in_bytes());
+            (params, Some(most))
         }
-        None => params,
+        None => (params, None),
     };
     let mut isolate = v8::Isolate::new(params);
     if block.config.max_memory.is_some() {
         sys::watch_heap(&mut isolate);
     }
-    if block.config.heap_limit.is_some() {
-        let reserved = isolate.get_heap_statistics().heap_size_limit();
+    let reserved = most.map(|_| isolate.get_heap_statistics().heap_size_limit());
+    if let Some(reserved) = reserved {
         block.heap.reserved.store(reserved, Ordering::Relaxed);
         sys::watch_heap_limit(&mut isolate, block);
     }
     let key = sys::isolate_key(&isolate);
     generation.tasks().register(key, &block.tasks);
+    // V8 reads its own flags, so this catches any that sized the heap past
+    // the limit, whatever `platform::read_sizing` made of them.
+    if reserved > most {
+        retire(block, generation, key, isolate);
+        return refuse(block, EngineError::HeapLimitOverridden);
+    }
     let contexts = {
         v8::scope!(let scope, &mut isolate);
         serialize::contexts(scope, from_snapshot)
     };
     let Some(contexts) = contexts else {
         retire(block, generation, key, isolate);
-        return refuse(block, "context setup failed");
+        return refuse(
+            block,
+            EngineError::Internal("context setup failed".to_owned()),
+        );
     };
     let runtime = Arc::new(Runtime::new(
         block,
@@ -395,7 +418,10 @@ fn serve(block: &Arc<ControlBlock>, generation: &'static Generation) -> bool {
         Ok(shared) => shared,
         Err(refused) => {
             retire(block, generation, key, refused);
-            return refuse(block, "isolate could not be shared");
+            return refuse(
+                block,
+                EngineError::Internal("isolate could not be shared".to_owned()),
+            );
         }
     };
     let _ = block.isolate.set(shared.thread_safe_handle());
@@ -415,7 +441,10 @@ fn adopt(
         // Disposed here, before the runner counts as idle to a fork.
         drop(block.tasks.close());
         drop(shared);
-        return refuse(block, "inherited isolate has no context");
+        return refuse(
+            block,
+            EngineError::Internal("inherited isolate has no context".to_owned()),
+        );
     };
     let runtime = {
         let mut locker = shared.lock();

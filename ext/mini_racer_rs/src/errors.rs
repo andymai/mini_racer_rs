@@ -91,6 +91,9 @@ pub fn engine(ruby: &Ruby, error: EngineError) -> Error {
         EngineError::Internal(message) => raised(ruby, INTERNAL.get(ruby), &message),
         EngineError::Snapshot(message) => snapshot(ruby, &message),
         EngineError::InvalidSnapshot(_) => raised(ruby, SNAPSHOT.get(ruby), error.to_string()),
+        EngineError::HeapLimitOverridden => {
+            Error::new(ruby.exception_arg_error(), error.to_string())
+        }
     }
 }
 

@@ -246,6 +246,10 @@ class HeapLimitSettingTest < Minitest::Test
       puts JSON.generate(outcome { MiniRacer::Platform.set_flags!("max-heap-size": 256) })
       puts JSON.generate(outcome { MiniRacer::Platform.set_flags!("no-max-semi-space-size": 1) })
       puts JSON.generate(outcome { MiniRacer::Platform.set_flags!(stack_size: "900 --max_old_space_size=8") })
+      puts JSON.generate(outcome { MiniRacer::Platform.set_flags!(max_heap_size: "-1 --max_old_space_size=256") })
+      puts JSON.generate(outcome { MiniRacer::Platform.set_flags!(max_old_space_size: " --max_heap_size=256") })
+      puts JSON.generate(outcome { MiniRacer::Platform.set_flags!(max_old_space_size: "256 --bogus --max_old_space_size=0") })
+      puts JSON.generate(outcome { MiniRacer::Platform.set_flags!(:predictable_gc_schedule) })
       puts JSON.generate(outcome { MiniRacer::Platform.set_flags!(:expose_gc, initial_heap_size: 48) })
       context = MiniRacer::Context.new
       puts JSON.generate(context.heap_stats[:heap_size_limit])
@@ -259,6 +263,10 @@ class HeapLimitSettingTest < Minitest::Test
       "ArgumentError:--max_heap_size would override the heap limit",
       "ArgumentError:--max_semi_space_size would override the heap limit",
       "ArgumentError:--max_old_space_size would override the heap limit",
+      "ArgumentError:--max_old_space_size would override the heap limit",
+      "ArgumentError:--max_heap_size would override the heap limit",
+      "ArgumentError:--max_old_space_size would override the heap limit",
+      "ArgumentError:--predictable_gc_schedule would override the heap limit",
       "ok:nil",
       64 * MIB,
       'ok:"function"',

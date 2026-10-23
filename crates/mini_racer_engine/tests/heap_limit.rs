@@ -339,9 +339,10 @@ fn a_context_without_a_limit_keeps_v8s() {
 
 const FLAG: &str = "MINI_RACER_RS_TEST_HEAP_FLAG";
 
-// Run in a process of its own per flag: the flag, then whether a heap limit
-// is refused, then the heap V8 sizes for a context with one.
-fn sized_under(flag: &str) -> (bool, f64) {
+// How a flag fares, in a process of its own: whether a heap limit is refused
+// once it is set, and the heap V8 sizes for a context given a limit anyway,
+// `None` where the context is refused because V8 sized it past the limit.
+fn sized_under(flag: &str) -> (bool, Option<f64>) {
     let output = Command::new(std::env::current_exe().expect("test binary"))
         .args(["flag_in_its_own_process", "--exact", "--nocapture"])
         .env(FLAG, flag)
@@ -354,7 +355,7 @@ fn sized_under(flag: &str) -> (bool, f64) {
         .find_map(|line| line.strip_prefix("sized "))
         .expect("a result");
     let (refused, limit) = line.split_once(' ').expect("two fields");
-    (refused == "refused", limit.parse().expect("a number"))
+    (refused == "refused", limit.parse().ok())
 }
 
 #[test]
@@ -368,7 +369,15 @@ fn flag_in_its_own_process() {
     };
     platform::push_flag(name.as_bytes(), value).expect("flag");
     let refused = platform::set_heap_limit(Some(LIMIT)).is_err();
-    let limit = heap_size_limit(&limited(LIMIT));
+    let config = ContextConfig {
+        heap_limit: Some(LIMIT),
+        ..ContextConfig::default()
+    };
+    let limit = match ContextHandle::spawn(config, &mut Parking) {
+        Ok(context) => heap_size_limit(&context).to_string(),
+        Err(EngineError::HeapLimitOverridden) => "overridden".to_owned(),
+        Err(other) => panic!("{other:?}"),
+    };
     println!(
         "sized {} {limit}",
         if refused { "refused" } else { "taken" }
@@ -376,24 +385,31 @@ fn flag_in_its_own_process() {
 }
 
 // V8 15.2's `Heap::ConfigureHeap` sizes the heap from these flags in place
-// of an isolate's own limits, in every spelling V8 reads; the others leave
-// the limit alone.
+// of an isolate's own limits, in every spelling V8 reads: a limit is refused
+// once one is set, and a context V8 sizes past its limit is refused as well,
+// whatever was made of the flags.
 #[test]
 fn flags_that_size_the_heap_override_the_limit_and_are_refused() {
     for flag in [
         "max_old_space_size=128",
         "--max-old-space-size=128",
         "no-max-old-space-size=128",
-        "max_old_space_size=8",
         "max_heap_size=256",
-        "max-heap-size=32",
         "max_semi_space_size=16",
-        "nomax_semi_space_size=1",
+        "predictable_gc_schedule",
         "stack_size=900 --max_heap_size=128",
+        "max_heap_size=-1 --max_old_space_size=256",
+        "max_old_space_size= --max_heap_size=256",
+        "max_old_space_size=256 --bogus --max_old_space_size=0",
     ] {
-        let (refused, limit) = sized_under(flag);
-        assert!(refused, "{flag}");
-        assert_ne!(limit, exactly(LIMIT), "{flag}");
+        assert_eq!(sized_under(flag), (true, None), "{flag}");
+    }
+    for (flag, sized) in [
+        ("max_old_space_size=8", 14 << 20),
+        ("max-heap-size=32", 32 << 20),
+        ("nomax_semi_space_size=1", LIMIT - (3 << 20)),
+    ] {
+        assert_eq!(sized_under(flag), (true, Some(exactly(sized))), "{flag}");
     }
     for flag in [
         "max_old_space_size=0",
@@ -404,21 +420,36 @@ fn flags_that_size_the_heap_override_the_limit_and_are_refused() {
         "max_shared_heap_size=8",
         "use_strict",
     ] {
-        let (refused, limit) = sized_under(flag);
-        assert!(!refused, "{flag}");
-        assert_eq!(limit, exactly(LIMIT), "{flag}");
+        assert_eq!(sized_under(flag), (false, Some(exactly(LIMIT))), "{flag}");
     }
-    // These imply a semi-space size and are taken: 1 MiB leaves the heap
-    // under the limit, and the 4 MiB of a flag for testing V8's collector
-    // puts it up to 6 MiB over a limit under 128 MiB.
-    for (flag, semi_spaces) in [
-        ("optimize_for_size", -1),
-        ("stress_compaction", -1),
-        ("predictable_gc_schedule", 2),
+    // These imply a semi-space of 1 MiB, which leaves the heap under the
+    // limit.
+    for flag in ["optimize_for_size", "stress_compaction"] {
+        assert_eq!(
+            sized_under(flag),
+            (false, Some(exactly(LIMIT - (3 << 20)))),
+            "{flag}"
+        );
+    }
+}
+
+// V8 rounds a semi-space up to a power of two, so a limit that is not a
+// round size can reserve a little more than itself; no flag is involved.
+#[test]
+fn limits_of_any_size_are_taken_without_flags() {
+    for limit in [
+        platform::MIN_HEAP_LIMIT,
+        33 << 20,
+        50_000_001,
+        100 << 20,
+        333 << 20,
+        1000 << 20,
+        platform::MAX_HEAP_LIMIT,
     ] {
-        let (refused, limit) = sized_under(flag);
-        assert!(!refused, "{flag}");
-        let sized = LIMIT.checked_add_signed(semi_spaces * (3 << 20));
-        assert_eq!(limit, exactly(sized.expect("a size")), "{flag}");
+        let context = limited(limit);
+        assert!(
+            heap_size_limit(&context) <= exactly(limit + limit / 10),
+            "{limit}"
+        );
     }
 }
