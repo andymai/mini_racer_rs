@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use mini_racer_sync::{DispatchId, Interrupt, lock, wait, wait_timeout};
 
 use crate::EngineError;
-use crate::control::ControlBlock;
+use crate::control::{ControlBlock, Timer};
 
 struct Entry {
     at: Instant,
@@ -88,12 +88,29 @@ pub fn schedule(
     block: &Arc<ControlBlock>,
     dispatch: DispatchId,
 ) -> Result<(), EngineError> {
+    arm(after, block, |timer, at| timer.due = Some((at, dispatch)))
+}
+
+/// Arms the timeout a nested script runs under on its own.
+pub fn schedule_nested(
+    after: Duration,
+    block: &Arc<ControlBlock>,
+    id: DispatchId,
+) -> Result<(), EngineError> {
+    arm(after, block, |timer, at| timer.nested = Some((at, id)))
+}
+
+fn arm(
+    after: Duration,
+    block: &Arc<ControlBlock>,
+    set: impl FnOnce(&mut Timer, Instant),
+) -> Result<(), EngineError> {
     let watchdog = current()?;
     let at = Instant::now()
         .checked_add(after)
         .ok_or_else(|| EngineError::Internal("timeout out of range".to_owned()))?;
     let mut timer = lock(&block.timer);
-    timer.due = Some((at, dispatch));
+    set(&mut timer, at);
     let wake = timer.queued.is_none_or(|queued| at < queued);
     if wake {
         timer.queued = Some(at);
@@ -104,6 +121,14 @@ pub fn schedule(
         watchdog.push(at, Arc::downgrade(block));
     }
     Ok(())
+}
+
+/// Whether the outermost dispatch's own timeout fires within `after` from now.
+pub fn ends_within(block: &ControlBlock, after: Duration) -> bool {
+    let Some(deadline) = Instant::now().checked_add(after) else {
+        return true;
+    };
+    lock(&block.timer).due.is_some_and(|(at, _)| at <= deadline)
 }
 
 /// Bounds work `dispatch` does after its timeout fired with the timeout again.
@@ -127,6 +152,14 @@ pub fn clear(block: &ControlBlock, dispatch: DispatchId) {
     let mut timer = lock(&block.timer);
     if timer.due.is_some_and(|(_, due)| due == dispatch) {
         timer.due = None;
+    }
+}
+
+/// Forgets a nested script's own timeout once the script is over.
+pub fn clear_nested(block: &ControlBlock, id: DispatchId) {
+    let mut timer = lock(&block.timer);
+    if timer.nested.is_some_and(|(_, due)| due == id) {
+        timer.nested = None;
     }
 }
 
@@ -166,20 +199,26 @@ fn run(watchdog: &Watchdog) {
 }
 
 fn fire(watchdog: &Watchdog, block: &Arc<ControlBlock>, now: Instant) {
-    let mut timer = lock(&block.timer);
-    timer.queued = None;
-    let due = timer.due;
-    match due {
-        Some((at, _)) if at <= now => timer.due = None,
-        Some((at, _)) => timer.queued = Some(at),
-        None => {}
+    let mut guard = lock(&block.timer);
+    let timer = &mut *guard;
+    let fired = [&mut timer.due, &mut timer.nested].map(|slot| {
+        let (at, id) = (*slot)?;
+        (at <= now).then(|| {
+            *slot = None;
+            id
+        })
+    });
+    let next = [timer.due, timer.nested]
+        .into_iter()
+        .flatten()
+        .map(|(at, _)| at)
+        .min();
+    timer.queued = next;
+    drop(guard);
+    for id in fired.into_iter().flatten() {
+        block.term.request(Interrupt::Timeout(id));
     }
-    drop(timer);
-    match due {
-        Some((at, dispatch)) if at <= now => {
-            block.term.request(Interrupt::Timeout(dispatch));
-        }
-        Some((at, _)) => watchdog.push(at, Arc::downgrade(block)),
-        None => {}
+    if let Some(at) = next {
+        watchdog.push(at, Arc::downgrade(block));
     }
 }

@@ -629,6 +629,30 @@ fn a_nested_timeout_racing_its_end_leaves_the_outer_dispatch_running() {
     });
 }
 
+// Model 20: a script's own timeout firing as a script nested in it ends on
+// its own timeout keeps the script around it terminated.
+#[test]
+fn an_outer_timeout_racing_a_nested_ones_end_keeps_the_outer_terminated() {
+    loom::model(|| {
+        let (cell, isolate) = term_cell(None);
+        let outer = cell.begin(DispatchKind::Script).expect("nothing armed");
+        let nested = cell.time_nested().expect("a dispatch is armed");
+        cell.request(Interrupt::Timeout(nested));
+        let watchdog_cell = Arc::clone(&cell);
+        let watchdog = thread::spawn(move || watchdog_cell.request(Interrupt::Timeout(outer)));
+
+        cell.untime_nested(nested);
+        watchdog.join().expect("watchdog thread");
+
+        assert!(isolate.terminating());
+        assert_eq!(
+            cell.end(outer),
+            Some(Halt::Terminated(TerminationCause::Timeout))
+        );
+        assert!(!isolate.terminating());
+    });
+}
+
 // Model 15: a timeout landing while a settled dispatch serializes its result
 // neither replaces that result nor terminates the next dispatch.
 #[test]

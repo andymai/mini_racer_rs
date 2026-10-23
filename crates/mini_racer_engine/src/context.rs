@@ -629,8 +629,10 @@ impl ContextHandle {
         result
     }
 
-    // A script nested in an untimed dispatch gets a timeout of its own: the
-    // context's, tightened by the script's.
+    // A nested script gets a timeout of its own, the context's tightened by
+    // the script's, unless the outermost script's ends it first: in an untimed
+    // dispatch always, as with `timeout:`, and in a script when its own is the
+    // shorter.
     fn nested(
         &self,
         block: &Arc<ControlBlock>,
@@ -642,13 +644,13 @@ impl ContextHandle {
             return Err(EngineError::Disposed);
         }
         let timer = match (kind, block.config.timeout_within(request.timeout())) {
-            (DispatchKind::Script, Some(timeout)) => {
+            (DispatchKind::Script, Some(timeout)) if !watchdog::ends_within(block, timeout) => {
                 block.term.time_nested().map(|id| (timeout, id))
             }
             _ => None,
         };
         if let Some((timeout, id)) = timer
-            && let Err(error) = watchdog::schedule(timeout, block, id)
+            && let Err(error) = watchdog::schedule_nested(timeout, block, id)
         {
             block.term.untime_nested(id);
             return Err(error);
@@ -665,7 +667,7 @@ impl ContextHandle {
         if let Some((_, id)) = timer
             && !wait.forked()
         {
-            watchdog::clear(block, id);
+            watchdog::clear_nested(block, id);
             block.term.untime_nested(id);
         }
         result
