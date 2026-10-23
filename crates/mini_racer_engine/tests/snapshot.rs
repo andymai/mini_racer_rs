@@ -201,6 +201,14 @@ fn offset(at: usize) -> u32 {
     u32::try_from(at).expect("an offset")
 }
 
+// A section between `start` and `end` whose recorded payload runs a byte past
+// it, with the checksum that matches.
+fn overlong(blob: &[u8], start: usize, end: usize) -> Vec<u8> {
+    resummed(blob, |b| {
+        set_word(b, start + 4, offset(end - start - 8 + 1));
+    })
+}
+
 fn assert_refused(refused: &[(Vec<u8>, InvalidSnapshot)]) {
     for (index, (bytes, invalid)) in refused.iter().enumerate() {
         assert_eq!(SnapshotBlob::check(bytes), Err(*invalid), "case {index}");
@@ -281,8 +289,8 @@ fn refuses_a_header_as_mini_racer_does() {
     ]);
 }
 
-// mini_racer's checksum; then, past it, a section V8 aborts on, which
-// mini_racer hands V8.
+// mini_racer's checksum; then, past it, a section V8 aborts on or reads past
+// the end of, whose checksum anyone can make match, which mini_racer hands V8.
 #[test]
 fn refuses_a_damaged_blob_as_mini_racer_does_and_one_v8_aborts_on() {
     let Layout {
@@ -317,6 +325,19 @@ fn refuses_a_damaged_blob_as_mini_racer_does_and_one_v8_aborts_on() {
             InvalidSnapshot::ReadOnly,
         ),
         (
+            overlong(&blob, startup, read_only),
+            InvalidSnapshot::Startup,
+        ),
+        (
+            overlong(&blob, read_only, shared_heap),
+            InvalidSnapshot::ReadOnly,
+        ),
+        (
+            overlong(&blob, shared_heap, word(&blob, 88)),
+            InvalidSnapshot::SharedHeap,
+        ),
+        (overlong(&blob, last, len), InvalidSnapshot::Context),
+        (
             resummed(&blob, |b| b[shared_heap] ^= 1),
             InvalidSnapshot::SharedHeap,
         ),
@@ -328,19 +349,23 @@ fn refuses_a_damaged_blob_as_mini_racer_does_and_one_v8_aborts_on() {
     assert_refused(&refused);
 }
 
-// Once its checksum matches, what a section holds is V8's to read, as it is in
-// mini_racer: bytes past its end, a payload length V8 reads past, a damaged
-// byte. Either checksum mini_racer accepts will do.
+// Once its checksum matches, what a section holds within its bounds is V8's
+// to read, as it is in mini_racer: bytes past the last section's payload, a
+// payload length up to the section's end, a damaged byte. Either checksum
+// mini_racer accepts will do.
 #[test]
 fn leaves_what_a_section_holds_to_v8_once_its_checksum_matches() {
     let blob = snapshot("var a = 41", None).expect("snapshot");
     let longer = resummed(&blob, |b| b.extend_from_slice(b"\n"));
     assert_eq!(eval_in(&longer, "a + 1"), 42);
-    let startup = (88 + 4 * word(&blob, 0)).next_multiple_of(8);
-    let overlong = resummed(&blob, |b| {
-        set_word(b, startup + 4, i32::MAX.cast_unsigned());
+    let last = word(&blob, 88 + 4 * (word(&blob, 0) - 1));
+    let filled = resummed(&blob, |b| {
+        b.extend_from_slice(&[0; 16]);
+        let room = offset(b.len() - last - 8);
+        set_word(b, last + 4, room);
     });
-    assert_eq!(eval_in(&overlong, "a + 1"), 42);
+    assert_eq!(SnapshotBlob::check(&filled), Ok(()));
+    assert_eq!(eval_in(&filled, "a + 1"), 42);
     let read_only = word(&blob, 80);
     let damaged = resummed(&blob, |b| b[read_only + 4096] ^= 1);
     assert_eq!(SnapshotBlob::check(&damaged), Ok(()));

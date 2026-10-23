@@ -54,12 +54,41 @@ class SnapshotBlobTest < Minitest::Test
     assert_equal "snapshot context section is invalid", error.message
   end
 
-  # V8 reads each section by the length it records, as mini_racer's does, once
-  # the checksum matches.
-  def test_a_blob_whose_checksum_matches_loads_with_bytes_after_its_last_section
-    snapshot = MiniRacer::Snapshot.load(resummed("#{blob}\n"))
+  # Each section starts at an offset in the header, the startup section at
+  # the first 8-byte boundary after it, and ends where the next one starts.
+  def sections(bytes)
+    contexts = word(bytes, 0)
+    starts = [(88 + (4 * contexts) + 7) & ~7, word(bytes, 80), word(bytes, 84)]
+    starts += Array.new(contexts) { |index| word(bytes, 88 + (4 * index)) }
+    starts.zip(starts.drop(1) + [bytes.bytesize])
+  end
 
-    assert_equal 1, MiniRacer::Context.new(snapshot: snapshot).eval("a")
+  def with_payload(bytes, section, length) = resummed(bytes.dup.tap { |b| b[section + 4, 4] = [length].pack("V") })
+
+  # Deviation behavior:invalid-snapshot@ruby: mini_racer 0.22.2 hands V8 a
+  # blob whose checksum matches, and V8 reads a section's payload for as long
+  # as the section's header says, past the section's end.
+  def test_load_refuses_a_section_whose_payload_runs_past_it
+    good = blob
+    kinds = %w[startup read-only shared-heap context]
+    sections(good).each_with_index do |(start, finish), index|
+      overlong = with_payload(good, start, finish - start - 8 + 1)
+
+      error = assert_raises(MiniRacer::SnapshotError) { MiniRacer::Snapshot.load(overlong) }
+      assert_equal "snapshot #{kinds.fetch(index, "context")} section is invalid", error.message
+    end
+  end
+
+  # V8 reads each section by the length it records, as mini_racer's does, once
+  # the checksum matches, up to the section's end.
+  def test_a_blob_whose_checksum_matches_loads_with_bytes_after_its_last_section
+    padded = resummed("#{blob}#{"\0" * 16}")
+    last, finish = sections(padded).last
+    filled = with_payload(padded, last, finish - last - 8)
+
+    [padded, filled].each do |bytes|
+      assert_equal 1, MiniRacer::Context.new(snapshot: MiniRacer::Snapshot.load(bytes)).eval("a")
+    end
   end
 
   # mini_racer warms an empty snapshot up from V8's own, and keeps none of the

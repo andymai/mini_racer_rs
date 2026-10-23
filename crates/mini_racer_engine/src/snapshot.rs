@@ -27,6 +27,7 @@ const SHARED_HEAP: usize = 84;
 const FIRST_CONTEXT: usize = 88;
 const WORD: usize = 4;
 const ALIGNMENT: usize = 8;
+const SECTION_HEADER: usize = 8;
 // V8's magic number is 0xC0DE0000 exclusive-ored with a table size under 2^16,
 // so this is its top half.
 const MAGIC_HIGH: usize = 0xC0DE;
@@ -88,8 +89,9 @@ impl SnapshotBlob {
     /// Refuses a blob as `mini_racer` does, in its order: one too long for
     /// V8, too short for its header, another V8's, one whose header or section
     /// offsets do not fit it, or whose checksum does not match. Then, past
-    /// those, a blob with a section V8 aborts the process on, which
-    /// `mini_racer` hands V8.
+    /// those, a blob with a section V8 aborts the process on or reads past
+    /// the end of, which `mini_racer` hands V8: anyone can write a checksum
+    /// that matches.
     pub fn check(bytes: &[u8]) -> Result<(), InvalidSnapshot> {
         if bytes.is_empty() {
             return Ok(());
@@ -108,7 +110,7 @@ impl SnapshotBlob {
         if !checksum_matches(bytes) {
             return Err(InvalidSnapshot::Checksum);
         }
-        sections_open(bytes, &ends)
+        sections_fit(bytes, &ends)
     }
 
     #[must_use]
@@ -213,27 +215,33 @@ fn checksum(bytes: &[u8], modulus: u64) -> u64 {
 }
 
 // V8 aborts on a section that does not open with its magic number, which every
-// section shares, or whose payload's length does not fit a C int. `ends` starts
-// at the startup section, so each section starts at one of its offsets but the
-// last, in the order of mini_racer's messages.
-fn sections_open(bytes: &[u8], ends: &[usize]) -> Result<(), InvalidSnapshot> {
+// section shares, and reads a section's payload for as long as its header says
+// without a check. `ends` starts at the startup section, so each pair of
+// neighbors bounds a section, in the order of mini_racer's messages.
+fn sections_fit(bytes: &[u8], ends: &[usize]) -> Result<(), InvalidSnapshot> {
     let magic = ends
         .first()
         .and_then(|start| word(bytes, *start))
         .filter(|magic| magic >> 16 == MAGIC_HIGH)
         .ok_or(InvalidSnapshot::Startup)?;
-    let starts = ends.split_last().map_or(&[][..], |(_, starts)| starts);
-    for (index, start) in starts.iter().enumerate() {
-        let payload = start.checked_add(WORD).and_then(|at| word(bytes, at));
-        if word(bytes, *start) != Some(magic)
-            || payload.is_none_or(|payload| i32::try_from(payload).is_err())
-        {
-            return Err(match index {
-                0 => InvalidSnapshot::Startup,
-                1 => InvalidSnapshot::ReadOnly,
-                2 => InvalidSnapshot::SharedHeap,
-                _ => InvalidSnapshot::Context,
-            });
+    for (index, bounds) in ends.windows(2).enumerate() {
+        let refused = match index {
+            0 => InvalidSnapshot::Startup,
+            1 => InvalidSnapshot::ReadOnly,
+            2 => InvalidSnapshot::SharedHeap,
+            _ => InvalidSnapshot::Context,
+        };
+        let section = bounds
+            .first()
+            .zip(bounds.get(1))
+            .and_then(|(start, end)| bytes.get(*start..*end))
+            .ok_or(refused)?;
+        let fits = word(section, 0) == Some(magic)
+            && word(section, WORD)
+                .zip(section.len().checked_sub(SECTION_HEADER))
+                .is_some_and(|(payload, room)| payload <= room);
+        if !fits {
+            return Err(refused);
         }
     }
     Ok(())
