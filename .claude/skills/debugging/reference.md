@@ -37,7 +37,7 @@ To narrow a `bounded` model, lower its preemption bound locally until it passes;
 
 ## Fuzz crashes
 
-`scripts/fuzz-smoke.sh <seconds>` runs each target in `crates/mini_racer_wire/fuzz/fuzz_targets/` (`decode_arbitrary`, `text_roundtrip`) for that long on the pinned nightly, with AddressSanitizer on, and stops at the first crash. libFuzzer saves the input under `crates/mini_racer_wire/fuzz/artifacts/<target>/` (`crash-<hash>`, or `leak-`, `timeout-`, `oom-`). CI's Fuzz Smoke job and the nightly Fuzz job upload that directory on failure: `gh run download <run-id> -n fuzz-artifacts`.
+`scripts/fuzz-smoke.sh <seconds>` runs each target in `crates/mini_racer_wire/fuzz/fuzz_targets/` (`decode_arbitrary`, `text_roundtrip`, `sourcemap`) for that long on the pinned nightly, with AddressSanitizer on, and stops at the first crash. libFuzzer saves the input under `crates/mini_racer_wire/fuzz/artifacts/<target>/` (`crash-<hash>`, or `leak-`, `timeout-`, `oom-`). CI's Fuzz Smoke job and the nightly Fuzz job upload that directory on failure: `gh run download <run-id> -n fuzz-artifacts`.
 
 ```bash
 toolchain=$(taplo get -f tools/versions.toml toolchains.fuzz)
