@@ -525,6 +525,29 @@ fn a_late_timeout_never_terminates_the_next_dispatch() {
     });
 }
 
+// Model 20: an exhausted heap that V8's near-heap-limit callback requests as
+// its dispatch ends is reported by that dispatch or dropped, and leaves no
+// termination behind for the next, which begins once the callback has
+// returned, as it does when V8 calls the callback on the runner.
+#[test]
+fn an_exhausted_heap_ends_with_its_dispatch() {
+    loom::model(|| {
+        let (cell, isolate) = term_cell(None);
+        let first = cell.begin(DispatchKind::Script).expect("nothing armed");
+        let callback_cell = Arc::clone(&cell);
+        let callback = thread::spawn(move || callback_cell.request(Interrupt::HeapExhausted));
+
+        let halt = cell.end(first);
+        let recorded = callback.join().expect("callback thread");
+        let next = run(&cell, DispatchKind::Script);
+
+        let exhausted = Some(Halt::Terminated(TerminationCause::HeapExhausted));
+        assert_eq!(halt == exhausted, recorded);
+        assert_eq!(next, None);
+        assert!(!isolate.terminating());
+    });
+}
+
 // Model 9: a stop is reported by exactly one script, whenever it lands, and
 // maintenance never consumes it.
 #[test]

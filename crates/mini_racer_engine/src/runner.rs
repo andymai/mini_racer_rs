@@ -9,13 +9,13 @@ use std::time::{Duration, Instant};
 
 use mini_racer_sourcemap::{Frame, Match, Placement, SourceMap};
 use mini_racer_sync::{
-    DispatchId, DispatchKind, Halt, Interrupt, Phase, Side, TerminationCause, ToV8, lock,
+    DispatchId, DispatchKind, Halt, Interrupt, Phase, Side, TermCell, TerminationCause, ToV8, lock,
 };
 use mini_racer_wire::Writer;
 use v8::ValueDeserializerHelper;
 
 use crate::control::{
-    CallRequest, CallbackReply, ControlBlock, Depth, IsolateTerminator, JsText, Request,
+    CallRequest, CallbackReply, ControlBlock, Depth, HeapWatch, IsolateTerminator, JsText, Request,
 };
 use crate::fast_calls::{self, Hoisted, Shape};
 use crate::process::code_cache::{Building, Key, Plan};
@@ -274,7 +274,12 @@ pub fn run(block: &Arc<ControlBlock>, generation: &'static Generation, start: St
         Start::Adopted => {
             let isolate = lock(&block.custody).take();
             isolate.map_or_else(
-                || refuse(block, "no isolate to take over"),
+                || {
+                    refuse(
+                        block,
+                        EngineError::Internal("no isolate to take over".to_owned()),
+                    )
+                },
                 |isolate| adopt(block, generation, isolate),
             )
         }
@@ -311,6 +316,116 @@ pub fn check_heap(isolate: &mut v8::Isolate) {
     }
 }
 
+const EXHAUSTED: Option<Halt> = Some(Halt::Terminated(TerminationCause::HeapExhausted));
+
+// A hit lends V8 room up to three times the old generation's limit, all at
+// once: V8 asks at most a few times per allocation, around its last-resort
+// collection, then retries the allocation once and aborts, so room lent a
+// share at a time ran out under one allocation, such as the backing store a
+// growing `Map` doubles into. Past that V8 aborts the process as it would
+// without a limit.
+const CEILING: usize = 3;
+
+// V8 is about to abort the process at the heap limit: the running script is
+// ended as out of memory, and V8 is lent room to unwind it. With no dispatch
+// armed, which the termination cell checks, or the runner collecting on its
+// own, no script is running, and `recover` settles the heap once the runner
+// is done.
+pub fn near_heap_limit(block: &ControlBlock, current: usize, initial: usize) -> usize {
+    let watch = &block.heap;
+    watch.old_generation.store(initial, Ordering::Relaxed);
+    watch.hit.store(true, Ordering::Relaxed);
+    if !watch.collecting.load(Ordering::Relaxed) {
+        block.term.request(Interrupt::HeapExhausted);
+    }
+    initial.saturating_mul(CEILING).max(current)
+}
+
+// After a hit, a full collection, then the old generation's limit back to the
+// one the heap limit set if the live heap fits under it. V8 puts a limit back
+// no lower than the live size and a quarter, so a heap that does not fit, or
+// a limit V8 did not put back, poisons the context instead of leaving it
+// above the heap limit. A script terminated with the heap that full gets the
+// collection too: V8 otherwise calls the callback in the next script, which
+// would end it though its own heap is small.
+fn recover(isolate: &mut v8::Isolate, block: &ControlBlock) {
+    if block.config.heap_limit.is_none() {
+        return;
+    }
+    let watch = &block.heap;
+    let ended = watch.ended.swap(false, Ordering::Relaxed);
+    if block.term.is_disposing() || watch.poisoned.load(Ordering::Relaxed) {
+        watch.hit.store(false, Ordering::Relaxed);
+        return;
+    }
+    let crowded = ended && !fits(isolate, watch);
+    if !crowded && !watch.hit.load(Ordering::Relaxed) {
+        return;
+    }
+    collect(isolate, block);
+    if !watch.hit.swap(false, Ordering::Relaxed) {
+        return;
+    }
+    let fits = fits(isolate, watch);
+    if fits {
+        let limit = watch.old_generation.load(Ordering::Relaxed);
+        sys::unwatch_heap_limit(isolate, limit);
+        sys::watch_heap_limit(isolate, block);
+    }
+    let reserved = isolate.get_heap_statistics().heap_size_limit();
+    if !fits || reserved > watch.reserved.load(Ordering::Relaxed) {
+        watch.poisoned.store(true, Ordering::Relaxed);
+    }
+}
+
+// The generations of a heap of `limit` bytes, with the old one's size.
+// `heap_limits` splits the limit, but V8 15.2's `Heap::ConfigureHeap` rounds
+// a third of the young generation, a semi-space, up to a power of two, which
+// can reserve a tenth more than the limit; rounded down here instead, the
+// heap V8 reserves is the limit, less its rounding of the old generation
+// down to a page. `heap_limits` also sets a code range of the limit's size,
+// which V8 aborts on unless it is a multiple of the allocation page, so the
+// code range is left at V8's own size, as for a context without a limit.
+fn sized(params: v8::CreateParams, limit: usize) -> (v8::CreateParams, usize) {
+    let params = params.heap_limits(0, limit);
+    let semi_space = (params.max_young_generation_size_in_bytes() / 3)
+        .checked_ilog2()
+        .map_or(0, |log| 1_usize << log);
+    let young_generation = semi_space.saturating_mul(3);
+    let old_generation = limit.saturating_sub(young_generation);
+    let params = params
+        .set_max_young_generation_size_in_bytes(young_generation)
+        .set_max_old_generation_size_in_bytes(old_generation)
+        .set_code_range_size_in_bytes(0);
+    (params, old_generation)
+}
+
+// Whether V8 would put the old generation's limit back where it started: no
+// lower than the live heap and a quarter.
+fn fits(isolate: &mut v8::Isolate, watch: &HeapWatch) -> bool {
+    let used = isolate.get_heap_statistics().used_heap_size();
+    used.saturating_add(used / 4) <= watch.old_generation.load(Ordering::Relaxed)
+}
+
+// A full collection the runner asks for itself, with no script to end if the
+// heap is at its limit.
+fn collect(isolate: &mut v8::Isolate, block: &ControlBlock) {
+    block.heap.collecting.store(true, Ordering::Relaxed);
+    isolate.low_memory_notification();
+    block.heap.collecting.store(false, Ordering::Relaxed);
+}
+
+// A context whose heap stayed over its limit runs no more JavaScript.
+fn unpoisoned(runtime: &Runtime) -> Result<(), EngineError> {
+    let block = &runtime.block;
+    match block.config.heap_limit {
+        Some(limit) if block.heap.poisoned.load(Ordering::Relaxed) => {
+            Err(EngineError::from(JsError::heap_limit_exceeded(limit)))
+        }
+        _ => Ok(()),
+    }
+}
+
 pub fn park_for_fork(isolate: &v8::Isolate) {
     if let Some(runtime) = isolate.get_slot::<Arc<Runtime>>() {
         let _paused = runtime.timing(false);
@@ -318,13 +433,11 @@ pub fn park_for_fork(isolate: &v8::Isolate) {
     }
 }
 
-fn refuse(block: &ControlBlock, message: &str) -> bool {
+fn refuse(block: &ControlBlock, error: EngineError) -> bool {
     // Holding no isolate, it never keeps a fork waiting.
     block.phase.set(Phase::Deposited);
     if receive(block).is_some() {
-        let _ = block
-            .channel
-            .respond(Err(EngineError::Internal(message.to_owned())));
+        let _ = block.channel.respond(Err(error));
     }
     false
 }
@@ -341,21 +454,49 @@ fn serve(block: &Arc<ControlBlock>, generation: &'static Generation) -> bool {
         Some(blob) => params.snapshot_blob(sys::startup_data(blob)),
         None => params,
     };
+    let params = match block.config.heap_limit {
+        Some(limit) => {
+            let (params, old_generation) = sized(params, limit);
+            block
+                .heap
+                .old_generation
+                .store(old_generation, Ordering::Relaxed);
+            params
+        }
+        None => params,
+    };
     let mut isolate = v8::Isolate::new(params);
     isolate.set_slot(Collections::new(block));
     sys::count_collections(&mut isolate);
     if block.config.max_memory.is_some() {
         sys::watch_heap(&mut isolate);
     }
+    let reserved = block
+        .config
+        .heap_limit
+        .map(|_| isolate.get_heap_statistics().heap_size_limit());
+    if let Some(reserved) = reserved {
+        block.heap.reserved.store(reserved, Ordering::Relaxed);
+        sys::watch_heap_limit(&mut isolate, block);
+    }
     let key = sys::isolate_key(&isolate);
     generation.tasks().register(key, &block.tasks);
+    // V8 reads its own flags, so this catches any that sized the heap past
+    // the limit, whatever `platform::read_sizing` made of them.
+    if reserved > block.config.heap_limit {
+        retire(block, generation, key, isolate);
+        return refuse(block, EngineError::HeapLimitOverridden);
+    }
     let contexts = {
         v8::scope!(let scope, &mut isolate);
         serialize::contexts(scope, from_snapshot)
     };
     let Some(contexts) = contexts else {
         retire(block, generation, key, isolate);
-        return refuse(block, "context setup failed");
+        return refuse(
+            block,
+            EngineError::Internal("context setup failed".to_owned()),
+        );
     };
     let runtime = Arc::new(Runtime::new(
         block,
@@ -372,7 +513,10 @@ fn serve(block: &Arc<ControlBlock>, generation: &'static Generation) -> bool {
         Ok(shared) => shared,
         Err(refused) => {
             retire(block, generation, key, refused);
-            return refuse(block, "isolate could not be shared");
+            return refuse(
+                block,
+                EngineError::Internal("isolate could not be shared".to_owned()),
+            );
         }
     };
     let _ = block.isolate.set(shared.thread_safe_handle());
@@ -392,7 +536,10 @@ fn adopt(
         // Disposed here, before the runner counts as idle to a fork.
         drop(block.tasks.close());
         drop(shared);
-        return refuse(block, "inherited isolate has no context");
+        return refuse(
+            block,
+            EngineError::Internal("inherited isolate has no context".to_owned()),
+        );
     };
     let runtime = {
         let mut locker = shared.lock();
@@ -407,6 +554,13 @@ fn adopt(
         // A child only try-locks what it inherited.
         if let Ok(matched) = inherited.matched.try_lock() {
             lock(&runtime.matched).clone_from(&matched);
+        }
+        // V8's callback still names the parent's block, whose termination
+        // cell no runner here serves.
+        if block.config.heap_limit.is_some() {
+            block.heap.inherit(&inherited.block.heap);
+            sys::unwatch_heap_limit(&mut locker, 0);
+            sys::watch_heap_limit(&mut locker, block);
         }
         locker.set_slot(Arc::clone(&runtime));
         // The parent's callbacks stay registered and now count here.
@@ -475,7 +629,8 @@ fn serve_held(block: &ControlBlock, shared: &v8::SharedIsolate, runtime: &Arc<Ru
             // A collection for a context about to be torn down is wasted.
             Received::Idle => {
                 if !block.term.is_disposing() {
-                    isolate.low_memory_notification();
+                    collect(&mut isolate, block);
+                    recover(&mut isolate, block);
                     sys::release_free_memory();
                 }
                 collected = true;
@@ -547,7 +702,7 @@ fn serve_one(
                     block
                         .term
                         .end(dispatch)
-                        .map_or(built, |halt| Err(halted(halt)))
+                        .map_or(built, |halt| Err(halted(block, halt)))
                 }
                 Depth::Nested => Err(EngineError::Internal(
                     "snapshot inside a callback".to_owned(),
@@ -570,6 +725,7 @@ fn serve_one(
     };
     // Before the response, so a fork that follows finds this runner idle.
     cache_uncached(isolate, runtime);
+    recover(isolate, block);
     let served = respond(block, response);
     // After the response, so the caller does not wait for it.
     if matches!(served, Served::Next) && runtime.freed.swap(false, Ordering::Relaxed) {
@@ -675,6 +831,7 @@ fn handle(
         } => {
             let timed = Timed::Script(runtime.block.config.timeout_within(timeout));
             script(scope, runtime, depth, timed, |tc| {
+                unpoisoned(runtime)?;
                 evaluate(tc, runtime, (&filename, &source), (depth, awaited))
             })
         }
@@ -686,6 +843,7 @@ fn handle(
         } => {
             let timed = Timed::Script(runtime.block.config.timeout_within(timeout));
             script(scope, runtime, depth, timed, |tc| {
+                unpoisoned(runtime)?;
                 invoke(tc, runtime, &request, (depth, awaited))
             })
         }
@@ -697,7 +855,7 @@ fn handle(
         // A collection for a context about to be torn down is wasted.
         Request::LowMemoryNotification { depth } => {
             if !runtime.block.term.is_disposing() {
-                scope.low_memory_notification();
+                collect(scope, &runtime.block);
                 runtime.freed.store(true, Ordering::Relaxed);
             }
             match depth {
@@ -709,7 +867,18 @@ fn handle(
         // it, or for the next script.
         Request::MicrotaskCheckpoint { depth } => {
             script(scope, runtime, depth, Timed::Maintenance, |tc| {
+                unpoisoned(runtime)?;
                 tc.perform_microtask_checkpoint();
+                // Maintenance reports no cause, and an exhausted heap leaves
+                // none for the next script, so the checkpoint raises it.
+                if tc.has_terminated()
+                    && runtime.block.term.check(DispatchKind::Script) == EXHAUSTED
+                {
+                    return Err(halted(
+                        &runtime.block,
+                        Halt::Terminated(TerminationCause::HeapExhausted),
+                    ));
+                }
                 Ok(Vec::new())
             })
         }
@@ -718,10 +887,15 @@ fn handle(
         }),
         Request::HeapSnapshot { depth } => {
             script(scope, runtime, depth, Timed::Maintenance, |tc| {
-                Ok(heap_snapshot(tc))
+                let heap = &runtime.block.heap;
+                heap.collecting.store(true, Ordering::Relaxed);
+                let json = heap_snapshot(tc);
+                heap.collecting.store(false, Ordering::Relaxed);
+                Ok(json)
             })
         }
         Request::PumpMessageLoop { depth } => script(scope, runtime, depth, Timed::Pump, |tc| {
+            unpoisoned(runtime)?;
             Ok(vec![u8::from(pump(tc, runtime))])
         }),
         // The extension refuses a dispose from inside a callback before it
@@ -742,9 +916,12 @@ fn ended(runtime: &Runtime, dispatch: DispatchId) -> Result<Vec<u8>, EngineError
     }
 }
 
-fn halted(halt: Halt) -> EngineError {
+fn halted(block: &ControlBlock, halt: Halt) -> EngineError {
     match halt {
-        Halt::Terminated(cause) => EngineError::from(JsError::terminated(cause)),
+        Halt::Terminated(cause) => EngineError::from(match (cause, block.config.heap_limit) {
+            (TerminationCause::HeapExhausted, Some(limit)) => JsError::heap_limit_reached(limit),
+            _ => JsError::terminated(cause),
+        }),
         // mini_racer cancels the wait of a dispatch a dispose catches in
         // flight, which raises its disposed error.
         Halt::Disposed => EngineError::Disposed,
@@ -776,6 +953,9 @@ fn script(
     } else {
         run(tc)
     };
+    if tc.has_terminated() && runtime.block.config.heap_limit.is_some() {
+        runtime.block.heap.ended.store(true, Ordering::Relaxed);
+    }
     let since = term.mark();
     // mini_racer's maintenance never cancels a termination it meets, so the
     // interrupt is used up while the cause waits for the next script. Inside
@@ -802,13 +982,22 @@ fn script(
         // the timeout bounds them again here.
         Depth::Outermost(dispatch) if kind == DispatchKind::Script && tc.has_terminated() => {
             let verdict = term.settle(dispatch);
-            let drains = verdict.is_some_and(|halt| halt != Halt::Disposed)
+            let exhausted = verdict == EXHAUSTED;
+            if exhausted {
+                discard_microtasks(tc, term);
+            }
+            let drains = !exhausted
+                && verdict.is_some_and(|halt| halt != Halt::Disposed)
                 && rearm_timeout(runtime, dispatch, timed).is_ok();
             if drains {
                 tc.reset();
                 tc.perform_microtask_checkpoint();
             }
-            if drains && (tc.has_terminated() || tc.is_execution_terminating()) {
+            // The microtasks it left reached the heap limit, which outranks
+            // every other cause: this script reports it, and nothing carries.
+            if drains && term.check(DispatchKind::Script) == EXHAUSTED {
+                term.end(dispatch)
+            } else if drains && (tc.has_terminated() || tc.is_execution_terminating()) {
                 term.spend(term.mark(), false);
                 match term.finish(dispatch) {
                     Some(Halt::Disposed) => Some(Halt::Disposed),
@@ -843,7 +1032,18 @@ fn script(
             message: String::new(),
         }));
     }
-    halt.map_or(result, |halt| Err(halted(halt)))
+    halt.map_or(result, |halt| Err(halted(&runtime.block, halt)))
+}
+
+// The microtasks a script left as it reached the heap limit would allocate
+// again. V8 empties the queue when a termination reaches it there, so they
+// are dropped rather than run, now or with the next script.
+fn discard_microtasks(tc: &mut Tc<'_, '_, '_, '_>, term: &TermCell<IsolateTerminator>) {
+    tc.reset();
+    term.interrupt();
+    tc.perform_microtask_checkpoint();
+    term.release();
+    tc.reset();
 }
 
 // A dispatch's kind, and for a script the timeout it runs under.
@@ -1336,7 +1536,7 @@ fn verdict(runtime: &Runtime, depth: Depth) -> Result<(), EngineError> {
         Depth::Outermost(dispatch) => term.settle(dispatch),
         Depth::Nested => term.check(DispatchKind::Script),
     };
-    halt.map_or(Ok(()), |halt| Err(halted(halt)))
+    halt.map_or(Ok(()), |halt| Err(halted(&runtime.block, halt)))
 }
 
 // V8 runs no microtask checkpoint inside another, so an await nested in a
@@ -1359,7 +1559,7 @@ fn refuse_nested_await(
     if matches!(halt, Some(Halt::Terminated(_))) {
         runtime.block.term.renew();
     }
-    let halt = halt.map(halted);
+    let halt = halt.map(|halt| halted(&runtime.block, halt));
     Err(match (halt, refused) {
         (Some(EngineError::Js(halt)), EngineError::Js(refused)) => EngineError::from(JsError {
             kind: halt.kind,

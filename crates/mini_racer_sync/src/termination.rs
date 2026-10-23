@@ -38,12 +38,10 @@ struct CauseSet(u8);
 
 impl CauseSet {
     // The causes that outlive the dispatch they arrived in, as upstream's
-    // non-watchdog termination bit does.
-    const PENDING: Self = Self(
-        TerminationCause::Stop.bit()
-            | TerminationCause::MaxMemory.bit()
-            | TerminationCause::HeapExhausted.bit(),
-    );
+    // non-watchdog termination bit does. An exhausted heap has no counterpart
+    // there and ends with its dispatch: the runner settles the heap once the
+    // dispatch is done, so a later script has nothing of it to report.
+    const PENDING: Self = Self(TerminationCause::Stop.bit() | TerminationCause::MaxMemory.bit());
 
     // The causes upstream records in its request flag beside the one-shot
     // interrupt, which V8 can use up while the flag stays.
@@ -127,7 +125,8 @@ impl DispatchKind {
 }
 
 /// A request to terminate. Timeouts and cancellations name the dispatch they
-/// belong to and are dropped if it has already ended.
+/// belong to and are dropped if it has already ended; an exhausted heap is
+/// dropped when none is armed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Interrupt {
     Stop,
@@ -364,7 +363,8 @@ impl<T: Terminator> TermCell<T> {
     }
 
     /// Records `interrupt` and terminates the armed dispatch. Returns false
-    /// when the interrupt names a dispatch that is no longer armed.
+    /// when the interrupt names a dispatch that is no longer armed, or is an
+    /// exhausted heap with none armed, which has no script to end.
     pub fn request(&self, interrupt: Interrupt) -> bool {
         let mut state = lock(&self.state);
         if let Some(id) = interrupt.dispatch() {
@@ -380,6 +380,9 @@ impl<T: Terminator> TermCell<T> {
             } else {
                 return false;
             }
+        }
+        if interrupt == Interrupt::HeapExhausted && state.armed.is_none() {
+            return false;
         }
         state.causes = state.causes.with(interrupt.cause());
         state.spent = false;
@@ -608,9 +611,9 @@ impl<T: Terminator> TermCell<T> {
 
     /// Disarms `id` once its reply is complete. After `settle`, a cause that
     /// landed while the result serialized, without stopping it, leaves the
-    /// result alone: a timeout or cancel is dropped, and a stop or memory
-    /// cause waits for the next script, as `mini_racer` leaves them. A dispatch
-    /// that was never settled ends as `end` ends it.
+    /// result alone: a timeout, cancel or exhausted heap is dropped, and a
+    /// stop or `max_memory` cause waits for the next script, as `mini_racer`
+    /// leaves them. A dispatch that was never settled ends as `end` ends it.
     pub fn finish(&self, id: DispatchId) -> Option<Halt> {
         lock(&self.state).finish(id)
     }
@@ -668,6 +671,40 @@ mod tests {
     }
 
     const STOPPED: Option<Halt> = Some(Halt::Terminated(TerminationCause::Stop));
+    const EXHAUSTED: Option<Halt> = Some(Halt::Terminated(TerminationCause::HeapExhausted));
+
+    // Whatever kind of dispatch the heap filled up in, and however it ended,
+    // the next script runs; with none armed, it is not recorded at all.
+    #[test]
+    fn an_exhausted_heap_ends_with_its_dispatch() {
+        let (cell, calls) = cell();
+        assert!(!cell.request(Interrupt::HeapExhausted));
+        assert_eq!(calls.terminate.get(), 0);
+        assert_eq!(run(&cell, DispatchKind::Script), None);
+        let id = cell
+            .begin(DispatchKind::Maintenance)
+            .expect("nothing armed");
+        cell.request(Interrupt::HeapExhausted);
+        assert_eq!(calls.terminate.get(), 1);
+        assert_eq!(cell.check(DispatchKind::Script), EXHAUSTED);
+        assert_eq!(cell.end(id), None);
+        assert!(!cell.refuses(DispatchKind::Script));
+        assert_eq!(run(&cell, DispatchKind::Script), None);
+
+        let id = cell.begin(DispatchKind::Script).expect("nothing armed");
+        assert_eq!(cell.settle(id), None);
+        cell.request(Interrupt::HeapExhausted);
+        assert_eq!(cell.finish(id), None);
+        assert_eq!(run(&cell, DispatchKind::Script), None);
+
+        let id = cell.begin(DispatchKind::Script).expect("nothing armed");
+        cell.request(Interrupt::Stop);
+        assert_eq!(cell.settle(id), STOPPED);
+        cell.request(Interrupt::HeapExhausted);
+        assert_eq!(cell.check(DispatchKind::Script), EXHAUSTED);
+        assert_eq!(cell.end(id), EXHAUSTED);
+        assert_eq!(run(&cell, DispatchKind::Script), None);
+    }
 
     #[test]
     fn a_stop_while_idle_is_reported_by_the_next_script_only() {
@@ -1129,10 +1166,10 @@ mod tests {
     fn a_dispose_or_an_exhausted_heap_is_never_lifted() {
         let (exhausted, calls) = cell();
         exhausted.request(Interrupt::Stop);
-        exhausted.request(Interrupt::HeapExhausted);
         let outer = exhausted
             .begin(DispatchKind::Script)
             .expect("nothing armed");
+        exhausted.request(Interrupt::HeapExhausted);
         assert!(!exhausted.spend(exhausted.mark(), true));
         assert!(exhausted.refuses(DispatchKind::Script));
         assert_eq!(calls.cancel.get(), 0);
@@ -1300,9 +1337,9 @@ mod tests {
             Some(Halt::Terminated(TerminationCause::MaxMemory))
         );
 
-        cell.request(Interrupt::HeapExhausted);
+        assert!(!cell.request(Interrupt::HeapExhausted));
         cell.relocked();
-        assert!(cell.refuses(DispatchKind::Script));
+        assert!(!cell.refuses(DispatchKind::Script));
     }
 
     // mini_racer's restore_termination: a nested script that reports a stop

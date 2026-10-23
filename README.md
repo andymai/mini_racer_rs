@@ -104,6 +104,7 @@ ExecJS.eval("[1, 2].map(x => x * 2)")         # => [2, 4]
 | `MiniRacerRs.register_source_map(bundle, map)` | Registers a source map for a bundle, so `MiniRacer::RuntimeError` backtraces show its original files and positions. CRuby only. |
 | `MiniRacerRs.counters(context)` | Returns per-context activity counters without dispatching or taking the context lock, including while a script runs and after disposal. CRuby only. |
 | `MiniRacerRs.timeout(milliseconds) { }` | Gives each JavaScript call started in the block a time budget, including calls made by ExecJS and react-rails. CRuby only. |
+| `MiniRacerRs.heap_limit = bytes` | Sets a process-wide V8 heap limit for contexts created afterward, allowing heap exhaustion to raise `MiniRacerRs::HeapLimitError` instead of fatally ending the process. CRuby only. |
 
 `Context.new` accepts these options:
 
@@ -132,6 +133,19 @@ MiniRacerRs.timeout(5_000) { context.eval(bundle) }
 ```
 
 The method returns the block's value. Fibers, threads, enumerators, and Async tasks started inside the block inherit its timeout while the block remains open. The effective budget is the smallest of every open scope and the context's own `timeout:`. A scope never loosens that context limit. A tighter scope inside an attached callback can terminate its nested script at any depth while the outer script continues. An overrun raises `MiniRacer::ScriptTerminatedError`, and leftover microtasks receive the same bound. The context remains usable. `milliseconds` is validated like `timeout:`. Passing `0` adds no bound, and omitting the block raises `LocalJumpError`. CRuby only.
+
+**Heap limits.** Set `MiniRacerRs.heap_limit` to make V8 heap exhaustion raise into Ruby. Without it, reaching V8's own limit fatally ends the process and takes every in-flight request with it.
+
+```ruby
+MiniRacerRs.heap_limit = 512 * 1024 * 1024
+begin
+  React::ServerRendering.render("Page", props, {})
+rescue MiniRacerRs::HeapLimitError
+  React::ServerRendering.reset_pool
+end
+```
+
+`bytes` must be 32 MiB to 4 GiB; `nil` clears it. The process-wide setting sizes every context created afterward, including ExecJS and react-rails contexts. The reader returns the configured value. V8 rounds each heap down to its page size, by at most 256 KiB. A hit raises `MiniRacerRs::HeapLimitError`, a subclass of `MiniRacer::V8OutOfMemoryError`, then mini_racer_rs runs a full collection. The context remains usable if its heap fits; otherwise evals, calls, await forms, microtask checkpoints, and pumps keep raising until disposal. `attach`, `heap_stats`, `heap_snapshot`, `low_memory_notification`, and `dispose` remain available. Hits increment `MiniRacerRs.counters(context)[:terminated][:heap_exhausted]`. `max_memory:` remains a per-context post-collection check. The limit is soft: unwinding may use up to three times the old generation. It excludes ArrayBuffer and typed array backing stores, shared large sources, and parser memory. Heap-sizing flags conflict. The limit setter and `Platform.set_flags!` raise `ArgumentError` when the other configured `max_old_space_size`, `max_heap_size`, `max_semi_space_size`, or `predictable_gc_schedule`; context creation is also refused when flags would exceed the limit. Some single allocations can still abort. In 540 processes, 534 hits raised and left the context usable; six aborts were `JSON.parse` results about twice the limit under `--minor-ms`.
 
 ## Switching from mini_racer
 

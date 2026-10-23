@@ -21,7 +21,8 @@ pub use context::{ContextHandle, Host, ScriptOptions, Unparker, WaitHandle, Wait
 pub use control::{CallRequest, CallbackReply, ContextConfig, JsText};
 pub use counters::{Counts, Terminations};
 pub use error::{
-    EngineError, FlagError, InvalidSnapshot, JsError, JsErrorKind, SourceMapError, TerminationCause,
+    EngineError, FlagError, HeapLimitError, InvalidSnapshot, JsError, JsErrorKind, SourceMapError,
+    TerminationCause,
 };
 pub use snapshot::{SnapshotBlob, WeakSnapshotBlob};
 pub use text::{Decoded, Transcoder};

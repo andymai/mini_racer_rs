@@ -124,3 +124,75 @@ class LeftoverMicrotasksTest < Minitest::Test
     context&.dispose
   end
 end
+
+# The heap limit outranks a stop or a timeout and ends with its dispatch, so
+# a hit in a script's leftover microtasks, in a checkpoint or as a result
+# serializes is that dispatch's to report, and the next script runs.
+class LeftoverMicrotasksHeapLimitTest < Minitest::Test
+  include RubyProcess
+
+  # Outcomes, one per line, of `code` run in a process of its own with a heap
+  # limit of 64 MiB, since a hit past V8's room would abort the process.
+  def under_heap_limit(code)
+    out, err, status = run_ruby(<<~RUBY)
+      require "mini_racer"
+      MiniRacerRs.heap_limit = 64 << 20
+      HOG = #{LeftoverMicrotasksTest::HOG.dump}
+      def outcome
+        "ok \#{yield.inspect}"
+      rescue => e
+        "\#{e.class}: \#{e.message}"
+      end
+      #{code}
+    RUBY
+    assert_predicate status, :success?, "stdout:\n#{out}\nstderr:\n#{err}"
+    out.lines(chomp: true)
+  end
+
+  REACHED = "MiniRacerRs::HeapLimitError: heap limit of #{64 << 20} bytes reached".freeze
+
+  # The heap limit outranks a stop or a timeout and ends with its dispatch:
+  # leftover microtasks that reach it report it with the script that left
+  # them, and the next script runs.
+  def test_a_heap_limit_in_leftover_microtasks_ends_with_the_script_that_left_them
+    lines = under_heap_limit(<<~RUBY)
+      context = MiniRacer::Context.new
+      context.attach("stopper", proc { context.stop; 1 })
+      puts outcome { context.eval("Promise.resolve().then(() => { \#{HOG} }); stopper(); 0") }
+      puts outcome { context.eval("1 + 1") }
+      timed = MiniRacer::Context.new(timeout: 200)
+      puts outcome { timed.eval("Promise.resolve().then(() => { \#{HOG} }); while (true) {}") }
+      puts outcome { timed.eval("1 + 1") }
+    RUBY
+
+    assert_equal [REACHED, "ok 2", REACHED, "ok 2"], lines
+  end
+
+  # A checkpoint reports no termination, so one whose microtasks reach the
+  # limit raises it itself; the script around it ends with it too.
+  def test_a_heap_limit_in_a_microtask_checkpoint_raises_from_it
+    lines = under_heap_limit(<<~RUBY)
+      context = MiniRacer::Context.new
+      nested = nil
+      context.attach("checkpoint", proc { nested = outcome { context.perform_microtask_checkpoint }; 1 })
+      puts outcome { context.eval("Promise.resolve().then(() => { \#{HOG} }); checkpoint(); 0") }
+      puts nested
+      puts outcome { context.eval("1 + 1") }
+    RUBY
+
+    assert_equal [REACHED, REACHED, "ok 2"], lines
+  end
+
+  # A getter runs as the result serializes, after the script's verdict.
+  def test_a_heap_limit_as_a_result_serializes_ends_with_that_script
+    lines = under_heap_limit(<<~RUBY)
+      context = MiniRacer::Context.new
+      puts outcome { context.eval("({ get x() { \#{HOG} } })") }
+      puts outcome { context.eval("1 + 1") }
+      puts outcome { context.eval("({ get x() { return new Array(7e6).fill(1.5).length } })")["x"] }
+      puts outcome { context.eval("1 + 1") }
+    RUBY
+
+    assert_equal [REACHED, "ok 2", "ok 7000000", "ok 2"], lines
+  end
+end

@@ -349,6 +349,9 @@ status = "done"
 [ids."smethod:MiniRacer::Snapshot.load@ruby"]
 status = "done"
 
+[extra."class:MiniRacerRs::HeapLimitError < MiniRacer::V8OutOfMemoryError@ruby"]
+status = "done"
+
 [extra."class:MiniRacerRs::Pins < Object@ruby"]
 status = "internal"
 
@@ -380,6 +383,12 @@ status = "done"
 status = "internal"
 
 [extra."smethod:MiniRacerRs.counters@ruby"]
+status = "done"
+
+[extra."smethod:MiniRacerRs.heap_limit=@ruby"]
+status = "done"
+
+[extra."smethod:MiniRacerRs.heap_limit@ruby"]
 status = "done"
 
 [extra."smethod:MiniRacerRs.register_source_map@ruby"]
