@@ -593,7 +593,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "mini_racer_engine"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "deno_core_icudata",
  "libc",
@@ -606,7 +606,7 @@ dependencies = [
 
 [[package]]
 name = "mini_racer_rs"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "magnus",
  "mini_racer_engine",
@@ -617,7 +617,7 @@ dependencies = [
 
 [[package]]
 name = "mini_racer_sourcemap"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "memchr",
  "serde",
@@ -627,7 +627,7 @@ dependencies = [
 
 [[package]]
 name = "mini_racer_sync"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "loom",
  "thiserror",
@@ -635,7 +635,7 @@ dependencies = [
 
 [[package]]
 name = "mini_racer_wire"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "criterion",
  "proptest",
