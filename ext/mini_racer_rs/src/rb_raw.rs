@@ -559,6 +559,49 @@ pub fn with_string_bytes<R>(_ruby: &Ruby, s: RString, read: impl FnOnce(&[u8]) -
     read(unsafe { s.as_slice() })
 }
 
+/// Runs `read` over the bytes `s` holds now, without the GVL, so Ruby's other
+/// threads run meanwhile. It reads a frozen share of `s` that this frame
+/// holds, so the GC neither frees nor moves it, and whose bytes a change to
+/// `s` copies before it writes. An interrupt already pending is run first, as
+/// `check_ints` runs one, up to twice, then `read` runs with the GVL held. The
+/// outer `Err` is what making the share or an interrupt raised.
+pub fn read_without_gvl<F, R>(
+    ruby: &Ruby,
+    s: RString,
+    read: F,
+) -> Result<Result<R, Panicked>, Error>
+where
+    F: Fn(&[u8]) -> R + Sync,
+    R: Send,
+{
+    let raw = s.as_raw();
+    let frozen = protect(|| {
+        // SAFETY: the `&Ruby` argument proves this thread holds the GVL, and
+        // `protect` catches what an allocation that fails raises.
+        unsafe { rb_sys::rb_str_new_frozen(raw) }
+    })?;
+    // SAFETY: `frozen` is the live String rb_str_new_frozen returned.
+    let share = RString::from_value(unsafe { Value::from_raw(frozen) })
+        .ok_or_else(|| Error::new(ruby.exception_type_error(), "expected String"))?;
+    let read = &read;
+    for _ in 0..2 {
+        // SAFETY: a frozen String's bytes never change, and `share` stays on
+        // this stack, where the GC of a thread that takes the GVL meanwhile
+        // finds and pins it, until `black_box` reads it after the call.
+        let bytes = unsafe { share.as_slice() };
+        if let Some(result) = nogvl(ruby, move || read(bytes), &|| {}) {
+            std::hint::black_box(&share);
+            return Ok(result);
+        }
+        check_ints(ruby)?;
+    }
+    // SAFETY: as above, with the GVL held and no Ruby code run until it ends.
+    let bytes = unsafe { share.as_slice() };
+    let result = guard(|| read(bytes));
+    std::hint::black_box(&share);
+    Ok(result)
+}
+
 /// The magnitude of an Integer as little-endian 64-bit words, and whether it is
 /// negative; `None` past `max_words`.
 pub fn integer_words(

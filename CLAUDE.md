@@ -86,7 +86,7 @@ Rust replacement for the `mini_racer` gem 0.22.2: same `MiniRacer` API, V8 from 
 | Runner phases and the fork gate | `crates/mini_racer_sync/src/fork.rs` |
 | std or loom primitives for protocol code | `crates/mini_racer_sync/src/primitives.rs` |
 | Loom models | `crates/mini_racer_sync/tests/loom.rs` |
-| `MiniRacer::Context` methods, per-context lock | `ext/mini_racer_rs/src/context.rs` |
+| `MiniRacer::Context` methods, per-context lock, large eval sources copied without the GVL | `ext/mini_racer_rs/src/context.rs`, `ext/mini_racer_rs/src/rb_raw.rs` |
 | Waiting from Ruby threads, running callbacks | `ext/mini_racer_rs/src/host.rs` |
 | Spin budgets and long-wait records | `ext/mini_racer_rs/src/spin.rs` |
 | `Context.new` and `Pool.new` option rules | `ext/mini_racer_rs/src/options.rs` |

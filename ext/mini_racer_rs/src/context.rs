@@ -27,6 +27,7 @@ const ISOLATE_BYTES: usize = 2 << 20;
 const POLL: std::time::Duration = std::time::Duration::from_millis(1);
 // mini_racer warns of every fiftieth level of js->ruby->js nesting.
 const DEEP_NESTING: u32 = 50;
+const SOURCE_WITHOUT_GVL: usize = 1 << 20;
 
 static OWNED: LazyId = LazyId::new("owned?");
 
@@ -119,19 +120,54 @@ impl Drop for Locked {
 
 // mini_racer sends ISO-8859-1 and UTF-16LE strings in their own encoding and
 // every other string's bytes as UTF-8.
-pub fn js_text(ruby: &Ruby, string: RString) -> Result<JsText, Error> {
-    let bytes = rb_raw::string_bytes(ruby, string);
-    Ok(match RbEncoding::from(string.enc_get()).name() {
-        "ISO-8859-1" => JsText::Latin1(bytes),
-        "UTF-16LE" => {
-            let (units, rest) = bytes.as_chunks::<2>();
-            if !rest.is_empty() {
-                return Err(errors::undeserializable(ruby));
-            }
-            JsText::Utf16(units.iter().map(|unit| u16::from_le_bytes(*unit)).collect())
+#[derive(Clone, Copy)]
+enum Sent {
+    Utf8,
+    Latin1,
+    Utf16,
+}
+
+impl Sent {
+    fn of(string: RString) -> Self {
+        match RbEncoding::from(string.enc_get()).name() {
+            "ISO-8859-1" => Self::Latin1,
+            "UTF-16LE" => Self::Utf16,
+            _ => Self::Utf8,
         }
-        _ => JsText::Utf8(bytes),
-    })
+    }
+
+    fn text(self, bytes: &[u8]) -> Option<JsText> {
+        Some(match self {
+            Self::Utf8 => JsText::Utf8(bytes.to_vec()),
+            Self::Latin1 => JsText::Latin1(bytes.to_vec()),
+            Self::Utf16 => {
+                let (units, rest) = bytes.as_chunks::<2>();
+                if !rest.is_empty() {
+                    return None;
+                }
+                JsText::Utf16(units.iter().map(|unit| u16::from_le_bytes(*unit)).collect())
+            }
+        })
+    }
+}
+
+pub fn js_text(ruby: &Ruby, string: RString) -> Result<JsText, Error> {
+    let sent = Sent::of(string);
+    rb_raw::with_string_bytes(ruby, string, |bytes| sent.text(bytes))
+        .ok_or_else(|| errors::undeserializable(ruby))
+}
+
+// Under the GVL, copying a source this long (about 0.4 ms a megabyte) would
+// stall every other Ruby thread; a shorter copy costs less than taking the
+// GVL back from one that is busy.
+fn source_text(ruby: &Ruby, string: RString) -> Result<JsText, Error> {
+    if string.len() < SOURCE_WITHOUT_GVL {
+        return js_text(ruby, string);
+    }
+    let sent = Sent::of(string);
+    rb_raw::read_without_gvl(ruby, string, |bytes| sent.text(bytes))?
+        .map_err(|_| errors::internal(ruby, "panic while copying the source"))?
+        .ok_or_else(|| errors::undeserializable(ruby))
 }
 
 // mini_racer looks for DateTime at each Context.new until it exists.
@@ -301,7 +337,7 @@ impl Context {
             }
             _ => JsText::from("<eval>"),
         };
-        let source = js_text(ruby, source)?;
+        let source = source_text(ruby, source)?;
         let options = ScriptOptions {
             awaited,
             timeout: timeout::current(ruby)?,
