@@ -632,6 +632,7 @@ end
 
 class PoolShutdownTest < Minitest::Test
   include PoolHelpers
+  include RubyProcess
 
   def test_shutdown_disposes_idle_contexts_now
     built = []
@@ -687,6 +688,53 @@ class PoolShutdownTest < Minitest::Test
 
     assert_raises(MiniRacerRs::Pool::ShutdownError) { waiter.join }
     release.call
+  end
+
+  # A push can let other threads run, as Ruby's interrupt check does once a
+  # time slice ends. The waits not yet pushed then find the pool shut down
+  # when they look again and end, and their queues must outlast a collection
+  # until shutdown pushes them. Here the first push waits for every wait to
+  # end and a collection to reuse what it frees.
+  def test_shutdown_keeps_the_queues_it_has_yet_to_push
+    code = <<~RUBY
+      require "mini_racer"
+      $pause = false
+      $collected = Thread::Queue.new
+      Thread::Queue.prepend(Module.new do
+        def push(...)
+          super.tap do
+            if $pause
+              $pause = false
+              $collected.pop
+            end
+          end
+        end
+      end)
+      pool = MiniRacerRs::Pool.new(size: 1)
+      held = Thread::Queue.new
+      Thread.new { pool.with { held << true; sleep } }
+      held.pop
+      waiters = Array.new(20) do
+        Thread.new do
+          pool.with { :got }
+        rescue MiniRacerRs::Pool::ShutdownError
+          :shut
+        end
+      end
+      sleep 0.01 until waiters.all? { _1.status == "sleep" }
+      Thread.new do
+        waiters.each(&:join)
+        3.times { GC.start }
+        $collected << Array.new(100_000) { |i| "x" * (i % 200) }.size
+      end
+      $pause = true
+      pool.shutdown
+      p waiters.map(&:value).uniq
+    RUBY
+    stdout, stderr, status = run_ruby(code)
+
+    assert_predicate status, :success?, stderr
+    assert_equal "[:shut]\n", stdout
   end
 
   def test_a_context_being_built_at_shutdown_is_disposed_once_built
