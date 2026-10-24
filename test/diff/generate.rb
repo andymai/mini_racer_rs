@@ -16,6 +16,9 @@ module DiffGenerate
     "'\\u65e5\\u672c'", "'\\u{1F600}'", "'\\ud800'", "'a\\u0000b'", "'x'.repeat(300)", "Symbol('s')", "Symbol()",
     "new Date(0)", "new Date(1e12 + 0.5)", "/a+/g", "(() => 1)", "new Uint8Array([1, 2, 255])", "new ArrayBuffer(4)",
     "new Error('boom')", "new TypeError('t')", "[1, , 3]", "new WeakMap()", "Object.create(null)", "new Number(1)",
+    "new Int32Array([1, -1])", "new Uint32Array([1, 4294967295])", "new Float32Array([1.5, -2])",
+    "new Uint8ClampedArray([-1, 300])", "new BigInt64Array([1n, -1n])", "new DataView(new ArrayBuffer(4))", "/a/",
+    "/a/u", "/a/v", "/a/dsy",
   ].freeze
   KEYS = ["a", "b", "z", "1", "10", "4294967295", "-1", "1.5", "", "é", "constructor"].freeze
   RUBY_LEAVES = [
@@ -26,7 +29,9 @@ module DiffGenerate
     ["string", "ISO-8859-1", "hex", "e9"], ["string", "ASCII-8BIT", "hex", "ff00"],
     ["string", "UTF-16LE", "hex", "6800"],
     ["symbol", %w[string US-ASCII text sym]], ["time", "0", 0, 0, true],
-    ["time", "1600000000", 123_456_789, 32_400, false], ["binary", "0102ff"],
+    ["time", "1600000000", 123_456_789, 32_400, false], ["binary", "0102ff"], ["int", (2**53).to_s],
+    ["int", (-(2**53)).to_s], ["range", %w[int 1], %w[int 2], false], %w[rational 1 1],
+    ["struct", [%w[int 1], %w[int 2]]], ["object"], %w[class Object],
   ].freeze
 
   module_function

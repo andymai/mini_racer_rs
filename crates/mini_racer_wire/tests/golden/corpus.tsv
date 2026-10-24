@@ -28,7 +28,12 @@ date	new Date(1622505600000)
 date_invalid	new Date(NaN)
 regexp	/a+b/gi
 regexp_padded	[1, new RegExp("\u6771", "g")]
+regexp_no_flags	/a/
+regexp_unicode	/a/u
+regexp_unicode_sets	/a/v
+regexp_indices_dotall_sticky	/a/dsy
 boolean_object	new Boolean(false)
+boolean_object_true	new Boolean(true)
 number_object	new Number(2.5)
 string_object	new String("boxed")
 bigint_object	Object(7n)
@@ -52,6 +57,12 @@ error_two_byte	new Error("\u6771")
 error_cause_self	(() => { const e = new Error("x"); e.cause = e; return e })()
 uint8array	new Uint8Array([1, 2, 255])
 float64array	new Float64Array([1.5, -2])
+int32array	new Int32Array([1, -1])
+uint32array	new Uint32Array([1, 4294967295])
+float32array	new Float32Array([1.5, -2])
+uint8clampedarray	new Uint8ClampedArray([-1, 300])
+bigint64array	new BigInt64Array([1n, -1n])
+int32array_offset	(() => { const a = new Int32Array(new ArrayBuffer(12), 4, 2); a.set([1, -1]); return a })()
 dataview	new DataView(new ArrayBuffer(4), 1, 2)
 arraybuffer	new Uint8Array([9, 8, 7]).buffer
 resizable_arraybuffer	new ArrayBuffer(4, {maxByteLength: 16})

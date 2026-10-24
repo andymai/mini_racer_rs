@@ -544,7 +544,7 @@ status = "same"
 status = "same"
 
 [cases."js-1-162"]
-status = "same"
+status = "accepted:reference-to-a-numbered-object"
 
 [cases."js-1-163"]
 status = "same"
@@ -577,10 +577,10 @@ status = "same"
 status = "same"
 
 [cases."js-1-172"]
-status = "accepted:reference-to-a-numbered-object"
+status = "same"
 
 [cases."js-1-173"]
-status = "same"
+status = "accepted:reference-to-a-numbered-object"
 
 [cases."js-1-174"]
 status = "same"
@@ -622,7 +622,7 @@ status = "same"
 status = "same"
 
 [cases."js-1-186"]
-status = "accepted:reference-to-a-numbered-object"
+status = "same"
 
 [cases."js-1-187"]
 status = "same"
@@ -739,7 +739,7 @@ status = "same"
 status = "same"
 
 [cases."js-1-41"]
-status = "same"
+status = "accepted:reference-to-a-numbered-object"
 
 [cases."js-1-42"]
 status = "same"
@@ -760,7 +760,7 @@ status = "same"
 status = "same"
 
 [cases."js-1-48"]
-status = "same"
+status = "accepted:reference-to-a-numbered-object"
 
 [cases."js-1-49"]
 status = "same"
@@ -835,7 +835,7 @@ status = "same"
 status = "same"
 
 [cases."js-1-70"]
-status = "same"
+status = "accepted:reference-to-a-numbered-object"
 
 [cases."js-1-71"]
 status = "same"
@@ -925,10 +925,10 @@ status = "same"
 status = "same"
 
 [cases."js-1-98"]
-status = "same"
+status = "accepted:reference-to-a-numbered-object"
 
 [cases."js-1-99"]
-status = "same"
+status = "accepted:reference-to-a-numbered-object"
 
 [cases."js-cb-1-0"]
 status = "same"
@@ -1144,7 +1144,7 @@ status = "same"
 status = "same"
 
 [cases."js-cb-1-162"]
-status = "same"
+status = "accepted:reference-to-a-numbered-object"
 
 [cases."js-cb-1-163"]
 status = "same"
@@ -1180,7 +1180,7 @@ status = "same"
 status = "same"
 
 [cases."js-cb-1-173"]
-status = "same"
+status = "accepted:reference-to-a-numbered-object"
 
 [cases."js-cb-1-174"]
 status = "same"
@@ -1222,7 +1222,7 @@ status = "same"
 status = "same"
 
 [cases."js-cb-1-186"]
-status = "accepted:reference-to-a-numbered-object"
+status = "same"
 
 [cases."js-cb-1-187"]
 status = "same"
@@ -1360,7 +1360,7 @@ status = "same"
 status = "same"
 
 [cases."js-cb-1-48"]
-status = "same"
+status = "accepted:reference-to-a-numbered-object"
 
 [cases."js-cb-1-49"]
 status = "same"
@@ -1525,10 +1525,10 @@ status = "same"
 status = "same"
 
 [cases."js-cb-1-98"]
-status = "same"
+status = "accepted:reference-to-a-numbered-object"
 
 [cases."js-cb-1-99"]
-status = "same"
+status = "accepted:reference-to-a-numbered-object"
 
 [cases."rb-1-0"]
 status = "same"
@@ -1537,7 +1537,7 @@ status = "same"
 status = "same"
 
 [cases."rb-1-10"]
-status = "accepted:reference-to-a-numbered-object"
+status = "same"
 
 [cases."rb-1-11"]
 status = "same"
@@ -1837,7 +1837,7 @@ status = "same"
 status = "same"
 
 [cases."rb-cb-1-10"]
-status = "accepted:reference-to-a-numbered-object"
+status = "same"
 
 [cases."rb-cb-1-11"]
 status = "same"
