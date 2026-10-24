@@ -23,10 +23,12 @@ export PROPTEST_DISABLE_FAILURE_PERSISTENCE=1
 # A mutant can turn a bounded allocation into an unbounded one, and a test
 # that then takes all of a hosted runner's memory takes the runner down with
 # every result. With MUTANTS_MEMORY_MAX set, the run lives in a cgroup that
-# caps it, so the kernel kills the test, which cargo-mutants counts as caught.
+# caps it, so the kernel kills the test, which cargo-mutants counts as caught;
+# OOMPolicy=continue keeps systemd from stopping the rest of the run with it.
 capped() {
   if [ -n "${MUTANTS_MEMORY_MAX:-}" ]; then
-    sudo systemd-run --scope --quiet -p "MemoryMax=$MUTANTS_MEMORY_MAX" -p MemorySwapMax=0 -- \
+    sudo systemd-run --scope --quiet -p "MemoryMax=$MUTANTS_MEMORY_MAX" -p MemorySwapMax=0 \
+      -p OOMPolicy=continue -- \
       sudo --preserve-env -u "$(id -un)" env "PATH=$PATH" "HOME=$HOME" "$@"
   else
     "$@"
