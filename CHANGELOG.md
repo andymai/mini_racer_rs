@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.5.3](https://github.com/andymai/mini_racer_rs/compare/v1.5.2...v1.5.3) (2026-10-24)
+
+
+### Performance
+
+* **engine:** cache a large first sighting that runs as long as it compiles ([#159](https://github.com/andymai/mini_racer_rs/issues/159)) ([47cc0cc](https://github.com/andymai/mini_racer_rs/commit/47cc0ccd76c5d39ec3c9005b848e5846e213d618))
+* **engine:** cache a script again after its builder's next call ([#160](https://github.com/andymai/mini_racer_rs/issues/160)) ([8f632e0](https://github.com/andymai/mini_racer_rs/commit/8f632e065ec3506687d69e8e13f0df56b2e21064))
+* **engine:** cache scripts from 128 KiB and keep 64 caches ([#158](https://github.com/andymai/mini_racer_rs/issues/158)) ([0b77e64](https://github.com/andymai/mini_racer_rs/commit/0b77e640d311db4c22d711a884be5aeadbcc0e0b))
+
 ## [1.5.2](https://github.com/andymai/mini_racer_rs/compare/v1.5.1...v1.5.2) (2026-10-24)
 
 
