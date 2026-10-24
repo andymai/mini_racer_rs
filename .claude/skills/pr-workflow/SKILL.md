@@ -15,7 +15,7 @@ Every change reaches `main` as a squash-merged PR with the required check `CI Pa
 | Parallel work | `git worktree add .worktrees/<branch> -b <branch>`, then `npm ci` inside it |
 | Local gate | `scripts/gate.sh`; use `--full` when a `Cargo.toml`, a script, or CI changed |
 | Independent review | the `code-review` skill at high effort on the branch diff; fix every P0 and P1 |
-| PR title and body | the `codex-write` skill: brief, run, fact-check, its checker prints PASS, then open |
+| PR title and body | the `outward-writing` skill: facts with sources, draft, fact-check, its checker prints PASS, then open |
 | Push | `git push "https://x-access-token:$(gh auth token)@github.com/andymai/mini_racer_rs.git" <branch> 2>&1 \| sed -E 's/x-access-token:[^@]+@/x-access-token:***@/'` |
 | Open the PR | `gh pr create --head <branch> --base main --title <title> --body-file <body-file>` (the token push sets no upstream, so pass `--head`) |
 | Confirm the remote head | `gh pr view <N> --json headRefOid` |
@@ -42,7 +42,7 @@ Never skip a hook. If one fails on breakage you did not cause, stop and report i
 4. Commit with a conventional message (`feat`, `fix`, `chore`, `docs`, `test`, `ci`, `refactor`, `perf`, `build`), no dashes.
 5. Run the `code-review` skill at high effort on the branch diff and fix P0 and P1 findings with a follow-up commit.
 6. Push the branch (token push above) and confirm the head with `gh pr view <N> --json headRefOid` once the PR exists.
-7. Draft the PR title and body with `codex-write` (observable facts, no hard wraps), fact-check them, and open the PR with `--head`.
+7. Draft the PR title and body with `outward-writing` (observable facts, no hard wraps), fact-check them, and open the PR with `--head`.
 8. Watch CI. On failure, read the failing step with `gh run view <run> --log-failed`, fix, push.
 9. Run `check-pr-comments` for review-bot threads; resolve each one.
 10. Enable squash auto-merge. When the PR reports `MERGED`, return to `main`, pull, and remove the worktree.
