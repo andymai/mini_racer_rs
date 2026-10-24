@@ -5,6 +5,7 @@ use mini_racer_sync::lock;
 
 use crate::control::JsText;
 use crate::process::code_cache::Key;
+use crate::text;
 
 const MAX_SOURCES: usize = 8;
 const MAX_BYTES: usize = 256 << 20;
@@ -26,16 +27,7 @@ impl Units {
         Some(match text {
             JsText::Latin1(bytes) => Self::OneByte(Arc::from(bytes.as_slice())),
             JsText::Utf8(bytes) if bytes.is_ascii() => Self::OneByte(Arc::from(bytes.as_slice())),
-            JsText::Utf8(bytes) => {
-                let text = std::str::from_utf8(bytes).ok()?;
-                text.chars()
-                    .map(u8::try_from)
-                    .collect::<Result<_, _>>()
-                    .map_or_else(
-                        |_| Self::TwoByte(text.encode_utf16().collect()),
-                        Self::OneByte,
-                    )
-            }
+            JsText::Utf8(bytes) => text::units(bytes)?,
             JsText::Utf16(units) => units
                 .iter()
                 .map(|&unit| u8::try_from(unit))
