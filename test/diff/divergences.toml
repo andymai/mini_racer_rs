@@ -14,8 +14,10 @@ compat = "behavior:object-ids@ruby"
 id = "reference-to-a-numbered-object"
 structure = "lost-reference"
 
+# The whole buffer of a view past offset 0, returned by itself or, as UTF-8
+# text, by an echo callback handed the view.
 [[divergences]]
-actual = '^\["string","ASCII-8BIT","hex","0000000000000000"\]$'
+actual = '^\["string","ASCII-8BIT","hex","(?:0{16}|0{24})"\]$|^\["array",\[\["string","UTF-8","text","(?:\\u0000){12}"\]\]\]$'
 compat = "behavior:typed-array-offsets@ruby"
 expected = '^\["raise","MiniRacer::RuntimeError",\["string","ASCII-8BIT","hex","626164207479706564206172726179"\]\]$'
 id = "view-at-an-offset"

@@ -36,7 +36,7 @@ fn nesting_stops_after_97_levels_like_mini_racer() {
 }
 
 #[test]
-fn bigints_past_the_limit_are_refused() {
+fn bigints_up_to_the_limit_are_read_and_past_it_refused() {
     let mut bytes = Vec::new();
     Writer::new(&mut bytes)
         .bigint(false, &[1; 16])
@@ -46,6 +46,11 @@ fn bigints_past_the_limit_are_refused() {
         ..Limits::default()
     };
     assert_eq!(render(&bytes, tight), "error: bigint too big");
+    let exact = Limits {
+        max_bigint_bytes: 16,
+        ..Limits::default()
+    };
+    assert_eq!(render(&bytes, exact), "0x01010101010101010101010101010101n");
     assert!(render(&bytes, Limits::default()).ends_with('n'));
 }
 
@@ -167,6 +172,7 @@ fn views_follow_v8s_alignment_and_flag_rules() {
     assert_eq!(body(b"~\x02\x04abVB\x00\x02\x01"), "error: bad typed array");
     assert_eq!(body(b"~\x02\x04abVB\x00\x02\x00"), "error: bad typed array");
     assert_eq!(body(b"~\x04\x02abcd"), "error: bad arraybuffer");
+    assert_eq!(body(b"~\x02\x02ab"), "buffer(6162)");
 }
 
 #[test]
@@ -541,6 +547,25 @@ fn writer_matches_mini_racers_encoder() {
     };
     assert_eq!(encode(&|w| w.integer(-2)), frame(b"I\x03"));
     assert_eq!(encode(&|w| w.integer(1 << 31)).get(2), Some(&b'N'));
+    // mini_racer writes a double above INT64_MIN / 1024, which is -(2**53),
+    // and up to INT64_MAX / 1024, which is 2**53 - 1.
+    let safe = (1 << 53) - 1;
+    assert_eq!(
+        encode(&|w| w.integer(safe)),
+        frame(b"N\xff\xff\xff\xff\xff\xff\x3f\x43")
+    );
+    assert_eq!(
+        encode(&|w| w.integer(-safe)),
+        frame(b"N\xff\xff\xff\xff\xff\xff\x3f\xc3")
+    );
+    assert_eq!(
+        encode(&|w| w.integer(safe + 1)),
+        frame(b"Z\x10\x00\x00\x00\x00\x00\x00\x20\x00")
+    );
+    assert_eq!(
+        encode(&|w| w.integer(-safe - 1)),
+        frame(b"Z\x11\x00\x00\x00\x00\x00\x00\x20\x00")
+    );
     assert_eq!(
         encode(&|w| w.integer(i64::MAX)),
         frame(b"Z\x10\xff\xff\xff\xff\xff\xff\xff\x7f")

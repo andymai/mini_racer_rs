@@ -10,6 +10,7 @@ module DiffCanonical
   # time as the same object is marked again, without a number, so container
   # numbering stays what DiffGenerate writes.
   Seen = Struct.new(:ids, :objects)
+  Point = Struct.new(:x, :y)
 
   def encode(value, seen = Seen.new({}.compare_by_identity, {}.compare_by_identity))
     case value
@@ -22,7 +23,18 @@ module DiffCanonical
     when Time then again(value, seen) { ["time", value.to_i.to_s, value.nsec, value.utc_offset, value.utc?] }
     when Array, Hash then container(value, seen)
     when Exception then exception(value, seen)
+    when Range, Rational, Point, Class then unconvertible(value, seen)
     else other(value)
+    end
+  end
+
+  # Values neither gem converts, which only arguments hold.
+  def unconvertible(value, seen)
+    case value
+    when Range then ["range", encode(value.begin, seen), encode(value.end, seen), value.exclude_end?]
+    when Rational then ["rational", value.numerator.to_s, value.denominator.to_s]
+    when Point then ["struct", value.to_a.map { |member| encode(member, seen) }]
+    else ["class", value.name]
     end
   end
 
@@ -71,6 +83,7 @@ module DiffCanonical
   def other(value)
     return ["function"] if defined?(MiniRacer::JavaScriptFunction) && value.is_a?(MiniRacer::JavaScriptFunction)
     return ["binary", value.data.b.unpack1("H*")] if defined?(MiniRacer::Binary) && value.is_a?(MiniRacer::Binary)
+    return ["object"] if value.instance_of?(Object)
 
     ["other", value.class.name]
   end
@@ -93,6 +106,17 @@ module DiffCanonical
     end
     when "ref" then refs.fetch(rest.fetch(0))
     when "binary" then MiniRacer::Binary.new([rest.fetch(0)].pack("H*"))
+    else decode_unconvertible(tag, rest, refs)
+    end
+  end
+
+  def decode_unconvertible(tag, rest, refs)
+    case tag
+    when "range" then Range.new(decode(rest.fetch(0), refs), decode(rest.fetch(1), refs), rest.fetch(2))
+    when "rational" then Rational(Integer(rest.fetch(0)), Integer(rest.fetch(1)))
+    when "struct" then Point.new(*rest.fetch(0).map { |member| decode(member, refs) })
+    when "class" then Object.const_get(rest.fetch(0))
+    when "object" then Object.new
     else raise ArgumentError, "cannot decode #{tag.inspect}"
     end
   end

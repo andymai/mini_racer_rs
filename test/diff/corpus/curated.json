@@ -211,6 +211,32 @@
     ]
   },
   {
+    "id": "curated-int32-view-at-offset",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "new Int32Array(new ArrayBuffer(12), 4, 2)"
+      }
+    ]
+  },
+  {
+    "id": "curated-int32-view-at-offset-through-a-callback",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "attach",
+        "name": "__diff_callback",
+        "callable": "echo",
+        "setup": true
+      },
+      {
+        "op": "eval",
+        "source": "__diff_callback(new Int32Array(new ArrayBuffer(12), 4, 2))"
+      }
+    ]
+  },
+  {
     "id": "curated-reference-after-date",
     "kind": "program",
     "steps": [
