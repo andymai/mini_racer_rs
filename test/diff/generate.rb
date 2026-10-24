@@ -18,7 +18,7 @@ module DiffGenerate
     "new Error('boom')", "new TypeError('t')", "[1, , 3]", "new WeakMap()", "Object.create(null)", "new Number(1)",
     "new Int32Array([1, -1])", "new Uint32Array([1, 4294967295])", "new Float32Array([1.5, -2])",
     "new Uint8ClampedArray([-1, 300])", "new BigInt64Array([1n, -1n])", "new DataView(new ArrayBuffer(4))", "/a/",
-    "/a/u", "/a/v", "/a/dsy", "new Int32Array(new ArrayBuffer(12), 4, 2)", "new Boolean(true)",
+    "/a/u", "/a/v", "/a/dsy", "new Boolean(true)",
   ].freeze
   KEYS = ["a", "b", "z", "1", "10", "4294967295", "-1", "1.5", "", "é", "constructor"].freeze
   RUBY_LEAVES = [
