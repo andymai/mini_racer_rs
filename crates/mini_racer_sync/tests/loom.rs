@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use loom::sync::Arc;
-use loom::sync::atomic::{AtomicBool, Ordering};
+use loom::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use loom::thread;
 use mini_racer_sync::primitives::{Condvar, Mutex};
 use mini_racer_sync::{
@@ -330,26 +330,35 @@ fn a_quiesced_fork_never_overlaps_a_runner_using_its_isolate() {
     });
 }
 
-// Model 10: a runner interrupted in JavaScript for a fork holds no isolate
-// until that fork ends, parks again when a second fork begins before it
-// wakes, and an interrupt that lands after its fork ended returns at once.
+// Model 10: a runner interrupted in JavaScript for a fork parks for it as
+// `ParkedForFork` and holds no isolate until that fork ends, parks again when
+// a second fork begins before it wakes, and an interrupt that lands after its
+// fork ended returns at once.
 #[test]
 fn an_interrupted_runner_parks_for_its_fork_and_no_longer() {
     bounded(3, || {
         let gate = Arc::new(ForkGate::default());
         let phase = Arc::new(RunnerPhase::default());
         let using = Arc::new(AtomicBool::new(true));
-        let interrupt = Arc::new(AtomicBool::new(false));
+        // Numbered, since a flag would merge the interrupt of a fork the
+        // runner sleeps through with the next one's.
+        let interrupts = Arc::new(AtomicU8::new(0));
+        let returned = Arc::new(AtomicU8::new(0));
         let runner = {
-            let (gate, phase) = (Arc::clone(&gate), Arc::clone(&phase));
-            let (using, interrupt) = (Arc::clone(&using), Arc::clone(&interrupt));
+            let (gate, phase, using) = (Arc::clone(&gate), Arc::clone(&phase), Arc::clone(&using));
+            let (interrupts, returned) = (Arc::clone(&interrupts), Arc::clone(&returned));
             thread::spawn(move || {
-                // Where V8 checks for interrupts while the script runs.
-                for _ in 0..3 {
-                    if interrupt.swap(false, Ordering::SeqCst) {
+                // Where V8 checks for interrupts while the script runs, until
+                // the one after the last fork.
+                let mut seen = 0;
+                while seen < 3 {
+                    let latest = interrupts.load(Ordering::SeqCst);
+                    if latest != seen {
+                        seen = latest;
                         using.store(false, Ordering::SeqCst);
                         gate.pause(&phase);
                         using.store(true, Ordering::SeqCst);
+                        returned.store(seen, Ordering::SeqCst);
                     }
                     thread::yield_now();
                 }
@@ -358,18 +367,21 @@ fn an_interrupted_runner_parks_for_its_fork_and_no_longer() {
             })
         };
 
-        for _ in 0..2 {
+        for fork in 1..=2 {
             gate.begin();
-            interrupt.store(true, Ordering::SeqCst);
-            while phase.get() == Phase::Running {
+            interrupts.store(fork, Ordering::SeqCst);
+            // A runner back from this fork's pause while the fork is pending
+            // never parked, so stop waiting for it.
+            while phase.get() == Phase::Running && returned.load(Ordering::SeqCst) < fork {
                 thread::yield_now();
             }
+            assert_eq!(phase.get(), Phase::ParkedForFork);
             assert!(!using.load(Ordering::SeqCst));
             thread::yield_now();
             assert!(!using.load(Ordering::SeqCst));
             gate.end();
         }
-        interrupt.store(true, Ordering::SeqCst);
+        interrupts.store(3, Ordering::SeqCst);
         runner.join().expect("runner thread");
     });
 }

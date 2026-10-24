@@ -114,3 +114,25 @@ impl ForkGate {
         drop(pending);
     }
 }
+
+#[cfg(test)]
+#[cfg(not(loom))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_phase_reads_back_as_it_was_set() {
+        let phase = RunnerPhase::default();
+        assert_eq!(phase.get(), Phase::Running);
+        for set in [
+            Phase::Deposited,
+            Phase::Parked,
+            Phase::ParkedForFork,
+            Phase::Exited,
+            Phase::Running,
+        ] {
+            phase.set(set);
+            assert_eq!(phase.get(), set);
+        }
+    }
+}
