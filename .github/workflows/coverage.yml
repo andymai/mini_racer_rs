@@ -14,7 +14,9 @@ on:
     types: [labeled, synchronize]
 
 concurrency:
-  group: coverage-${{ github.event.pull_request.number || github.run_id }}
+  # Keyed by the label a labeled event adds, as in nightly.yml, so adding another
+  # label does not cancel this run.
+  group: coverage-${{ github.event.pull_request.number || github.run_id }}-${{ github.event.action == 'labeled' && github.event.label.name || 'push' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions: {}

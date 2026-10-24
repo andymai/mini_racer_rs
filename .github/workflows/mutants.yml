@@ -15,7 +15,9 @@ on:
     types: [labeled, synchronize]
 
 concurrency:
-  group: mutants-${{ github.event.pull_request.number || github.run_id }}
+  # Keyed by the label a labeled event adds, as in nightly.yml, so adding another
+  # label does not cancel this run.
+  group: mutants-${{ github.event.pull_request.number || github.run_id }}-${{ github.event.action == 'labeled' && github.event.label.name || 'push' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions: {}
@@ -35,7 +37,17 @@ jobs:
       contents: read
     env:
       CI: "true"
+      # Every mutant relinks the engine's test binaries against V8: without
+      # debug info and with two jobs at a time they fit the runner, whose
+      # service was shut down mid-build with the defaults.
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_BUILD_JOBS: "2"
     steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h / && free -g
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -45,6 +57,9 @@ jobs:
       - env:
           SHARD: ${{ matrix.shard }}
         run: scripts/mutants.sh wire "$SHARD/4"
+      - name: Disk and memory after the run
+        if: ${{ always() }}
+        run: df -h / && free -g && du -sh target 2>/dev/null || true
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
         with:
