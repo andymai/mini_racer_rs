@@ -157,7 +157,7 @@ scripts/check-exports.sh --write   # after changing #[no_mangle] items or bumpin
 scripts/update-v8-archives.sh      # repin every target's V8 archive after bumping v8
 scripts/update-notices.sh          # regenerate THIRD_PARTY_NOTICES.md and licenses/v8 (--check to verify)
 RUSTFLAGS="--cfg loom -Dwarnings" cargo test -p mini_racer_sync --test loom --release --locked --target-dir target/loom
-scripts/fuzz-smoke.sh 60           # every fuzz target, 60 s each, on the pinned nightly
+scripts/fuzz-smoke.sh 60           # every fuzz target, 60 s each, on the pinned nightly (a corpus directory may follow)
 scripts/sanitizers.sh              # ASan teardown and memory checks, TSan on sync (Linux x86_64, needs llvm-symbolizer)
 bundle exec ruby test/upstream/run.rb --strict   # mini_racer's own suite against the ledger
 bundle exec ruby test/upstream/run.rb --suite execjs --strict   # ExecJS's suite on its MiniRacer runtime
