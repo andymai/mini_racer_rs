@@ -46,6 +46,28 @@ class SharedSourceHeapStatsTest < Minitest::Test
     end
   end
 
+  # A script of 128 KiB to a megabyte is cached from its second load, and
+  # every context still keeps its own copy of the source, reporting
+  # `:external_memory` as 0 as mini_racer 0.22.2 does.
+  def test_a_script_under_a_megabyte_is_never_shared
+    out, err, status = run_ruby(<<~'RUBY')
+      require "json"
+      require "mini_racer"
+      functions = Array.new(6_000) { |i| "function f#{i}(a) { return a + #{i}; }" }
+      source = "// \u{1F600}\n#{functions.join("\n")}\nf0(1);"
+      abort "#{source.bytesize} bytes" unless source.bytesize.between?(128 << 10, 1 << 20)
+      stats = Array.new(3) do
+        context = MiniRacer::Context.new
+        context.eval(source)
+        context.heap_stats[:external_memory]
+      end
+      puts JSON.generate(stats)
+    RUBY
+
+    assert_predicate status, :success?, err
+    assert_equal [0, 0, 0], JSON.parse(out)
+  end
+
   # Deviation behavior:shared-source-heap-stats@ruby: with the switch set
   # before the first context, every context keeps its own copy and reports
   # it as mini_racer 0.22.2 does.

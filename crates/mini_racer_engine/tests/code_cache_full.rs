@@ -1,4 +1,4 @@
-//! A process keeps at most 8 code caches, dropping the least recently used;
+//! A process keeps at most 64 code caches, dropping the least recently used;
 //! in a file of its own, as the cache is the process's.
 
 #![allow(
@@ -13,7 +13,7 @@ use mini_racer_engine::process::fork;
 use mini_racer_engine::{ContextConfig, ContextHandle, Host, WaitHandle, WaitOutcome};
 
 // What the cache holds before it drops an entry.
-const KEPT: usize = 8;
+const KEPT: usize = 64;
 
 struct Parking;
 
@@ -47,10 +47,10 @@ fn load(text: &str) {
     context.dispose(&mut Parking).expect("dispose");
 }
 
-// A script over the size worth caching.
+// A script over 128 KiB, the size worth caching, and under a megabyte.
 fn script(seed: usize) -> String {
     let mut text = String::new();
-    for i in 0..25_000 {
+    for i in 0..4_000 {
         writeln!(text, "function f{seed}_{i}(a) {{ return a + {i} - {i}; }}").expect("write");
     }
     write!(text, "f{seed}_0(1);").expect("write");
@@ -58,7 +58,7 @@ fn script(seed: usize) -> String {
 }
 
 #[test]
-fn a_ninth_cache_drops_the_least_recently_used() {
+fn a_cache_past_the_count_drops_the_least_recently_used() {
     if std::env::var_os("MINI_RACER_RS_CODE_CACHE").is_some() {
         return;
     }
@@ -70,8 +70,8 @@ fn a_ninth_cache_drops_the_least_recently_used() {
         load(text);
     }
     assert_eq!(counts(), (stored, 0));
-    // Found, the first becomes the most recently used, so the ninth drops the
-    // second, which is then made again.
+    // Found, the first becomes the most recently used, so the one past the
+    // count drops the second, which is then made again.
     load(&texts[0]);
     assert_eq!(counts(), (stored, 1));
     load(&texts[KEPT]);

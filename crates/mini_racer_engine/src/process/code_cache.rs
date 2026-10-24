@@ -7,7 +7,11 @@ use mini_racer_sync::lock;
 
 use crate::control::JsText;
 
-const MAX_ENTRIES: usize = 8;
+// The byte cap bounds the memory; the count keeps each large eval's scan of
+// the list short. Caches of scripts of 128 KiB to 1 MiB measured 99 KB
+// (React's bundle) to 530 KB (Autoprefixer's), so 64 of them take about 34 MB
+// at most, where 8 entries let a few such scripts push a bundle's cache out.
+const MAX_ENTRIES: usize = 64;
 const MAX_BYTES: usize = 256 << 20;
 // 32 KiB of digests, so a bundle loaded again after thousands of large scripts
 // evaluated once is still seen a second time: a list of 64 forgot one after 70
@@ -20,9 +24,9 @@ const MAX_REFUSED: usize = 8;
 const SAMPLE: usize = 4096;
 const SAMPLE_POINTS: usize = 8;
 
-/// V8 code caches for the large scripts one process's contexts have run, so
-/// the next context to evaluate one reads its compiled code back instead of
-/// compiling it again.
+/// V8 code caches for the scripts of 128 KiB or more one process's contexts
+/// have run, so the next context to evaluate one reads its compiled code back
+/// instead of compiling it again.
 ///
 /// A script is cached the second time the process sees it. The first sighting
 /// costs a sampled digest and no cache, as a large script evaluated once
