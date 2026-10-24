@@ -8,7 +8,8 @@
 # the first, or the harness itself is unsound. --explore runs a fresh seed's
 # cases with no ledger and fails on any divergence the accepted ones miss. Its
 # cases share no object, so it accepts none under behavior:object-ids@ruby: a
-# repeated object there is one the candidate made up.
+# repeated object there is one the candidate made up. With --shared its cases
+# share objects as the ledger's do, and those divergences stay accepted.
 
 require "fileutils"
 require "json"
@@ -49,6 +50,9 @@ OptionParser.new do |opts|
   opts.on("--explore", "Generated cases only, none sharing an object; fail on any divergence or crash") do
     options.merge!(explore: true, generated: true)
   end
+  opts.on("--shared", "With --explore, cases share objects, and #{IDENTITY} divergences stay accepted") do
+    options[:shared] = true
+  end
   opts.on("--out PATH") { |path| options[:out] = path }
 end.parse!
 
@@ -77,12 +81,14 @@ FileUtils.mkdir_p(WORK)
 divergences = DiffLedger.load_divergences(DIVERGENCES)
 problems = DiffLedger.divergence_problems(divergences, compat_entries)
 abort problems.join("\n") unless problems.empty?
-divergences = divergences.reject { |divergence| divergence["compat"] == IDENTITY } if options[:explore]
+shared = !options[:explore] || options.fetch(:shared, false)
+divergences = divergences.reject { |divergence| divergence["compat"] == IDENTITY } unless shared
 
 ledger_path = LEDGERS.fetch(options[:set])
 if options[:explore] && (options[:strict] || options[:write_ledger])
   abort "diff: --explore checks no ledger, so it takes neither --strict nor --write-ledger"
 end
+abort "diff: --shared applies to --explore" if options[:shared] && !options[:explore]
 if options[:set] == "consumers" && options[:generated]
   abort "diff: --set consumers runs fixed workloads; --seed, --js, --ruby and --shrink apply to the values set"
 end
@@ -94,7 +100,7 @@ cases = if options[:set] == "consumers"
           end
         else
           generated = DiffGenerate.cases(seed: options[:seed], javascript: options[:js], ruby: options[:ruby],
-                                         shared: !options[:explore],)
+                                         shared:,)
           options[:explore] ? generated : generated + load_corpus
         end
 duplicates = cases.map { |kase| kase.fetch("id") }.tally.select { |_, n| n > 1 }.keys

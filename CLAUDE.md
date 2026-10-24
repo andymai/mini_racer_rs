@@ -168,6 +168,7 @@ bundle exec rake compat:verify     # compat:check plus a fresh reflection of the
 bundle exec ruby test/diff/run.rb --twin --strict   # the real gem and this one on the same values (needs tools/reference)
 bundle exec ruby test/diff/run.rb --set consumers --twin --strict   # real libraries (npm run build in test/consumers/js first)
 bundle exec ruby test/diff/run.rb --explore --shrink --seed 42 --js 1500 --ruby 1500   # a fresh seed, no ledger, no shared objects
+bundle exec ruby test/diff/run.rb --explore --shared --shrink --seed 2 --js 1500 --ruby 1500   # a seed's values sharing objects, no ledger
 BUNDLE_GEMFILE=$PWD/test/consumers/transitive/Gemfile bundle exec ruby test/consumers/transitive/check.rb
 podman run --rm --init --userns=keep-id --user 0 --security-opt label=disable -v "$PWD:/mini_racer_rs" -w /mini_racer_rs "$(scripts/alpine-image.sh ruby-3.4)" scripts/alpine.sh test   # CI's Alpine job
 ```
