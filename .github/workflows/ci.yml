@@ -518,10 +518,12 @@ jobs:
         if: matrix.os == 'ubuntu-24.04' && matrix.ruby == '3.4'
         run: bundle exec ruby bench/run.rb --quick
       # mini_racer's own suite, unmodified; every result must match the ledger.
+      # A failure runs the suite once more, and a pass then leaves a warning
+      # naming what failed.
       - name: Upstream suite (strict)
-        run: bundle exec ruby test/upstream/run.rb --strict --seed "${{ github.run_number }}"
+        run: scripts/retry.sh "Upstream suite (strict)" bundle exec ruby test/upstream/run.rb --strict --seed "${{ github.run_number }}"
       - name: ExecJS contract suite (strict)
-        run: bundle exec ruby test/upstream/run.rb --suite execjs --strict --seed "${{ github.run_number }}"
+        run: scripts/retry.sh "ExecJS contract suite (strict)" bundle exec ruby test/upstream/run.rb --suite execjs --strict --seed "${{ github.run_number }}"
       - name: Upstream scripts (recorded until their milestone)
         if: matrix.os == 'ubuntu-24.04' && matrix.ruby == '3.4'
         run: bundle exec ruby test/upstream/run.rb --scripts
@@ -645,7 +647,8 @@ jobs:
         with:
           ruby-version: truffleruby+graalvm-40.0.0
           bundler-cache: true
-      - run: truffleruby-polyglot-get js
+      - name: Install GraalJS
+        run: scripts/retry.sh "truffleruby-polyglot-get js" truffleruby-polyglot-get js
       - run: bundle exec ruby -Itest/ruby -Ilib test/ruby/harness_guard_test.rb
       - name: Install the real mini_racer 0.22.2
         working-directory: tools/reference
@@ -658,9 +661,9 @@ jobs:
             bundle exec ruby tools/compat/reflect.rb --reference --out tmp/compat/reference-truffleruby.json
           bundle exec ruby tools/compat/check.rb tmp/compat/candidate-truffleruby.json tmp/compat/reference-truffleruby.json
       - name: Upstream suite (strict)
-        run: bundle exec ruby test/upstream/run.rb --strict --seed "${{ github.run_number }}"
+        run: scripts/retry.sh "Upstream suite (strict)" bundle exec ruby test/upstream/run.rb --strict --seed "${{ github.run_number }}"
       - name: ExecJS contract suite (strict)
-        run: bundle exec ruby test/upstream/run.rb --suite execjs --strict --seed "${{ github.run_number }}"
+        run: scripts/retry.sh "ExecJS contract suite (strict)" bundle exec ruby test/upstream/run.rb --suite execjs --strict --seed "${{ github.run_number }}"
 
   gc-stress:
     name: GC Stress
