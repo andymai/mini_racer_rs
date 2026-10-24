@@ -69,6 +69,13 @@ class DiffShapesErrorFieldsTest < Minitest::Test
     refute lost?(list(ONE, fields("message")), list(ONE, NOTHING))
     refute lost?(list(ONE, fields("message")), list(ONE, int(5)))
   end
+
+  # mini_racer numbers an Error twice, so its fields Hash stands in for a repeated container only;
+  # a repeated String or Time is an again, never an Error.
+  def test_error_fields_are_not_accepted_where_the_candidate_repeats_a_string_or_a_time
+    refute lost?(list(text("e"), fields("message")), list(text("e"), again(text("e"))))
+    refute lost?(list(TIME, fields("message", "stack")), list(TIME, again(TIME)))
+  end
 end
 
 class DiffShapesEqualValueTest < Minitest::Test

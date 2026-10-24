@@ -60,7 +60,8 @@ module DiffShapes
 
     def explained?(want, got)
       if repeat?(got)
-        LOST.include?(want) || repeat?(want) || error_fields?(want) || @moved_to.any? { alike?(want, _1) }
+        LOST.include?(want) || repeat?(want) || (ref?(got) && error_fields?(want)) ||
+          @moved_to.any? { alike?(want, _1) }
       elsif want == NIL_NODE
         earlier?(got, %w[string]) || moved?(got)
       elsif ref?(want)
