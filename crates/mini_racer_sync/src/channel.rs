@@ -477,6 +477,141 @@ mod tests {
         }
     }
 
+    // What a fork's takeover and `is_disposed` read of a channel.
+    #[derive(Debug, PartialEq, Eq)]
+    struct Seen {
+        idle: bool,
+        closed: bool,
+    }
+
+    const IDLE: Seen = Seen {
+        idle: true,
+        closed: false,
+    };
+    const BUSY: Seen = Seen {
+        idle: false,
+        closed: false,
+    };
+    const SHUT: Seen = Seen {
+        idle: false,
+        closed: true,
+    };
+
+    fn seen(channel: &Channel<Text>) -> Seen {
+        Seen {
+            idle: channel.idle(),
+            closed: channel.is_closed(),
+        }
+    }
+
+    type Stage = (&'static str, fn(&Channel<Text>), Seen);
+
+    // An outermost request whose callback nests a request, one send or
+    // receive at a time, with what the channel reads as after each.
+    fn steps() -> [Stage; 12] {
+        [
+            (
+                "a request not yet received",
+                |channel| channel.request("outer").unwrap(),
+                BUSY,
+            ),
+            (
+                "a request open",
+                |channel| assert_eq!(request(channel), Some("outer")),
+                BUSY,
+            ),
+            (
+                "a callback not yet received",
+                |channel| channel.callback("ruby fn").unwrap(),
+                BUSY,
+            ),
+            (
+                "a callback open",
+                |channel| assert_eq!(callback(channel), Some("ruby fn")),
+                BUSY,
+            ),
+            (
+                "a nested request not yet received",
+                |channel| channel.request("inner").unwrap(),
+                BUSY,
+            ),
+            (
+                "a nested request open",
+                |channel| assert_eq!(request(channel), Some("inner")),
+                BUSY,
+            ),
+            (
+                "a nested response not yet received",
+                |channel| channel.respond("inner done").unwrap(),
+                BUSY,
+            ),
+            (
+                "the callback open again",
+                |channel| assert_eq!(response(channel), Some("inner done")),
+                BUSY,
+            ),
+            (
+                "a reply not yet received",
+                |channel| channel.reply("ruby fn done").unwrap(),
+                BUSY,
+            ),
+            (
+                "the request open again",
+                |channel| assert_eq!(reply(channel), Some("ruby fn done")),
+                BUSY,
+            ),
+            (
+                "a response not yet received",
+                |channel| channel.respond("outer done").unwrap(),
+                IDLE,
+            ),
+            (
+                "the response received, as a claim finds it before sending",
+                |channel| assert_eq!(response(channel), Some("outer done")),
+                IDLE,
+            ),
+        ]
+    }
+
+    #[test]
+    fn only_rubys_turn_with_nothing_open_is_idle() {
+        let channel = Channel::<Text>::default();
+        assert_eq!(seen(&channel), IDLE, "nothing sent");
+        for (state, step, expected) in steps() {
+            step(&channel);
+            assert_eq!(seen(&channel), expected, "{state}");
+        }
+    }
+
+    // `park_notified` holds its side's flag in the state word while `wait`
+    // runs, as a runner parked for its next request holds its own.
+    #[test]
+    fn a_side_waiting_for_its_turn_leaves_idle_alone() {
+        let channel = Channel::<Text>::default();
+        channel.park_notified(Side::V8, || {
+            assert_eq!(seen(&channel), IDLE, "a runner waiting for a request");
+        });
+        channel.request("eval").unwrap();
+        channel.park_notified(Side::Ruby, || {
+            assert_eq!(seen(&channel), BUSY, "Ruby waiting for a response");
+        });
+    }
+
+    #[test]
+    fn a_closed_channel_is_never_idle() {
+        for reached in 0..=steps().len() {
+            let channel = Channel::<Text>::default();
+            let mut state = "nothing sent";
+            for (name, step, _) in steps().into_iter().take(reached) {
+                step(&channel);
+                state = name;
+            }
+            assert!(!channel.is_closed(), "open with {state}");
+            channel.close();
+            assert_eq!(seen(&channel), SHUT, "closed with {state}");
+        }
+    }
+
     #[test]
     fn a_request_and_its_response_change_turns() {
         let channel = Channel::<Text>::default();

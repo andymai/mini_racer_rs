@@ -904,6 +904,33 @@ mod tests {
         assert_eq!(cell.begin(DispatchKind::Script), Err(TermError::Disposing));
     }
 
+    // A forked child reads `inherited().disposing` where its parent reads
+    // `is_disposing`, so the two must agree throughout.
+    #[test]
+    fn a_dispose_shows_from_its_start_and_for_good() {
+        let (cell, _) = cell();
+        let disposing = |cell: &TermCell<Probe>| {
+            let disposing = cell.is_disposing();
+            assert_eq!(
+                cell.inherited().map(|inherited| inherited.disposing),
+                Some(disposing)
+            );
+            disposing
+        };
+        assert!(!disposing(&cell));
+        cell.request(Interrupt::Stop);
+        let id = cell.begin(DispatchKind::Script).expect("nothing armed");
+        cell.request(Interrupt::Timeout(id));
+        assert!(!disposing(&cell));
+
+        cell.dispose();
+        assert!(disposing(&cell));
+        assert_eq!(cell.end(id), Some(Halt::Disposed));
+        assert!(disposing(&cell));
+        assert_eq!(cell.begin(DispatchKind::Script), Err(TermError::Disposing));
+        assert!(disposing(&cell));
+    }
+
     #[test]
     fn one_outermost_dispatch_at_a_time() {
         let (cell, _) = cell();
