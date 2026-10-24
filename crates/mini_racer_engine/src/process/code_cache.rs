@@ -1,7 +1,8 @@
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hash, Hasher};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
 
 use mini_racer_sync::lock;
 
@@ -23,6 +24,13 @@ const MAX_REFUSED: usize = 8;
 // few points between, to tell one sighting from another without reading it all.
 const SAMPLE: usize = 4096;
 const SAMPLE_POINTS: usize = 8;
+// A first sighting this large is cached at once when its top-level run took
+// at least as long as its compile, as a bundle that renders as it loads does:
+// a 44 MB server rendering bundle compiled in 186 ms and ran for 690, and its
+// cache of 8 MB took 35 ms. A data literal runs in a fraction of its compile,
+// and its cache is larger than its source: 16 MiB of JSON compiled in 312 ms,
+// ran for 55 and made a cache of 24 MB in 164 ms.
+const FIRST_SIGHTING: usize = 16 << 20;
 
 /// V8 code caches for the scripts of 128 KiB or more one process's contexts
 /// have run, so the next context to evaluate one reads its compiled code back
@@ -31,7 +39,10 @@ const SAMPLE_POINTS: usize = 8;
 /// A script is cached the second time the process sees it. The first sighting
 /// costs a sampled digest and no cache, as a large script evaluated once
 /// (per-request data, say) gains nothing from one; it costs the full digest
-/// too only in a context that reads the script from its shared source.
+/// too only in a context that reads the script from its shared source. Such a
+/// context caches a first sighting of 16 MiB or more whose run took at least
+/// as long as its compile (`worth_first`), unless that would drop an entry a
+/// context has read.
 #[derive(Default)]
 pub struct CodeCache {
     // Most recently used last.
@@ -64,6 +75,8 @@ pub(crate) struct Key {
 pub(crate) struct Entry {
     key: Key,
     data: Box<[u8]>,
+    // A context compiled from it.
+    read: AtomicBool,
 }
 
 impl Entry {
@@ -76,6 +89,9 @@ impl Entry {
 pub(crate) struct Building {
     cache: &'static CodeCache,
     key: Key,
+    // At the script's first sighting, so it makes room only from entries no
+    // context has read.
+    first: bool,
 }
 
 impl Drop for Building {
@@ -90,6 +106,9 @@ pub(crate) enum Plan {
     /// first sighting whose source is shared, a key being built elsewhere or
     /// a refused cache.
     Compile(Option<Key>),
+    /// From source, a first sighting of 16 MiB or more whose source is
+    /// shared, cached once it has run if `worth_first` says so (`CodeCache::first`).
+    First(Key),
     /// From source, then a cache made once the dispatch is over.
     Make(Building),
     /// From the entry, falling back to source if V8 refuses it.
@@ -102,7 +121,7 @@ impl Plan {
         match self {
             Self::Compile(key) => key.as_ref(),
             Self::Make(building) => Some(&building.key),
-            Self::Consume(_, key) => Some(key),
+            Self::First(key) | Self::Consume(_, key) => Some(key),
         }
     }
 }
@@ -137,6 +156,9 @@ impl CodeCache {
             digest: self.hasher.hash_one(source),
             sighting,
         };
+        if first && source.byte_len() >= FIRST_SIGHTING {
+            return Plan::First(key);
+        }
         if first {
             return Plan::Compile(Some(key));
         }
@@ -157,13 +179,32 @@ impl CodeCache {
 
     /// Claims `key` for this context to build, unless another is building it.
     pub(crate) fn begin(&'static self, key: Key) -> Option<Building> {
+        self.claim(key, false)
+    }
+
+    /// Claims a first sighting's `key` for this context to build once its
+    /// script has run, unless it was cached, refused or claimed meanwhile.
+    pub(crate) fn first(&'static self, key: Key) -> Option<Building> {
+        if lock(&self.entries).iter().any(|entry| entry.key == key)
+            || lock(&self.refused).contains(&key)
+        {
+            return None;
+        }
+        self.claim(key, true)
+    }
+
+    fn claim(&'static self, key: Key, first: bool) -> Option<Building> {
         let mut building = lock(&self.building);
         if building.contains(&key) {
             return None;
         }
         building.push(key.clone());
         drop(building);
-        Some(Building { cache: self, key })
+        Some(Building {
+            cache: self,
+            key,
+            first,
+        })
     }
 
     /// A startup snapshot's identity for `Key`, from a sample of the blob:
@@ -174,14 +215,17 @@ impl CodeCache {
         hasher.finish()
     }
 
-    pub(crate) fn hit(&self) {
+    pub(crate) fn hit(&self, entry: &Entry) {
+        entry.read.store(true, Ordering::Relaxed);
         self.hits.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Keeps `data` for the key built, dropping the least recently used
-    /// entries past the limits; a cache larger than all of them is refused.
+    /// entries past the limits; a cache larger than all of them is refused. A
+    /// first sighting's cache that would drop an entry a context has read is
+    /// not kept, and the script is cached at its next sighting instead.
     pub(crate) fn store(&self, building: Building, data: Box<[u8]>) {
-        let key = building.key.clone();
+        let (key, first) = (building.key.clone(), building.first);
         drop(building);
         if data.len() > MAX_BYTES {
             touch(&self.refused, key, MAX_REFUSED);
@@ -191,12 +235,26 @@ impl CodeCache {
         if entries.iter().any(|entry| entry.key == key) {
             return;
         }
-        entries.push(Arc::new(Entry { key, data }));
-        while entries.len() > MAX_ENTRIES
-            || entries.iter().map(|entry| entry.data.len()).sum::<usize>() > MAX_BYTES
-        {
-            entries.remove(0);
+        let mut count = entries.len() + 1;
+        let mut bytes = entries.iter().map(|entry| entry.data.len()).sum::<usize>() + data.len();
+        let mut dropped = 0;
+        while count > MAX_ENTRIES || bytes > MAX_BYTES {
+            let Some(oldest) = entries.get(dropped) else {
+                break;
+            };
+            if first && oldest.read.load(Ordering::Relaxed) {
+                return;
+            }
+            count -= 1;
+            bytes -= oldest.data.len();
+            dropped += 1;
         }
+        entries.drain(..dropped);
+        entries.push(Arc::new(Entry {
+            key,
+            data,
+            read: AtomicBool::new(false),
+        }));
         drop(entries);
         self.stored.fetch_add(1, Ordering::Relaxed);
     }
@@ -297,10 +355,31 @@ pub(crate) fn enabled() -> bool {
     })
 }
 
+/// Whether a first sighting's script is worth a cache now, from how long it
+/// took to compile and to run. `MINI_RACER_RS_CODE_CACHE_FIRST` set to
+/// `always` or `never` (unstable, for tests) decides instead, read once per
+/// process, first by `ContextHandle::spawn` as `enabled` is.
+pub(crate) fn worth_first(compiled: Duration, ran: Duration) -> bool {
+    first_override().unwrap_or(ran >= compiled)
+}
+
+pub(crate) fn first_override() -> Option<bool> {
+    static DECIDED: OnceLock<Option<bool>> = OnceLock::new();
+    *DECIDED.get_or_init(
+        || match std::env::var_os("MINI_RACER_RS_CODE_CACHE_FIRST")?.to_str()? {
+            "always" => Some(true),
+            "never" => Some(false),
+            _ => None,
+        },
+    )
+}
+
 #[cfg(test)]
 #[allow(clippy::panic, reason = "a test fails by panicking")]
 mod tests {
-    use super::{CodeCache, MAX_SIGHTINGS, Plan};
+    use std::time::Duration;
+
+    use super::{CodeCache, FIRST_SIGHTING, MAX_ENTRIES, MAX_SIGHTINGS, Plan};
     use crate::control::JsText;
 
     fn cache() -> &'static CodeCache {
@@ -502,6 +581,149 @@ mod tests {
         assert!(matches!(
             cache.plan(&name(), &source(10), None, true),
             Plan::Make(..)
+        ));
+    }
+
+    fn bundle(seed: u8, bytes: usize) -> JsText {
+        JsText::Latin1(vec![seed; bytes])
+    }
+
+    // Small enough to fill the list quickly; `plan` reads no size but the
+    // first sighting's.
+    fn tiny(seed: usize) -> JsText {
+        JsText::Latin1(seed.to_le_bytes().to_vec())
+    }
+
+    // Caches `text` at its first sighting.
+    fn first(cache: &'static CodeCache, text: &JsText, data: Box<[u8]>) {
+        let Plan::First(key) = cache.plan(&name(), text, None, true) else {
+            panic!("a first sighting worth a cache at once");
+        };
+        let Some(building) = cache.first(key) else {
+            panic!("an unclaimed first sighting");
+        };
+        cache.store(building, data);
+    }
+
+    fn consumed(cache: &'static CodeCache, text: &JsText) {
+        let Plan::Consume(entry, _) = cache.plan(&name(), text, None, true) else {
+            panic!("a stored cache is found");
+        };
+        cache.hit(&entry);
+    }
+
+    #[test]
+    fn only_a_shared_first_sighting_of_16_mib_or_more_may_be_cached_at_once() {
+        let cache = cache();
+        assert!(matches!(
+            cache.plan(&name(), &bundle(1, FIRST_SIGHTING), None, true),
+            Plan::First(_)
+        ));
+        assert!(matches!(
+            cache.plan(&name(), &bundle(2, FIRST_SIGHTING), None, false),
+            Plan::Compile(None)
+        ));
+        assert!(matches!(
+            cache.plan(&name(), &bundle(3, FIRST_SIGHTING - 1), None, true),
+            Plan::Compile(Some(_))
+        ));
+        let units = vec![0x61; FIRST_SIGHTING / 2];
+        assert!(matches!(
+            cache.plan(&name(), &JsText::Utf16(units), None, true),
+            Plan::First(_)
+        ));
+        // Seen again, it is cached as any other script.
+        assert!(matches!(
+            cache.plan(&name(), &bundle(1, FIRST_SIGHTING), None, true),
+            Plan::Make(_)
+        ));
+    }
+
+    #[test]
+    fn a_first_sighting_is_cached_once_it_has_run_for_as_long_as_it_compiled() {
+        let millis = Duration::from_millis;
+        assert!(super::worth_first(millis(186), millis(690)));
+        assert!(super::worth_first(millis(100), millis(100)));
+        assert!(!super::worth_first(millis(312), millis(55)));
+        let cache = cache();
+        let text = bundle(4, FIRST_SIGHTING);
+        first(cache, &text, Box::from(&b"compiled"[..]));
+        assert_eq!(cache.stored(), 1);
+        consumed(cache, &text);
+        assert_eq!(cache.hits(), 1);
+    }
+
+    #[test]
+    fn a_first_sighting_cached_or_claimed_meanwhile_is_not_built_again() {
+        let cache = cache();
+        let text = bundle(5, FIRST_SIGHTING);
+        let Plan::First(key) = cache.plan(&name(), &text, None, true) else {
+            panic!("a first sighting worth a cache at once");
+        };
+        let Plan::Make(building) = cache.plan(&name(), &text, None, true) else {
+            panic!("a second sighting makes a cache");
+        };
+        assert!(cache.first(key.clone()).is_none());
+        cache.store(building, Box::from(&b"compiled"[..]));
+        assert!(cache.first(key).is_none());
+        assert_eq!(cache.stored(), 1);
+    }
+
+    // A full list with a read entry the least recently used: a first
+    // sighting's cache would drop it, so it is not kept, and its script is
+    // cached at its second sighting as any other.
+    #[test]
+    fn a_first_sighting_never_drops_an_entry_a_context_has_read() {
+        let cache = cache();
+        for seed in 0..MAX_ENTRIES {
+            cached(cache, &tiny(seed), Box::from(&b"compiled"[..]));
+        }
+        consumed(cache, &tiny(0));
+        // Now the least recently used, and unread: the first sighting takes
+        // its place.
+        let roomy = bundle(6, FIRST_SIGHTING);
+        first(cache, &roomy, Box::from(&b"compiled"[..]));
+        assert_eq!(cache.stored(), 65);
+        assert!(matches!(
+            cache.plan(&name(), &tiny(1), None, true),
+            Plan::Make(_)
+        ));
+        // Read in turn, every entry is read, the oldest last.
+        for seed in 2..MAX_ENTRIES {
+            consumed(cache, &tiny(seed));
+        }
+        consumed(cache, &tiny(0));
+        consumed(cache, &roomy);
+        let crowded = bundle(7, FIRST_SIGHTING);
+        first(cache, &crowded, Box::from(&b"compiled"[..]));
+        assert_eq!(cache.stored(), 65);
+        consumed(cache, &tiny(2));
+        let Plan::Make(building) = cache.plan(&name(), &crowded, None, true) else {
+            panic!("a second sighting makes a cache");
+        };
+        cache.store(building, Box::from(&b"compiled"[..]));
+        assert_eq!(cache.stored(), 66);
+        assert!(matches!(
+            cache.plan(&name(), &tiny(3), None, true),
+            Plan::Make(_)
+        ));
+    }
+
+    #[test]
+    fn a_first_sighting_past_the_size_limit_drops_only_unread_entries() {
+        let cache = cache();
+        let half = || vec![0; super::MAX_BYTES / 2 + 1].into_boxed_slice();
+        cached(cache, &tiny(1), half());
+        consumed(cache, &tiny(1));
+        first(cache, &bundle(8, FIRST_SIGHTING), half());
+        assert_eq!(cache.stored(), 1);
+        cached(cache, &tiny(2), half());
+        assert_eq!(cache.stored(), 2);
+        first(cache, &bundle(9, FIRST_SIGHTING), half());
+        assert_eq!(cache.stored(), 3);
+        assert!(matches!(
+            cache.plan(&name(), &tiny(2), None, true),
+            Plan::Make(_)
         ));
     }
 }

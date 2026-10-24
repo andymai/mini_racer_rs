@@ -18,7 +18,7 @@ use crate::control::{
     CallRequest, CallbackReply, ControlBlock, Depth, HeapWatch, IsolateTerminator, JsText, Request,
 };
 use crate::fast_calls::{self, Hoisted, Shape};
-use crate::process::code_cache::{Building, Key, Plan};
+use crate::process::code_cache::{self, Building, Key, Plan};
 use crate::process::fork::Generation;
 use crate::process::platform::{self, Mode};
 use crate::process::watchdog;
@@ -1135,13 +1135,27 @@ fn evaluate(
         .ok_or_else(too_large)?;
     let name = string(tc, filename).ok_or_else(too_large)?;
     let origin = serialize::origin(tc, name.into());
+    let first = match &plan {
+        Plan::First(key) => Some(key.clone()),
+        _ => None,
+    };
+    let compiling = first.is_some().then(Instant::now);
     let (script, make) = compile(tc, runtime, source, &origin, plan);
+    let compiled = compiling.map(|at| at.elapsed());
     let script = script.ok_or_else(|| failure(tc, JsErrorKind::Parse))?;
     match_bundle(tc, runtime, text, name, script);
+    let running = compiled.is_some().then(Instant::now);
     let value = script
         .run(tc)
         .ok_or_else(|| failure(tc, JsErrorKind::Runtime))?;
+    let ran = running.map(|at| at.elapsed());
     let reply = settle(tc, runtime, value, (depth, awaited))?;
+    let make = make.or_else(|| {
+        let first = first?;
+        code_cache::worth_first(compiled?, ran?)
+            .then(|| runtime.generation.code_cache().first(first))
+            .flatten()
+    });
     if let Some(building) = make {
         let script = v8::Global::new(tc, script.get_unbound_script(tc));
         lock(&runtime.uncached).push(Uncached { script, building });
@@ -1507,7 +1521,9 @@ fn compile<'s>(
     plan: Plan,
 ) -> (Option<v8::Local<'s, v8::Script>>, Option<Building>) {
     let (entry, key) = match plan {
-        Plan::Compile(_) => return (v8::Script::compile(scope, source, Some(origin)), None),
+        Plan::Compile(_) | Plan::First(_) => {
+            return (v8::Script::compile(scope, source, Some(origin)), None);
+        }
         Plan::Make(building) => {
             return (
                 v8::Script::compile(scope, source, Some(origin)),
@@ -1538,7 +1554,7 @@ fn compile<'s>(
         cache.forget(&entry);
         return (script, cache.begin(key));
     }
-    cache.hit();
+    cache.hit(&entry);
     (script, None)
 }
 
