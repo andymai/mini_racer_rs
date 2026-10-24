@@ -89,4 +89,32 @@ class CallbackDeviationTest < Minitest::Test
     assert_predicate status, :success?, err
     assert_equal "5\n\"undefined\"\nnil\n3\n", out
   end
+
+  # Deviation behavior:callback-jump@ruby, from the to_s of the error a
+  # callback raises, which gives JavaScript its message: mini_racer 0.22.2
+  # crashes the process when that to_s throws, and hands JavaScript a
+  # catchable "Ruby exception" when it calls Thread#kill. Here, as for a jump
+  # out of the callable, the script is terminated and the jump goes on once
+  # the eval has returned.
+  def test_a_jump_out_of_a_raised_errors_to_s_ends_the_script_and_continues
+    out, err, status = run_ruby(<<~RUBY)
+      Thread.new { sleep 10; warn "timed out"; exit!(99) }
+      require "mini_racer"
+      Jumps = Class.new(StandardError) { def to_s = $jump.call }
+      context = MiniRacer::Context.new
+      context.attach("raiser", proc { raise Jumps })
+      script = "raiser(); globalThis.ran = true; 'not reached'"
+      $jump = -> { throw :out, 5 }
+      p catch(:out) { context.eval(script) }
+      p context.eval("typeof ran")
+      $jump = -> { Thread.current.kill }
+      p Thread.new { context.eval(script) }.join.value
+      p context.eval("typeof ran")
+      context.attach("plain", proc { raise "plain" })
+      p context.eval("try { plain() } catch (e) { e.message }")
+    RUBY
+
+    assert_predicate status, :success?, err
+    assert_equal "5\n\"undefined\"\nnil\n\"undefined\"\n\"plain\"\n", out
+  end
 end

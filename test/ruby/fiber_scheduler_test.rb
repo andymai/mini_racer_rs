@@ -163,3 +163,44 @@ class FiberSchedulerLifecycleTest < Minitest::Test
     assert_operator waits, :>=, 1
   end
 end
+
+# A wait under a scheduler first finds or makes the IO it waits on, and an
+# interrupt that came in while the wait spun holding the GVL is raised as
+# that first Ruby call returns. MINI_RACER_RS_SPIN_US makes the spin 600 ms,
+# so the signal sent 150 ms in runs its trap there: on a context that made
+# its IO earlier, in the check that the IO is open, and on a new one, in
+# making it.
+class FiberSchedulerInterruptTest < Minitest::Test
+  include RubyProcess
+
+  def test_an_interrupt_as_a_wait_begins_cancels_the_dispatch
+    skip "needs CRuby, async and SIGUSR1" unless RUBY_ENGINE == "ruby" && defined?(Async) && Signal.list.key?("USR1")
+    code = <<~RUBY
+      require "mini_racer"
+      require "async"
+      Trapped = Class.new(StandardError)
+      trap("USR1") { raise Trapped }
+      busy = "globalThis.busy = (ms) => { const end = Date.now() + ms; while (Date.now() < end) {} return ms }"
+      contexts = Array.new(2) { MiniRacer::Context.new.tap { _1.eval(busy) } }
+      outcomes = Sync do
+        contexts.first.call("busy", 800)
+        contexts.map do |context|
+          context.eval("1")
+          signal = Process.spawn("sleep 0.15; kill -USR1 \#{Process.pid}")
+          begin
+            context.call("busy", 800)
+          rescue Trapped
+            :raised
+          ensure
+            Process.wait(signal)
+          end
+        end
+      end
+      p outcomes + contexts.map { _1.eval("1 + 1") }
+    RUBY
+    stdout, stderr, status = run_ruby(code, env: { "MINI_RACER_RS_SPIN_US" => "600000,0" })
+
+    assert_predicate status, :success?, stderr
+    assert_equal "[:raised, :raised, 2, 2]\n", stdout
+  end
+end

@@ -113,7 +113,13 @@ impl<'r> RubyHost<'r> {
     // the dispatch, even when the answer came in meanwhile. None means no
     // notifier is to be had, so the thread waits instead.
     fn wait_in_fiber(&mut self, wait: &WaitHandle<'_>) -> Option<WaitOutcome> {
-        let io = self.waiter_io(wait)?;
+        let io = match self.waiter_io(wait) {
+            Ok(io) => io?,
+            Err(error) => {
+                self.pending = Some(error);
+                return Some(WaitOutcome::Cancel);
+            }
+        };
         loop {
             let mut raised = None;
             wait.park_notified(|| raised = wait_readable(io).err())
@@ -130,34 +136,47 @@ impl<'r> RubyHost<'r> {
 
     // Made once per context and fork epoch, and again if Ruby code closed it;
     // the descriptor is Ruby's own copy, so closing it never touches the
-    // engine's.
-    fn waiter_io(&self, wait: &WaitHandle<'_>) -> Option<Value> {
+    // engine's. An error is an interrupt raised as one of its calls returned,
+    // which the dispatch raises, as it does one raised in the wait itself.
+    fn waiter_io(&self, wait: &WaitHandle<'_>) -> Result<Option<Value>, Error> {
         let ruby = self.ruby;
-        let waiter = self.waiter?;
+        let Some(waiter) = self.waiter else {
+            return Ok(None);
+        };
         let epoch = fork::epoch();
         if let Some(io) = waiter.io.get(ruby)
             && waiter.epoch.get() == epoch
-            && !io.funcall::<_, _, bool>("closed?", ()).unwrap_or(true)
+            && !io.funcall::<_, _, bool>("closed?", ())?
         {
-            return Some(io);
+            return Ok(Some(io));
         }
-        let fd = wait.notifier().ok()?;
+        let Ok(fd) = wait.notifier() else {
+            return Ok(None);
+        };
+        // An interrupt can end `for_fd` after Ruby made the IO, which this
+        // then drops along with closing the descriptor; made without
+        // autoclose, that IO never closes the number once it is reused.
         let io: Value = ruby
             .class_io()
-            .funcall("for_fd", (fd.as_raw_fd(), kwargs!("autoclose" => true)))
-            .ok()?;
+            .funcall("for_fd", (fd.as_raw_fd(), kwargs!("autoclose" => false)))?;
         let _owned_by_io = fd.into_raw_fd();
         waiter.io.set(ruby, io);
         waiter.epoch.set(epoch);
-        Some(io)
+        io.funcall::<_, _, Value>("autoclose=", (true,))?;
+        Ok(Some(io))
     }
 
     // Keeps the first exception the scheduler raises for after the dispatch,
     // then leaves the rest of the wait to the thread, so a scheduler that
     // keeps raising cannot spin here.
     fn wait_blocking_in_fiber(&mut self, wait: &WaitHandle<'_>) {
-        let Some(io) = self.waiter_io(wait) else {
-            return;
+        let io = match self.waiter_io(wait) {
+            Ok(Some(io)) => io,
+            Ok(None) => return,
+            Err(error) => {
+                self.pending.get_or_insert(error);
+                return;
+            }
         };
         while !wait.ready() {
             let mut raised = None;
@@ -226,21 +245,23 @@ fn exception(ruby: &Ruby, error: &Error) -> Option<Exception> {
 }
 
 // What V8 throws for a raising callback: the exception's to_s, in its own
-// encoding, or mini_racer's fallback text. A callback refused for want of
-// stack has no room left to call to_s, so its text is the one Ruby raises
-// SystemStackError with, as mini_racer's callbacks hand JavaScript.
-fn message(ruby: &Ruby, exception: Exception) -> JsText {
-    exception
-        .funcall::<_, _, RString>("to_s", ())
-        .ok()
-        .and_then(|text| context::js_text(ruby, text).ok())
-        .unwrap_or_else(|| {
-            if exception.is_kind_of(ruby.exception_sys_stack_error()) {
-                JsText::from(errors::STACK_EXHAUSTED)
-            } else {
-                JsText::from("Ruby exception")
-            }
-        })
+// encoding, or mini_racer's fallback text when to_s raises. A callback
+// refused for want of stack has no room left to call to_s, so its text is
+// the one Ruby raises SystemStackError with, as mini_racer's callbacks hand
+// JavaScript. A throw or Thread#kill out of to_s comes back as the error.
+fn message(ruby: &Ruby, exception: Exception) -> Result<JsText, Error> {
+    let text = match exception.funcall::<_, _, RString>("to_s", ()) {
+        Ok(text) => context::js_text(ruby, text).ok(),
+        Err(error) if matches!(error.error_type(), ErrorType::Jump(_)) => return Err(error),
+        Err(_) => None,
+    };
+    Ok(text.unwrap_or_else(|| {
+        if exception.is_kind_of(ruby.exception_sys_stack_error()) {
+            JsText::from(errors::STACK_EXHAUSTED)
+        } else {
+            JsText::from("Ruby exception")
+        }
+    }))
 }
 
 impl Host for RubyHost<'_> {
@@ -326,8 +347,8 @@ impl Host for RubyHost<'_> {
         }
     }
 
-    // A throw or Thread#kill out of the callable aborts the dispatch and
-    // resumes once it is over.
+    // A throw or Thread#kill out of the callable, or out of the to_s of what
+    // it raised, aborts the dispatch and resumes once it is over.
     fn callback(&mut self, request: &[u8]) -> CallbackReply {
         let error = match self.run(request) {
             Ok(reply) => return CallbackReply::Value(reply),
@@ -337,7 +358,13 @@ impl Host for RubyHost<'_> {
             self.pending.get_or_insert(error);
             return CallbackReply::Abort;
         };
-        let message = message(self.ruby, exception);
+        let message = match message(self.ruby, exception) {
+            Ok(message) => message,
+            Err(jump) => {
+                self.pending.get_or_insert(jump);
+                return CallbackReply::Abort;
+            }
+        };
         if let Some(callbacks) = &self.callbacks {
             callbacks.raised.set(self.ruby, exception.as_value());
         }

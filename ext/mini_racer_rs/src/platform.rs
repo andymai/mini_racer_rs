@@ -16,12 +16,17 @@ fn set_flags(ruby: &Ruby, args: &[Value]) -> Result<(), Error> {
     for name in args.splat {
         push(ruby, name, None)?;
     }
-    let mut pairs = Vec::new();
+    // Each `to_s` can collect and compact, so the pairs wait in a Ruby array,
+    // which the GC sees and updates, rather than in Rust storage.
+    let pairs = ruby.ary_new_capa(args.keywords.len().saturating_mul(2));
     args.keywords.foreach(|name: Value, value: Value| {
-        pairs.push((name, value));
+        pairs.push(name)?;
+        pairs.push(value)?;
         Ok(magnus::r_hash::ForEach::Continue)
     })?;
-    for (name, value) in pairs {
+    while !pairs.is_empty() {
+        let name: Value = pairs.shift()?;
+        let value: Value = pairs.shift()?;
         push(ruby, name, Some(value))?;
     }
     Ok(())

@@ -238,3 +238,33 @@ class ConversionGcPairsTest < Minitest::Test
     assert_equal [{}, [1, 2], 1], [map.keys.last, map.values, value["z"]]
   end
 end
+
+# Platform flags are process-global, so this runs in a Ruby of its own. Each
+# keyword value's to_s moves every movable object, among them the values not
+# yet read, which only the keyword hash holds.
+class ConversionGcFlagsTest < Minitest::Test
+  include RubyProcess
+
+  def test_flag_values_survive_moves_while_earlier_ones_are_read
+    skip "needs CRuby's GC.verify_compaction_references" unless GC.respond_to?(:verify_compaction_references)
+    code = <<~RUBY
+      require "mini_racer"
+      class Flag
+        def initialize(text) = @text = text
+
+        def to_s
+          $read << @text
+          GC.verify_compaction_references(expand_heap: true, toward: :empty)
+          @text
+        end
+      end
+      $read = []
+      MiniRacer::Platform.set_flags!(**Array.new(3) { |i| [:"flag_\#{i}", Flag.new("v\#{i}")] }.to_h)
+      p $read
+    RUBY
+    stdout, stderr, status = run_ruby(code)
+
+    assert_predicate status, :success?, stderr.lines.first(3).join
+    assert_equal %(["v0", "v1", "v2"]\n), stdout
+  end
+end
