@@ -1,0 +1,221 @@
+[
+  {
+    "id": "unconvertible-arguments-range",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "globalThis.__diff_echo = (...args) => args",
+        "setup": true
+      },
+      {
+        "op": "call",
+        "path": "__diff_echo",
+        "args": [
+          [
+            "range",
+            [
+              "int",
+              "1"
+            ],
+            [
+              "int",
+              "2"
+            ],
+            false
+          ]
+        ]
+      },
+      {
+        "op": "attach",
+        "name": "__diff_callback",
+        "callable": "values",
+        "args": [
+          [
+            "range",
+            [
+              "int",
+              "1"
+            ],
+            [
+              "int",
+              "2"
+            ],
+            false
+          ]
+        ],
+        "setup": true
+      },
+      {
+        "op": "eval",
+        "source": "__diff_callback()"
+      }
+    ]
+  },
+  {
+    "id": "unconvertible-arguments-rational",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "globalThis.__diff_echo = (...args) => args",
+        "setup": true
+      },
+      {
+        "op": "call",
+        "path": "__diff_echo",
+        "args": [
+          [
+            "rational",
+            "1",
+            "1"
+          ]
+        ]
+      },
+      {
+        "op": "attach",
+        "name": "__diff_callback",
+        "callable": "values",
+        "args": [
+          [
+            "rational",
+            "1",
+            "1"
+          ]
+        ],
+        "setup": true
+      },
+      {
+        "op": "eval",
+        "source": "__diff_callback()"
+      }
+    ]
+  },
+  {
+    "id": "unconvertible-arguments-struct",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "globalThis.__diff_echo = (...args) => args",
+        "setup": true
+      },
+      {
+        "op": "call",
+        "path": "__diff_echo",
+        "args": [
+          [
+            "struct",
+            [
+              [
+                "int",
+                "1"
+              ],
+              [
+                "int",
+                "2"
+              ]
+            ]
+          ]
+        ]
+      },
+      {
+        "op": "attach",
+        "name": "__diff_callback",
+        "callable": "values",
+        "args": [
+          [
+            "struct",
+            [
+              [
+                "int",
+                "1"
+              ],
+              [
+                "int",
+                "2"
+              ]
+            ]
+          ]
+        ],
+        "setup": true
+      },
+      {
+        "op": "eval",
+        "source": "__diff_callback()"
+      }
+    ]
+  },
+  {
+    "id": "unconvertible-arguments-object",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "globalThis.__diff_echo = (...args) => args",
+        "setup": true
+      },
+      {
+        "op": "call",
+        "path": "__diff_echo",
+        "args": [
+          [
+            "object"
+          ]
+        ]
+      },
+      {
+        "op": "attach",
+        "name": "__diff_callback",
+        "callable": "values",
+        "args": [
+          [
+            "object"
+          ]
+        ],
+        "setup": true
+      },
+      {
+        "op": "eval",
+        "source": "__diff_callback()"
+      }
+    ]
+  },
+  {
+    "id": "unconvertible-arguments-class",
+    "kind": "program",
+    "steps": [
+      {
+        "op": "eval",
+        "source": "globalThis.__diff_echo = (...args) => args",
+        "setup": true
+      },
+      {
+        "op": "call",
+        "path": "__diff_echo",
+        "args": [
+          [
+            "class",
+            "Object"
+          ]
+        ]
+      },
+      {
+        "op": "attach",
+        "name": "__diff_callback",
+        "callable": "values",
+        "args": [
+          [
+            "class",
+            "Object"
+          ]
+        ],
+        "setup": true
+      },
+      {
+        "op": "eval",
+        "source": "__diff_callback()"
+      }
+    ]
+  }
+]

@@ -18,7 +18,7 @@ module DiffGenerate
     "new Error('boom')", "new TypeError('t')", "[1, , 3]", "new WeakMap()", "Object.create(null)", "new Number(1)",
     "new Int32Array([1, -1])", "new Uint32Array([1, 4294967295])", "new Float32Array([1.5, -2])",
     "new Uint8ClampedArray([-1, 300])", "new BigInt64Array([1n, -1n])", "new DataView(new ArrayBuffer(4))", "/a/",
-    "/a/u", "/a/v", "/a/dsy",
+    "/a/u", "/a/v", "/a/dsy", "new Int32Array(new ArrayBuffer(12), 4, 2)", "new Boolean(true)",
   ].freeze
   KEYS = ["a", "b", "z", "1", "10", "4294967295", "-1", "1.5", "", "é", "constructor"].freeze
   RUBY_LEAVES = [
@@ -30,8 +30,7 @@ module DiffGenerate
     ["string", "UTF-16LE", "hex", "6800"],
     ["symbol", %w[string US-ASCII text sym]], ["time", "0", 0, 0, true],
     ["time", "1600000000", 123_456_789, 32_400, false], ["binary", "0102ff"], ["int", (2**53).to_s],
-    ["int", (-(2**53)).to_s], ["range", %w[int 1], %w[int 2], false], %w[rational 1 1],
-    ["struct", [%w[int 1], %w[int 2]]], ["object"], %w[class Object],
+    ["int", (-(2**53)).to_s],
   ].freeze
 
   module_function
@@ -61,10 +60,13 @@ module DiffGenerate
     end
   end
 
-  # A wrapper object reaches Ruby as an immediate Integer, so a lost reference
-  # to one cannot be told from a wrong value; it is shared inside an array.
+  WRAPPERS = [["lit", "new Number(1)"], ["lit", "new Boolean(true)"]].freeze
+
+  # A wrapper object reaches Ruby as an immediate Integer or true, so a lost
+  # reference to one cannot be told from a wrong value; it is shared inside an
+  # array.
   def shareable(tree)
-    tree == ["lit", "new Number(1)"] ? ["array", [tree]] : tree
+    WRAPPERS.include?(tree) ? ["array", [tree]] : tree
   end
 
   HASH_KEYS = [%w[string UTF-8 text k], ["symbol", %w[string US-ASCII text s]], %w[int 7],

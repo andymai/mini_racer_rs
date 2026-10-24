@@ -13,6 +13,13 @@ class DiffCanonicalTest < Minitest::Test
     trees.each { |tree| assert_equal tree, DiffCanonical.encode(DiffCanonical.decode(tree)) }
   end
 
+  def test_arguments_neither_gem_converts_round_trip
+    trees = [["range", %w[int 1], %w[int 2], false], %w[rational 1 1], ["struct", [%w[int 1], %w[int 2]]],
+             ["object"], %w[class Object],]
+
+    trees.each { |tree| assert_equal tree, DiffCanonical.encode(DiffCanonical.decode(tree)) }
+  end
+
   def test_shared_containers_keep_their_identity
     shared = [1]
     encoded = DiffCanonical.encode([shared, { "a" => shared }])
