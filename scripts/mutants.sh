@@ -27,7 +27,7 @@ export PROPTEST_DISABLE_FAILURE_PERSISTENCE=1
 capped() {
   if [ -n "${MUTANTS_MEMORY_MAX:-}" ]; then
     sudo systemd-run --scope --quiet -p "MemoryMax=$MUTANTS_MEMORY_MAX" -p MemorySwapMax=0 -- \
-      sudo --preserve-env -u "$(id -un)" env "PATH=$PATH" "$@"
+      sudo --preserve-env -u "$(id -un)" env "PATH=$PATH" "HOME=$HOME" "$@"
   else
     "$@"
   fi
