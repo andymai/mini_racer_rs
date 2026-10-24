@@ -96,9 +96,14 @@ case "$mode" in
   wire)
     # cargo-mutants' own baseline runs only the mutated crate's tests, so both
     # crates' run here unmutated instead, and their time sets the timeout.
+    # The engine's heap limit, collection, snapshot memory and teardown tests
+    # measure memory and time rather than the codec, so they stay out: on a
+    # shared runner they flake, and a mutant that breaks a size check turns
+    # them into runaway allocations.
+    filter=(-E 'not (binary(heap_limit) | binary(counters_gc) | binary(snapshot_memory) | binary(teardown) | binary(teardown_single_threaded))')
     cargo nextest run --no-run -p mini_racer_wire -p mini_racer_engine --locked
     start=$SECONDS
-    cargo nextest run -p mini_racer_wire -p mini_racer_engine --locked
+    cargo nextest run -p mini_racer_wire -p mini_racer_engine --locked "${filter[@]}"
     timeout=$((5 * (SECONDS - start)))
     [ "$timeout" -ge 60 ] || timeout=60
     run=wire
@@ -108,7 +113,7 @@ case "$mode" in
       shard=(--shard "$1" --sharding round-robin)
     fi
     mutants "$run" -p mini_racer_wire --test-package mini_racer_wire,mini_racer_engine \
-      --test-tool nextest --baseline skip --timeout "$timeout" "${shard[@]}"
+      --test-tool nextest --baseline skip --timeout "$timeout" "${shard[@]}" -- "${filter[@]}"
     ;;
   sync)
     mutants sync -p mini_racer_sync --test-tool nextest
