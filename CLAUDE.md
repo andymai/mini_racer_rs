@@ -122,6 +122,7 @@ Rust replacement for the `mini_racer` gem 0.22.2: same `MiniRacer` API, V8 from 
 | Nightly fuzzing and fresh-seed differential runs | `.github/workflows/nightly.yml`, `scripts/fuzz-smoke.sh`, `test/diff/run.rb` |
 | Weekly Ruby head, source gem, newest v8 | `.github/workflows/extended.yml` |
 | Weekly benchmark and its floors | `.github/workflows/bench.yml`, `bench/floors.rb` |
+| Weekly coverage and mutation testing, reported only | `.github/workflows/coverage.yml`, `scripts/coverage.sh`, `.github/workflows/mutants.yml`, `scripts/mutants.sh` |
 | Upstream suite runner, suites, guard, reporter | `test/upstream/run.rb`, `test/upstream/suites.rb`, `test/upstream/preload.rb`, `test/upstream/reporter.rb` |
 | Per-test parity ledgers | `test/upstream/mini_racer.status.toml`, `test/upstream/execjs.status.toml`, `test/upstream/milestones.toml` |
 | Ledger generation | `.github/workflows/ledger-generate.yml`, `rakelib/ledger.rake`, `test/upstream/milestone_rules.rb` |
@@ -163,6 +164,8 @@ scripts/update-notices.sh          # regenerate THIRD_PARTY_NOTICES.md and licen
 RUSTFLAGS="--cfg loom -Dwarnings" cargo test -p mini_racer_sync --test loom --release --locked --target-dir target/loom
 scripts/fuzz-smoke.sh 60           # every fuzz target, 60 s each, on the pinned nightly (a corpus directory may follow)
 scripts/sanitizers.sh              # ASan teardown and memory checks, TSan on sync (Linux x86_64, needs llvm-symbolizer)
+scripts/coverage.sh workspace      # line and branch coverage per crate into tmp/coverage (ruby: the Ruby suites, Linux)
+scripts/mutants.sh wire            # cargo-mutants into tmp/mutants (sync, then loom; report <dir>... for a table)
 bundle exec ruby test/upstream/run.rb --strict   # mini_racer's own suite against the ledger
 bundle exec ruby test/upstream/run.rb --suite execjs --strict   # ExecJS's suite on its MiniRacer runtime
 bundle exec ruby test/upstream/run.rb --gc-stress --strict   # the passing tests in gc_stress.txt under GC.stress with compaction
