@@ -42,4 +42,4 @@ Installs the toolchain from `rust-toolchain.toml`, restores and verifies the V8 
 
 ## PR body brief
 
-The `codex-write` brief lists every fact with its source: what the diff adds, how it was verified (commands and counts), deviations from the plan with reasons, and what only CI can confirm. Bodies state observable facts, follow any repository template, use LF line endings, and are never hard-wrapped.
+The `outward-writing` fact list names every fact with its source: what the diff adds, how it was verified (commands and counts), deviations from the plan with reasons, and what only CI can confirm. Bodies state observable facts, follow any repository template, use LF line endings, and are never hard-wrapped.

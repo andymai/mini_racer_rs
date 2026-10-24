@@ -29,7 +29,7 @@ Every check prints `VIOLATION [<tag>]: <detail>` (or `[settings]`) and exits non
 | | `image` | A workflow container, `docker run` or Dockerfile stage image without a digest | Pin it to its multi-arch index digest |
 | `scripts/check-versions.sh` | `version` | Version literals disagree | Make them agree |
 | `scripts/check-platforms.sh` | `platform` | Target lists disagree | Make them agree |
-| `scripts/check-doc-paths.sh` | `doc-path` | A path named in `CLAUDE.md`, a skill, a root Markdown doc or a GitHub template does not exist | Fix the path or the doc (for `COMPATIBILITY.md`, `compat.toml`); public docs change through codex-write and Andy's approval |
+| `scripts/check-doc-paths.sh` | `doc-path` | A path named in `CLAUDE.md`, a skill, a root Markdown doc or a GitHub template does not exist | Fix the path or the doc (for `COMPATIBILITY.md`, `compat.toml`); public docs change through outward-writing and Andy's approval |
 | `scripts/check-repo-settings.sh` | `settings` | A GitHub setting differs from the expected value (run locally with an admin token) | Restore the setting |
 
 Checks `scripts/test-boundaries.sh` does not plant:
