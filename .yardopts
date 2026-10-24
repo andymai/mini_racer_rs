@@ -1,0 +1,7 @@
+--markup markdown
+--exclude lib/mini_racer/truffleruby.rb
+--exclude lib/mini_racer/shared.rb
+lib/**/*.rb
+-
+COMPATIBILITY.md
+CHANGELOG.md
