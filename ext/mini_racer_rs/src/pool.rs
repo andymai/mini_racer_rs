@@ -791,13 +791,17 @@ impl Pool {
                 }
             }
         }
-        let waiting: Vec<Value> = rb_self
-            .waiting
-            .borrow()
-            .iter()
-            .filter_map(|waiter| waiter.queue.get(ruby))
-            .collect();
-        for queue in waiting {
+        // A push can switch threads, and a wait not yet pushed that then
+        // ends leaves its queue referenced by nothing else, so the queues
+        // stay rooted in `waiting` until the array holds them, as in
+        // `wake_owed`. The mark shares this borrow.
+        let queues = ruby.ary_new_capa(rb_self.waiting.borrow().len());
+        for waiter in rb_self.waiting.borrow().iter() {
+            if let Some(queue) = waiter.queue.get(ruby) {
+                queues.push(queue)?;
+            }
+        }
+        while let Some(queue) = queues.shift::<Option<Value>>()? {
             queue.funcall::<_, _, Value>("push", (true,))?;
         }
         rb_self.wake_owed(ruby)?;
