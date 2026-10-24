@@ -34,6 +34,8 @@ OSV scans all eight lockfiles: on PRs the `osv` job in `.github/workflows/ci.yml
 
 `.github/workflows/nightly.yml` runs `scripts/sanitizers.sh` every night, on demand, and on PRs carrying the `sanitizers` label: AddressSanitizer on the engine's teardown tests with leak detection (rusty_v8's deliberate per-isolate leak is suppressed in `.github/sanitizers/lsan.supp`), on every engine and sync test for memory errors, and ThreadSanitizer on the sync crate. It is not part of `CI Pass`.
 
+Two weekly workflows report without gating anything, and also run on demand and on PRs carrying their label. `.github/workflows/coverage.yml` (label `coverage`) runs `scripts/coverage.sh`: line and branch coverage per crate, from the Rust tests and from the Ruby tests and upstream suites on an instrumented extension, in the run summary, with each lcov uploaded. `.github/workflows/mutants.yml` (label `mutants`) runs `scripts/mutants.sh`: cargo-mutants on `mini_racer_wire` against its tests and the engine's in four shards, and on `mini_racer_sync` against its tests and then the loom models, with the counts and surviving mutants in the run summary and each `mutants.out` uploaded.
+
 `.github/workflows/pr-title.yml` lints the PR title with commitlint. It runs from `main` (`pull_request_target`), so a change to it takes effect after merge.
 
 ## Setup action (`.github/actions/setup/action.yml`)

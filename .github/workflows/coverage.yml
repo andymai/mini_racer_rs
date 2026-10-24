@@ -1,0 +1,99 @@
+name: Coverage
+
+# Weekly line and branch coverage, reported and never gated: the Rust tests
+# through cargo-llvm-cov, and the Ruby tests and both upstream suites through an
+# instrumented extension. Each job writes a per-crate table to the run summary
+# and uploads its lcov. Runs on demand, and on a PR while it carries the
+# coverage label; adding any other label does not restart it.
+
+on:
+  schedule:
+    - cron: "0 13 * * 0"
+  workflow_dispatch:
+  pull_request:
+    types: [labeled, synchronize]
+
+concurrency:
+  group: coverage-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions: {}
+
+jobs:
+  workspace:
+    name: Coverage, Rust tests
+    if: github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'coverage') && (github.event.action != 'labeled' || github.event.label.name == 'coverage'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          tools: cargo-llvm-cov cargo-nextest
+          cache-workspaces: ". -> target/llvm-cov-target"
+      - run: scripts/coverage.sh workspace
+      - name: Summary
+        if: ${{ !cancelled() && hashFiles('tmp/coverage/workspace.md') != '' }}
+        run: |
+          {
+            echo "## Rust tests"
+            echo
+            echo "Lines and branches of each crate's src/, its unit test modules included."
+            echo
+            cat tmp/coverage/workspace.md
+          } >>"$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: coverage-workspace
+          path: |
+            tmp/coverage/workspace.lcov
+            tmp/coverage/workspace.txt
+            tmp/coverage/workspace.md
+          if-no-files-found: warn
+          retention-days: 30
+
+  ruby:
+    name: Coverage, Ruby suites
+    if: github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'coverage') && (github.event.action != 'labeled' || github.event.label.name == 'coverage'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      CI: "true"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: true
+      - uses: ./.github/actions/setup
+        with:
+          ruby: "3.4"
+          tools: cargo-llvm-cov
+          cache-workspaces: ". -> target/coverage"
+      - run: scripts/coverage.sh ruby
+      - name: Summary
+        if: ${{ !cancelled() && hashFiles('tmp/coverage/ruby.md') != '' }}
+        run: |
+          {
+            echo "## Ruby suites"
+            echo
+            echo "The Ruby tests, the fork stress scripts and both upstream suites, forked children included."
+            echo
+            cat tmp/coverage/ruby.md
+          } >>"$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: coverage-ruby
+          path: |
+            tmp/coverage/ruby.lcov
+            tmp/coverage/ruby.txt
+            tmp/coverage/ruby.md
+          if-no-files-found: warn
+          retention-days: 30

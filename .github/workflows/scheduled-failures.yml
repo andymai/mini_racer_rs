@@ -2,7 +2,7 @@ name: Scheduled Failures
 
 on:
   workflow_run:
-    workflows: [Nightly, Extended, Bench, OSV Scan, Upstream Watch]
+    workflows: [Nightly, Extended, Bench, Coverage, Mutants, OSV Scan, Upstream Watch]
     types: [completed]
 
 permissions: {}
