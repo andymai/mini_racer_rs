@@ -103,6 +103,7 @@ What mini_racer_rs adds under `MiniRacerRs`. An internal id is not for callers.
 | `imethod:MiniRacerRs::Pool#with` | done | n/a |
 | `module:MiniRacerRs` | done | done |
 | `module:MiniRacerRs::ForkHook` | internal | n/a |
+| `smethod:MiniRacerRs.code_cache` | done | n/a |
 | `smethod:MiniRacerRs.counters` | done | n/a |
 | `smethod:MiniRacerRs.heap_limit` | done | n/a |
 | `smethod:MiniRacerRs.heap_limit=` | done | n/a |

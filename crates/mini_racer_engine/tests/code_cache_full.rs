@@ -70,6 +70,9 @@ fn a_cache_past_the_count_drops_the_least_recently_used() {
         load(text);
     }
     assert_eq!(counts(), (stored, 0));
+    assert_eq!(cache().entries(), stored);
+    let full = cache().bytes();
+    assert!(full > 0);
     // Found, the first becomes the most recently used, so the one past the
     // count drops the second, which is then made again.
     load(&texts[0]);
@@ -77,6 +80,8 @@ fn a_cache_past_the_count_drops_the_least_recently_used() {
     load(&texts[KEPT]);
     load(&texts[KEPT]);
     assert_eq!(counts(), (stored + 1, 1));
+    assert_eq!(cache().entries(), stored);
+    assert!(cache().bytes() > 0 && cache().bytes() < full * 2);
     load(&texts[1]);
     assert_eq!(counts(), (stored + 2, 1));
     load(&texts[0]);
