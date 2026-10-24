@@ -29,7 +29,9 @@ class PackageTest < Minitest::Test
       assert_equal Gem::Requirement.new(">= #{oldest}", Package.upper_bound(newest)), spec.required_ruby_version
       Package.rubies.each { |minor| assert_includes spec.files, "lib/mini_racer_rs/#{minor}/mini_racer_rs.so" }
       assert_empty spec.files.grep(Package::SOURCE_ONLY)
-      %w[lib/mini_racer.rb lib/mini_racer_rs.rb LICENSE THIRD_PARTY_NOTICES.md].each do |file|
+      %w[
+        lib/mini_racer.rb lib/mini_racer_rs.rb LICENSE THIRD_PARTY_NOTICES.md sig/mini_racer.rbs sig/mini_racer_rs.rbs
+      ].each do |file|
         assert_includes spec.files, file
       end
     end

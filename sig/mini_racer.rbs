@@ -1,0 +1,122 @@
+module MiniRacer
+  VERSION: String
+  LIBV8_NODE_VERSION: String
+
+  class Binary
+    attr_reader data: String
+
+    def initialize: (String data) -> void
+  end
+
+  class Error < StandardError
+  end
+
+  class ContextDisposedError < Error
+  end
+
+  class PlatformAlreadyInitialized < Error
+  end
+
+  class EvalError < Error
+  end
+
+  class ParseError < EvalError
+  end
+
+  class ScriptTerminatedError < EvalError
+  end
+
+  class V8OutOfMemoryError < EvalError
+  end
+
+  class InternalError < EvalError
+  end
+
+  class RuntimeError < EvalError
+    @frames: Array[String]
+
+    def initialize: (String message) -> void
+
+    def backtrace: () -> Array[String]?
+  end
+
+  # A JavaScript Error converted to Ruby is one of these; its cause is the
+  # JavaScript value it was given, which is untyped as every converted value is.
+  class ScriptError < EvalError
+    @frames: Array[String]
+
+    def initialize: (String message) -> void
+
+    def backtrace: () -> Array[String]
+
+    def cause: () -> untyped
+  end
+
+  class SnapshotError < Error
+    @frames: Array[String]
+
+    def initialize: (String message) -> void
+
+    def backtrace: () -> Array[String]?
+  end
+
+  class JavaScriptFunction
+  end
+
+  # What JavaScript returns, and what Ruby sends it, is known only when the
+  # script runs, so those values are untyped.
+  class Context
+    def initialize: (
+      ?timeout: Integer,
+      ?max_memory: Integer,
+      ?ensure_gc_after_idle: Integer,
+      ?marshal_stack_depth: Integer,
+      ?snapshot: Snapshot?,
+      ?verbose_exceptions: boolish
+    ) -> void
+
+    def eval: (String source, ?filename: String?) -> untyped
+
+    def eval_await: (String source, ?filename: String?) -> untyped
+
+    def call: (String name, *untyped args) -> untyped
+
+    def call_await: (String name, *untyped args) -> untyped
+
+    def attach: (String name, ::Proc::_Callable callable) -> nil
+
+    def load: (path filename) -> untyped
+
+    def stop: () -> nil
+
+    def dispose: () -> nil
+
+    def heap_stats: () -> Hash[Symbol, Integer]
+
+    def heap_snapshot: () -> String
+
+    def write_heap_snapshot: (String | File file_or_io) -> Integer
+
+    def low_memory_notification: () -> nil
+
+    def perform_microtask_checkpoint: () -> nil
+
+    def pump_message_loop: () -> bool
+  end
+
+  class Snapshot
+    def self.load: (String blob) -> instance
+
+    def initialize: (?String? code) -> void
+
+    def warmup!: (String code) -> self
+
+    def dump: () -> String
+
+    def size: () -> Integer
+  end
+
+  class Platform
+    def self.set_flags!: (*_ToS flags, **_ToS? valued_flags) -> nil
+  end
+end

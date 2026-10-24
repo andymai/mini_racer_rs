@@ -96,6 +96,8 @@ jobs:
       # Here rather than in a build job, which a docs-only PR skips.
       - name: COMPATIBILITY.md and the README table match compat.toml
         run: bundle exec ruby tools/compat/render.rb --check
+      - name: RBS signatures are valid
+        run: bundle exec rbs -I sig validate
 
   machete:
     name: Unused Dependencies
@@ -375,7 +377,8 @@ jobs:
           files=$(tar -xOf tmp/mini_racer_rs.gem data.tar.gz | tar -tz)
           for required in Cargo.toml Cargo.lock ext/mini_racer_rs/extconf.rb ext/mini_racer_rs/v8-archives.sha256 \
             lib/mini_racer.rb lib/mini_racer_rs.rb crates/mini_racer_engine/src/lib.rs LICENSE THIRD_PARTY_NOTICES.md \
-            licenses/mini_racer.txt licenses/v8/SOURCES.tsv licenses/v8/v8/LICENSE .yardopts; do
+            licenses/mini_racer.txt licenses/v8/SOURCES.tsv licenses/v8/v8/LICENSE .yardopts sig/mini_racer.rbs \
+            sig/mini_racer_rs.rbs; do
             grep -qx "$required" <<<"$files" || { echo "missing $required"; exit 1; }
           done
           forbidden=$(grep -E '^(\.cargo|\.github|target|test|scripts|tools|vendor|bin|node_modules)/|rust-toolchain\.toml|\.(so|bundle)$' <<<"$files" || true)
@@ -447,6 +450,10 @@ jobs:
           path: ${{ steps.exports.outputs.allow }}
           retention-days: 14
       - run: bundle exec rake test
+      # The signatures are the same on every platform and Ruby, so one leg checks them.
+      - name: Ruby tests with their calls checked against the RBS signatures
+        if: matrix.os == 'ubuntu-24.04' && matrix.ruby == '3.4'
+        run: bundle exec rake rbs:test
       - name: Fork stress
         run: bundle exec ruby -Ilib test/stress/fork_loop.rb
       # glibc keeps what a thread frees unless asked; macOS's allocator differs.
