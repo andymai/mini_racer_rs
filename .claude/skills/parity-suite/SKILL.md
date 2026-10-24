@@ -1,16 +1,17 @@
 ---
 name: parity-suite
-description: Use when running mini_racer's or ExecJS's test suite against mini_racer_rs, reading or updating test/upstream/mini_racer.status.toml or test/upstream/execjs.status.toml, regenerating the ledger after a change, debugging an upstream test that fails, hangs or crashes, when the harness guard exits 97, or when changing the public surface, compat.toml or COMPATIBILITY.md.
+description: Use when running mini_racer's or ExecJS's test suite against mini_racer_rs, reading or updating test/upstream/mini_racer.status.toml or test/upstream/execjs.status.toml, regenerating the ledger after a change, debugging an upstream test that fails, hangs or crashes, when the harness guard exits 97, when running or recording the differential run against the real gem (test/diff/run.rb, test/diff/candidate.status.toml, test/diff/divergences.toml, the consumer workloads), or when changing the public surface, compat.toml or COMPATIBILITY.md.
 ---
 
 # Parity Suite
 
-Parity means mini_racer 0.22.2's own tests pass unmodified. `vendor/mini_racer` is that release as a submodule and is never edited. `test/upstream/run.rb` runs its suite against this gem (or, with `--reference`, against the real mini_racer from `tools/reference`) and compares every result with the ledger. `--suite execjs` runs ExecJS 2.10.2's suite (`vendor/execjs`) the same way with `EXECJS_RUNTIME=MiniRacer`, against `test/upstream/execjs.status.toml`.
+Parity means mini_racer 0.22.2's own tests pass unmodified. `vendor/mini_racer` is that release as a submodule and is never edited. `test/upstream/run.rb` runs its suite against this gem (or, with `--reference`, against the real mini_racer from `tools/reference`) and compares every result with the ledger. `--suite execjs` runs ExecJS 2.10.2's suite (`vendor/execjs`) the same way with `EXECJS_RUNTIME=MiniRacer`, against `test/upstream/execjs.status.toml`. `test/upstream/run.rb` sets `BUNDLE_GEMFILE`, `RUBYOPT`, `MINI_RACER_RS_UPSTREAM_REPORT`, `MINI_RACER_RS_UPSTREAM_ROOT` and, for ExecJS, `EXECJS_RUNTIME` (reference.md), so run the suites through it, not with `rake test` inside the submodule.
 
 ## Quick reference
 
 | Task | Command |
 |---|---|
+| First run in a checkout or worktree | `git submodule update --init`, which the upstream suites and `rake test` (the ExecJS autodetect test) need |
 | Run the suite, strict | `bundle exec ruby test/upstream/run.rb --strict` |
 | ExecJS's suite, strict | `bundle exec ruby test/upstream/run.rb --suite execjs --strict` |
 | One test | `bundle exec ruby test/upstream/run.rb -n test_it_can_stop` |
@@ -71,7 +72,7 @@ What this gem adds under `MiniRacerRs` is reflected apart, as the candidate repo
 | Added a `MiniRacerRs` method, constant or class | add `[extra."smethod:MiniRacerRs.<name>@ruby"]` with `status = "done"`, then `rake compat:render` |
 | Rebuild the surface | `REFERENCE=1 bundle exec rake compat:reflect` on CRuby and on TruffleRuby, then `bundle exec rake compat:surface` |
 
-`compat:check` failures: `MISSING` (an id has no entry), `STALE` (an entry for an id that left the surface), `MALFORMED`, `UNKNOWN_MILESTONE`, `CLAIMED_DONE_BUT_ABSENT`, `TODO_BUT_IMPLEMENTED` (mark it done), `DEVIATION_BUT_PRESENT`, `EXTRA_SURFACE` (this gem exposes something mini_racer does not), `UNKNOWN_DEVIATION` (an upstream ledger cites a deviation compat.toml lacks), `SURFACE_DRIFT` (`compat:verify` only: the real gem and compat/surface.json disagree), `MISSING_EXTRA` (a `MiniRacerRs` id with no `[extra]` entry), `STALE_EXTRA` (an `[extra]` entry this gem lacks on the engine checked).
+`compat:check` failures: `MISSING` (an id has no entry), `STALE` (an entry for an id that left the surface), `MALFORMED`, `UNKNOWN_MILESTONE`, `CLAIMED_DONE_BUT_ABSENT`, `TODO_BUT_IMPLEMENTED` (mark it done), `DEVIATION_BUT_PRESENT`, `EXTRA_SURFACE` (this gem exposes something mini_racer does not), `UNKNOWN_DEVIATION` (an upstream ledger cites a deviation compat.toml lacks), `SURFACE_DRIFT` (`compat:verify` only: the real gem and compat/surface.json disagree), `MISSING_EXTRA` (a `MiniRacerRs` id with no `[extra]` entry), `STALE_EXTRA` (an `[extra]` entry this gem lacks on the engine checked). A planned method that exists before what it calls works (`write_heap_snapshot`) lists that in `depends_on`. `rake` needs the lint group installed; without it (the TruffleRuby CI job), run `tools/compat/reflect.rb` and `tools/compat/check.rb` directly.
 
 ## Differential run
 

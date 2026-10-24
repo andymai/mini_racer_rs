@@ -15,7 +15,7 @@ A case starts with `require_relative "prelude"` (`test/ruby/fork/prelude.rb`), w
 - `raised(klass) { ... }` returns the message of the error the block raises, or nil;
 - `skip_case(reason)` prints the reason and exits 77, which ForkTest reports as a skip; with `CI` set it exits 1 instead, so a CI leg missing a prerequisite fails rather than dropping the case.
 
-The three cases that fork through Fiddle need `fiddle`. Ruby 4.0 ships without it, so the `Gemfile` installs it there (building it needs libffi's headers); Ruby 3.3 and 3.4 use their default gem. The case's top comment says what it proves and what mini_racer 0.22.2 does.
+The three cases that fork through Fiddle need `fiddle`. Ruby 4.0 ships without it, so the `Gemfile` installs it there (building it needs libffi's headers: `libffi-devel` on Fedora, `libffi-dev` on Debian and Ubuntu, or `PKG_CONFIG_PATH` at Homebrew's libffi); Ruby 3.3 and 3.4 use their default gem. The case's top comment says what it proves and what mini_racer 0.22.2 does.
 
 ## Loom models
 
@@ -54,6 +54,24 @@ Each script runs alone with `bundle exec ruby -Ilib test/stress/<script>.rb`, ta
 | `test/stress/large_arguments.rb [calls] [max_ratio]` (also `-Ivendor/execjs/lib`) | the last tenth of ExecJS calls with equal-length 24 KB arguments take over 3 times as long as the first tenth | every CI Ruby leg |
 | `test/stress/heap_limit.rb single\|multi [hits] [max_mib]` | a hit of a 64 MiB heap limit does not raise `MiniRacerRs::HeapLimitError` or leaves its context unusable, or RSS grows over 64 MiB past its reading after a warm-up | Nightly and `stress`: 300 hits per mode |
 | `test/stress/madvise_fixture.rb clean\|crash` | the child's outcome is not the expected one | `scripts/madvise-fixture.sh`, CI's ubuntu-24.04 Ruby 3.4 leg |
+
+Local runs:
+
+```bash
+bundle exec ruby -Ilib test/stress/round_trips.rb multi   # 1M evals after a 500k warm-up; fails on RSS growth over 5% (also: single)
+bundle exec ruby -Ilib test/stress/churn.rb multi 8 600   # 8 threads churning contexts for 10 min; fails over 256 bytes of RSS per context plus 32 MB (also: single)
+bundle exec ruby -Ilib test/stress/pool_churn.rb multi 8 180   # 8 threads on a pool of 4 replacing a context every 20 uses for 3 min; fails over 256 bytes of RSS per context built plus 32 MB (also: single)
+bundle exec ruby -Ilib test/stress/fork_loop.rb    # 500 forks with idle contexts, 100 during an eval loop, single-threaded
+bundle exec ruby -Ilib test/stress/fork_busy.rb    # 300 forks while 4 threads evaluate, multi-threaded; each child makes and uses a new context
+bundle exec ruby -Ilib test/stress/fork_child_memory.rb   # a multi-threaded child and its parent each run 20,000 allocating evals; fails if the child grows 8 MiB more
+bundle exec ruby -Ilib test/stress/spawn_churn.rb single   # 1,000 backticks and IO.popen under context churn (also: multi)
+bundle exec ruby -Ilib test/stress/large_load.rb multi   # 5 contexts each loading a generated 3 MiB script; fails over 16 MiB of RSS per context (also: single)
+bundle exec ruby -Ilib test/stress/shared_load.rb multi  # 5 contexts loading one generated 3 MiB two-byte script after a first; fails over 14 MiB of RSS per context (also: single)
+bundle exec ruby -Ilib test/stress/one_off_load.rb multi  # 10 contexts in turn each loading a different 3 MiB two-byte script once; fails over 16 MiB kept once all are disposed (also: single)
+bundle exec ruby -Ilib -Ivendor/execjs/lib test/stress/large_arguments.rb   # 3,000 ExecJS calls with 24 KB arguments of one length; fails when the last tenth is 3 times slower than the first
+bundle exec ruby -Ilib test/stress/heap_limit.rb multi   # 300 hits of a 64 MiB heap limit on one context and on fresh ones; fails on a hit that does not raise or over 64 MiB of RSS growth (also: single)
+scripts/madvise-fixture.sh         # Linux: build without the madvise wrapper and show a fork child crash
+```
 
 The churn bound is not zero because rusty_v8 leaks a 64-byte cell per isolate (denoland/rusty_v8#2075). The nightly `stress` job runs on ubuntu-24.04 and macos-15, one step per run with `if: ${{ !cancelled() }}`, so one failure does not hide the others; a new long-running script gets a step there.
 

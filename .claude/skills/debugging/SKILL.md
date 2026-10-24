@@ -1,6 +1,6 @@
 ---
 name: debugging
-description: Use when triaging an ASan, LSan or TSan report (scripts/sanitizers.sh or the nightly Sanitizers job), a failing loom model, a fuzz crash, an upstream test that times out or crashes or a suite failure, a differential divergence or a worker dying with signal 6, a failing or hanging fork case, a "Scheduled <workflow> run failed" issue, or a Rust edit that seems to have no effect (a stale extension).
+description: Use when triaging an ASan, LSan or TSan report (scripts/sanitizers.sh or the nightly Sanitizers job), a failing loom model, a fuzz crash, an upstream test that times out or crashes or a suite failure, a differential divergence or a worker dying with signal 6, a failing or hanging fork case, a "Scheduled <workflow> run failed" issue, a Rust edit that seems to have no effect (a stale extension), or a link that fails with "could not find native static library rusty_v8".
 ---
 
 # Debugging
@@ -21,7 +21,8 @@ Every harness here writes its evidence to a known place. Read that first, reprod
 | Fork case fails or hangs | ForkTest's message: status, stdout, stderr | `bundle exec ruby test/ruby/fork/<what>_case.rb; echo $?` |
 | Scheduled run issue | the issue: run link, commit, failed jobs | `gh run view <run-id> --log-failed` |
 | A Rust change has no effect | which extension `$LOADED_FEATURES` lists | `bundle exec rake compile` |
-| `Fatal JavaScript out of memory` with a heap limit set, or a `MiniRacerRs::HeapLimitError` a script did not earn | V8's line on stderr (`Reached heap limit`, `CALL_AND_RETRY_LAST`, `Ineffective mark-compacts near heap limit`); the heap limit pitfall in `CLAUDE.md` | the script alone through `capped` in `test/ruby/heap_limit_test.rb`, or `crates/mini_racer_engine/tests/heap_limit.rs` |
+| `Fatal JavaScript out of memory` with a heap limit set, or a `MiniRacerRs::HeapLimitError` a script did not earn | V8's line on stderr (`Reached heap limit`, `CALL_AND_RETRY_LAST`, `Ineffective mark-compacts near heap limit`); `.claude/skills/engine-internals/heap-limit.md` | the script alone through `capped` in `test/ruby/heap_limit_test.rb`, or `crates/mini_racer_engine/tests/heap_limit.rs` |
+| `could not find native static library rusty_v8` | the v8 crate rebuilt without rerunning its build script, so `gn_out` is gone | reference.md, "Missing V8 static library" |
 
 ## Rules
 
@@ -40,6 +41,6 @@ ls lib/mini_racer_rs/          # a directory named for a Ruby minor is a copied 
 bundle exec rake compile
 ```
 
-A `CI=1` release build from benchmarking also stays until the next `rake compile`.
+A `CI=1` release build from benchmarking also stays until the next `rake compile`. Switching profiles (`CI=1 rake compile` after a dev build, or back) can reinstall the other profile's copy staged under `tmp/<platform>/mini_racer_rs/<ruby version>/`, which make finds newer than cargo's output; delete it and `lib/mini_racer_rs/mini_racer_rs.so` first, and check with `cmp` against `target/release/libmini_racer_rs.so`.
 
 Recipes per symptom: [reference.md](reference.md).
