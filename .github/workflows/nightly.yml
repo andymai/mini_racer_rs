@@ -86,10 +86,12 @@ jobs:
         run: bundle exec ruby -Ilib test/stress/pool_churn.rb multi 8 180
 
   # Every fuzz target for 15 minutes on the pinned nightly: three, 45 minutes,
-  # with room for setup and the nightly's build.
+  # with room for setup and the nightly's build. Each target's corpus carries
+  # over from the newest run that saved one; a key per run, since a cache entry
+  # is never overwritten. A target without a step here starts empty each night.
   fuzz:
     name: Fuzz
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'fuzz') && (github.event.action != 'labeled' || github.event.label.name == 'fuzz'))
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     permissions:
@@ -103,7 +105,28 @@ jobs:
           v8: "false"
           tools: cargo-fuzz
           cache-workspaces: crates/mini_racer_wire/fuzz -> target
-      - run: scripts/fuzz-smoke.sh 900
+      - name: Cache the decode_arbitrary corpus
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: tmp/fuzz-corpus/decode_arbitrary
+          key: fuzz-corpus-decode_arbitrary-${{ github.run_id }}
+          restore-keys: fuzz-corpus-decode_arbitrary-
+      - name: Cache the sourcemap corpus
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: tmp/fuzz-corpus/sourcemap
+          key: fuzz-corpus-sourcemap-${{ github.run_id }}
+          restore-keys: fuzz-corpus-sourcemap-
+      - name: Cache the text_roundtrip corpus
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: tmp/fuzz-corpus/text_roundtrip
+          key: fuzz-corpus-text_roundtrip-${{ github.run_id }}
+          restore-keys: fuzz-corpus-text_roundtrip-
+      # A labeled pull request checks the corpus caches in two minutes a target.
+      - env:
+          FUZZ_SECONDS: ${{ github.event_name == 'pull_request' && '120' || '900' }}
+        run: scripts/fuzz-smoke.sh "$FUZZ_SECONDS" tmp/fuzz-corpus
       - name: Keep crashes
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
