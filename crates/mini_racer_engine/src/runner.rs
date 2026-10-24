@@ -750,14 +750,22 @@ fn cache_uncached(isolate: &mut v8::Isolate, runtime: &Runtime) {
     }
 }
 
-// A bundle, not a render: what parsing it frees is worth handing back.
+// A bundle, not a render: what parsing it frees is worth handing back, and
+// its source is worth one copy every context shares.
 const LARGE_SOURCE: usize = 1 << 20;
+// A new context loaded React's 217 KB bundle in 10.1 ms, and in 2.3 from a
+// cache that cost the context building it 0.3 ms more.
+const CACHED_SOURCE: usize = 128 << 10;
+
+const fn at_least(source: &JsText, bytes: usize) -> bool {
+    match source {
+        JsText::Utf8(text) | JsText::Latin1(text) => text.len() >= bytes,
+        JsText::Utf16(units) => units.len() >= bytes / 2,
+    }
+}
 
 const fn large(source: &JsText) -> bool {
-    match source {
-        JsText::Utf8(bytes) | JsText::Latin1(bytes) => bytes.len() >= LARGE_SOURCE,
-        JsText::Utf16(units) => units.len() >= LARGE_SOURCE / 2,
-    }
+    at_least(source, LARGE_SOURCE)
 }
 
 fn respond(block: &ControlBlock, response: Result<Vec<u8>, EngineError>) -> Served {
@@ -1103,20 +1111,26 @@ fn evaluate(
     if let Some(value) = fast_call(tc, runtime, filename, source)? {
         return settle(tc, runtime, value, (depth, awaited));
     }
-    let plan = if large(source) {
+    let bundle = large(source);
+    if bundle {
         runtime.freed.store(true, Ordering::Relaxed);
+    }
+    let plan = if at_least(source, CACHED_SOURCE) {
         runtime.generation.code_cache().plan(
             filename,
             source,
             runtime.snapshot,
-            shares_sources(runtime),
+            bundle && shares_sources(runtime),
         )
     } else {
         Plan::Compile(None)
     };
     let too_large = || EngineError::Internal("source too large".to_owned());
     let text = source;
-    let source = shared_source(tc, runtime, plan.key(), source)
+    let shared = bundle
+        .then(|| shared_source(tc, runtime, plan.key(), source))
+        .flatten();
+    let source = shared
         .or_else(|| string(tc, source))
         .ok_or_else(too_large)?;
     let name = string(tc, filename).ok_or_else(too_large)?;

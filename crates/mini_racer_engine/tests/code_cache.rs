@@ -58,6 +58,13 @@ fn one_off(seed: u32) -> String {
     format!("var oneOff{seed} = {seed};\n/* {} */", "x".repeat(1 << 20))
 }
 
+// A script of exactly `bytes`, told apart from the others by its start.
+fn sized(seed: u32, bytes: usize) -> String {
+    let head = format!("var sized{seed} = {seed};\n/*");
+    let fill = bytes - head.len() - "*/".len();
+    format!("{head}{}*/", "x".repeat(fill))
+}
+
 // Counters and entries are the process's, so the cases run in order in one
 // test, as nextest's process per test and libtest's threads both allow.
 #[test]
@@ -120,6 +127,22 @@ fn the_code_cache() {
     assert_eq!(cache().stored(), 3);
     eval(&spawn(), "bundle.js", &bundle).expect("eval");
     assert_eq!(cache().hits(), 3);
+
+    // Cached from 128 KiB, though under a megabyte each context keeps its own
+    // copy of the source.
+    let sources = fork::current().sources();
+    let (made, reads) = (sources.made(), sources.reads());
+    let short = sized(5, (128 << 10) - 1);
+    for _ in 0..3 {
+        eval(&spawn(), "short.js", &short).expect("eval");
+    }
+    assert_eq!(cache().stored(), 3);
+    let cached = sized(6, 128 << 10);
+    for _ in 0..3 {
+        eval(&spawn(), "cached.js", &cached).expect("eval");
+    }
+    assert_eq!((cache().stored(), cache().hits()), (4, 4));
+    assert_eq!((sources.made(), sources.reads()), (made, reads));
 }
 
 // The documented switch, in a run of this test alone with it set. Sources
