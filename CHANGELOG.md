@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.6.0](https://github.com/andymai/mini_racer_rs/compare/v1.5.3...v1.6.0) (2026-10-24)
+
+
+### Features
+
+* add MiniRacerRs.code_cache ([#164](https://github.com/andymai/mini_racer_rs/issues/164)) ([9238e61](https://github.com/andymai/mini_racer_rs/commit/9238e61e4ae9ab4ae16d50c0035ee7bf611ea258))
+
+
+### Performance
+
+* **ext:** copy a large eval source without the GVL ([#163](https://github.com/andymai/mini_racer_rs/issues/163)) ([25fa05e](https://github.com/andymai/mini_racer_rs/commit/25fa05e009086eca64641a699fb5190fb876c69c))
+
 ## [1.5.3](https://github.com/andymai/mini_racer_rs/compare/v1.5.2...v1.5.3) (2026-10-24)
 
 
