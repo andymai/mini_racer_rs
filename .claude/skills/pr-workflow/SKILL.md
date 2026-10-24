@@ -58,5 +58,6 @@ Never skip a hook. If one fails on breakage you did not cause, stop and report i
 | TOML Format | `taplo fmt` |
 | RuboCop | `bundle exec rubocop -a`, then fix what remains. The job also runs `tools/compat/render.rb --check`, which fails on a stale `COMPATIBILITY.md` or README compat table: `bundle exec rake compat:render` |
 | Cargo Deny or Security Audit | Read the advisory and upgrade within range. If no fix exists, record the advisory ID with its reason in `[advisories] ignore` in `deny.toml`, and in an `[advisories] ignore` list in .cargo/audit.toml, created if missing (cargo audit does not read deny.toml) |
+| A "Passed on retry" warning | An upstream suite step, or TruffleRuby's `truffleruby-polyglot-get js`, failed once and passed when `scripts/retry.sh` ran it again; the warning and the job summary name the tests that failed first. A test that keeps doing it needs a fix, or a `flaky:<anchor>` status in its ledger (`.claude/skills/parity-suite`) |
 
 Job details: [reference.md](reference.md).
