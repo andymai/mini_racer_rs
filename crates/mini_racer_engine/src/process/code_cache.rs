@@ -9,7 +9,11 @@ use crate::control::JsText;
 
 const MAX_ENTRIES: usize = 8;
 const MAX_BYTES: usize = 256 << 20;
-const MAX_SIGHTINGS: usize = 64;
+// 32 KiB of digests, so a bundle loaded again after thousands of large scripts
+// evaluated once is still seen a second time: a list of 64 forgot one after 70
+// such scripts, so only its fourth load read a cache. Each large eval scans
+// it, in about 2 microseconds when full.
+const MAX_SIGHTINGS: usize = 4096;
 const MAX_REFUSED: usize = 8;
 // Units read from each end of a source, and a smaller window from each of a
 // few points between, to tell one sighting from another without reading it all.
@@ -292,7 +296,7 @@ pub(crate) fn enabled() -> bool {
 #[cfg(test)]
 #[allow(clippy::panic, reason = "a test fails by panicking")]
 mod tests {
-    use super::{CodeCache, Plan};
+    use super::{CodeCache, MAX_SIGHTINGS, Plan};
     use crate::control::JsText;
 
     fn cache() -> &'static CodeCache {
@@ -394,6 +398,29 @@ mod tests {
         assert!(matches!(
             cache.plan(&name(), &source(2), None, true),
             Plan::Consume(..)
+        ));
+    }
+
+    // The list holds as many sightings as it keeps and no more: a script is
+    // seen again after one fewer others, and forgotten after that many more.
+    #[test]
+    fn a_sighting_is_forgotten_once_the_list_has_had_its_fill_of_others() {
+        let cache = cache();
+        let script = |seed: usize| JsText::Latin1(seed.to_le_bytes().to_vec());
+        for seed in 0..MAX_SIGHTINGS {
+            let _ = cache.plan(&name(), &script(seed), None, false);
+        }
+        assert!(matches!(
+            cache.plan(&name(), &script(0), None, false),
+            Plan::Make(..)
+        ));
+        for seed in MAX_SIGHTINGS..2 * MAX_SIGHTINGS {
+            let _ = cache.plan(&name(), &script(seed), None, false);
+        }
+        assert_eq!(mini_racer_sync::lock(&cache.sightings).len(), MAX_SIGHTINGS);
+        assert!(matches!(
+            cache.plan(&name(), &script(0), None, false),
+            Plan::Compile(None)
         ));
     }
 

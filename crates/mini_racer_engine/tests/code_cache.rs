@@ -52,6 +52,12 @@ fn script(seed: u32, result: u32) -> String {
     text
 }
 
+// A script over the size worth caching, evaluated once, told apart from the
+// others by its start.
+fn one_off(seed: u32) -> String {
+    format!("var oneOff{seed} = {seed};\n/* {} */", "x".repeat(1 << 20))
+}
+
 // Counters and entries are the process's, so the cases run in order in one
 // test, as nextest's process per test and libtest's threads both allow.
 #[test]
@@ -100,6 +106,20 @@ fn the_code_cache() {
     assert!(answers.iter().all(|answer| *answer == answers[0]));
     assert_eq!(cache().stored(), 2);
     assert_eq!(cache().hits(), 2);
+
+    // A bundle loaded again after a hundred large scripts evaluated once, as a
+    // process running large per-request scripts between loads sees, is still
+    // seen a second time and cached.
+    let bundle = script(4, 1000);
+    eval(&spawn(), "bundle.js", &bundle).expect("eval");
+    let one_offs = spawn();
+    for seed in 0..100 {
+        eval(&one_offs, "one-off.js", &one_off(seed)).expect("eval");
+    }
+    eval(&spawn(), "bundle.js", &bundle).expect("eval");
+    assert_eq!(cache().stored(), 3);
+    eval(&spawn(), "bundle.js", &bundle).expect("eval");
+    assert_eq!(cache().hits(), 3);
 }
 
 // The documented switch, in a run of this test alone with it set. Sources
