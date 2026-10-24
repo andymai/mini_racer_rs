@@ -134,6 +134,7 @@ Rust replacement for the `mini_racer` gem 0.22.2: same `MiniRacer` API, V8 from 
 | Vendored TruffleRuby backend | `lib/mini_racer/truffleruby.rb`, `lib/mini_racer/shared.rb` |
 | Public surface status and deviation reasons | `compat.toml`, `compat/surface.json` |
 | Compat reflection, extraction, check, rendering | `tools/compat/`, `rakelib/compat.rake` |
+| RBS signatures of the public API, and the tests' calls checked against them | `sig/`, `test/rbs/runtime_check.rb`, `rakelib/rbs.rake` |
 | Generated from compat.toml (never edit) | `COMPATIBILITY.md`, the README compat table |
 | README `ruby check` examples, each asserted | `test/ruby/readme_test.rb` |
 | Public docs (outward-writing, Andy's approval) and templates | `README.md`, `ARCHITECTURE.md`, `BENCHMARKS.md`, `SECURITY.md`, `STABILITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1, verbatim), `AI-DISCLOSURE.md` (copied verbatim), `.github/ISSUE_TEMPLATE/`, `.github/pull_request_template.md` |
@@ -152,6 +153,8 @@ scripts/gate.sh                    # plus Rust tests, compile, exports, Ruby tes
 scripts/gate.sh --full             # plus planted violations, MSRV, deny, audit, machete, rustdoc, gem builds
 bundle exec rake compile           # build the extension into lib/mini_racer_rs/
 bundle exec rake test              # Ruby tests (compiles first)
+bundle exec rake rbs:validate      # the signatures in sig/ are well formed
+bundle exec rake rbs:test          # Ruby tests with their calls into MiniRacer and MiniRacerRs checked against sig/
 cargo nextest run --workspace --exclude mini_racer_rs
 scripts/check-exports.sh --write   # after changing #[no_mangle] items or bumping v8
 scripts/update-v8-archives.sh      # repin every target's V8 archive after bumping v8
@@ -183,6 +186,7 @@ Stress scripts and golden bytes: the testing skill. Benchmarks: the profiling sk
 - `crates/mini_racer_engine`: `cargo nextest run -p mini_racer_engine`; for teardown or lifetime changes, `scripts/sanitizers.sh` or the `sanitizers` label. Flag-dependent assertions live in `crates/mini_racer_engine/tests/flags.rs`, one test per process.
 - `ext/` or `lib/`: `cargo test -p mini_racer_rs --lib` (the Ruby-free option rules, number classification and spin record), `bundle exec rake test`, then `scripts/check-exports.sh`, then `bundle exec ruby test/upstream/run.rb --strict` with and without `--suite execjs`, then `bundle exec ruby test/diff/run.rb --strict` with and without `--set consumers`, then `bundle exec rake compat:check`.
 - `compat.toml`: `bundle exec rake compat:render`, then `bundle exec rake compat:check`.
+- `sig/`, or a public method's arguments or result in `ext/` or `lib/`: `bundle exec rake rbs:validate`, then `bundle exec rake rbs:test`.
 - `scripts/`, `layers.toml`, any `Cargo.toml`: `scripts/check-boundaries.sh`, `scripts/test-boundaries.sh` and `scripts/check-deny.sh`.
 - `.github/`, `release/alpine/Dockerfile`: `scripts/check-action-pins.sh`, which also requires every container image a workflow runs to be pinned to a digest.
 - `scripts/alpine.sh`, `scripts/fetch-v8-archive.sh`, `ext/mini_racer_rs/extconf.rb`: also CI's Alpine job under podman (the command above).

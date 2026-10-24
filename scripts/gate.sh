@@ -27,6 +27,7 @@ step cargo fmt --all -- --check
 step cargo fmt --manifest-path crates/mini_racer_wire/fuzz/Cargo.toml -- --check
 step taplo fmt --check
 step bundle exec rubocop
+step bundle exec rbs -I sig validate
 step scripts/check-boundaries.sh
 step scripts/check-unsafe-fences.sh
 step scripts/check-ffi-guards.sh
@@ -59,6 +60,7 @@ step bundle exec ruby test/upstream/run.rb --suite execjs --strict
 msrv=$(taplo get -f tools/versions.toml toolchains.msrv)
 step scripts/test-boundaries.sh
 step bundle exec ruby test/upstream/run.rb --scripts
+step bundle exec rake rbs:test
 step bundle exec ruby test/diff/run.rb --twin --strict
 step npm --prefix test/consumers/js ci --silent
 step npm --prefix test/consumers/js run build --silent

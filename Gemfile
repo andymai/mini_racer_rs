@@ -12,6 +12,7 @@ gem "minitest", "~> 5.25"
 gem "rake", "~> 13.2"
 gem "rake-compiler", "~> 1.2"
 group :lint do
+  gem "rbs", "~> 4.2", require: false
   gem "rubocop", "~> 1.81", require: false
   gem "rubocop-minitest", require: false
   gem "rubocop-performance", require: false

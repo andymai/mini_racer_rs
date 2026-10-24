@@ -9,7 +9,7 @@
 | Changes | Decides whether the PR touches code |
 | Format | `cargo fmt --all -- --check`, and the same for the fuzz crate |
 | TOML Format | `taplo fmt --check` |
-| RuboCop | `bundle exec rubocop`, then `tools/compat/render.rb --check` (`COMPATIBILITY.md` and the README table match `compat.toml`), which a docs-only PR runs too |
+| RuboCop | `bundle exec rubocop`, `tools/compat/render.rb --check` (`COMPATIBILITY.md` and the README table match `compat.toml`) and `rbs -I sig validate`, which a docs-only PR runs too |
 | Unused Dependencies | `cargo machete` |
 | Cargo Deny | `scripts/check-deny.sh`: the supported targets, every target (the only pass that sees `cfg(loom)` crates), and the fuzz crate |
 | Security Audit | `cargo audit` on the root and fuzz lockfiles |
@@ -23,7 +23,7 @@
 | Loom | the loom models in `crates/mini_racer_sync/tests/loom.rs`, under `--cfg loom` |
 | Fuzz Smoke | `scripts/fuzz-smoke.sh 60`: every fuzz target for 60 s on the pinned nightly; crash inputs are uploaded on failure |
 | Gem Contents | Builds both gemspecs, checks the file list, resolves the unpacked source gem with `--locked` |
-| Ruby (3.3, 3.4 and 4.0 on ubuntu-24.04 and macos-15; 3.4 on ubuntu-24.04-arm and macos-15-intel; a pull request leaves macos-15's 3.3 and 4.0 to `main`) | `rake compile`, `scripts/check-exports.sh`, `rake test`, the upstream suite in strict mode, upstream's scripts, and a source gem install into an empty `GEM_HOME`; on a pull request, the source gem install and the consumer workloads run on ubuntu-24.04 and macos-15 only |
+| Ruby (3.3, 3.4 and 4.0 on ubuntu-24.04 and macos-15; 3.4 on ubuntu-24.04-arm and macos-15-intel; a pull request leaves macos-15's 3.3 and 4.0 to `main`) | `rake compile`, `scripts/check-exports.sh`, `rake test` (and `rake rbs:test` on ubuntu-24.04 Ruby 3.4), the upstream suite in strict mode, upstream's scripts, and a source gem install into an empty `GEM_HOME`; on a pull request, the source gem install and the consumer workloads run on ubuntu-24.04 and macos-15 only |
 | Alpine (Ruby 3.4, x86_64 on ubuntu-24.04 and aarch64 on ubuntu-24.04-arm) | `scripts/alpine.sh test` in the digest-pinned `ruby:3.4-alpine` from `release/alpine/Dockerfile`: `rake compile`, `scripts/check-exports.sh`, the Ruby tests as the checkout's owner, both upstream suites in strict mode, and `scripts/madvise-fixture.sh` |
 | TruffleRuby | the harness guard tests and the upstream suite in strict mode against the vendored backend |
 | OSV Scan (new findings), PRs only | OSV on the eight lockfiles at the base and the head; fails on a finding the PR adds or a scan that cannot finish |

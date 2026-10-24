@@ -1,0 +1,70 @@
+module MiniRacerRs
+  VERSION: String
+  NATIVE_VERSION: String
+  V8_VERSION: String
+
+  type terminations = {
+    stop: Integer,
+    timeout: Integer,
+    interrupt: Integer,
+    max_memory: Integer,
+    heap_exhausted: Integer
+  }
+
+  type counts = {
+    dispatches: Integer,
+    callbacks: Integer,
+    bytes_to_js: Integer,
+    bytes_from_js: Integer,
+    js_ns: Integer,
+    gc_count: Integer,
+    gc_ns: Integer,
+    terminated: terminations
+  }
+
+  type code_cache_counts = {
+    entries: Integer,
+    bytes: Integer,
+    hits: Integer,
+    builds: Integer,
+    rebuilds: Integer,
+    refused: Integer,
+    shared_sources: Integer,
+    shared_bytes: Integer
+  }
+
+  def self.register_source_map: (String bundle, String map) -> nil
+
+  def self.counters: (MiniRacer::Context context) -> counts
+
+  def self.code_cache: () -> code_cache_counts
+
+  def self.timeout: [T] (Integer milliseconds) { () -> T } -> T
+
+  def self.heap_limit: () -> Integer?
+
+  def self.heap_limit=: (Integer? bytes) -> Integer?
+
+  class HeapLimitError < MiniRacer::V8OutOfMemoryError
+  end
+
+  class Pool
+    class ShutdownError < MiniRacer::Error
+    end
+
+    def initialize: (
+      size: Integer,
+      ?max_uses: Integer?,
+      ?timeout: Integer,
+      ?max_memory: Integer,
+      ?ensure_gc_after_idle: Integer,
+      ?marshal_stack_depth: Integer,
+      ?snapshot: MiniRacer::Snapshot?,
+      ?verbose_exceptions: boolish
+    ) ?{ (MiniRacer::Context context) -> void } -> void
+
+    def with: [T] () { (MiniRacer::Context context) -> T } -> T
+
+    def shutdown: () -> nil
+  end
+end
