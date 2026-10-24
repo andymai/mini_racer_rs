@@ -144,6 +144,16 @@ jobs:
             bundle exec ruby test/diff/run.rb --explore --shrink --seed "$seed" --js 1500 --ruby 1500
             seed=$((seed + 1))
           done
+      # The objects shared as in the ledger's run, past the seed 1 that PR CI
+      # runs; every seed runs, so one failure does not hide another.
+      - name: Shared values, seeds 1 to 10
+        if: ${{ !cancelled() }}
+        run: |
+          status=0
+          for seed in $(seq 1 10); do
+            bundle exec ruby test/diff/run.rb --explore --shared --shrink --seed "$seed" --js 1500 --ruby 1500 || status=1
+          done
+          exit "$status"
       - name: Keep results and minimized cases
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

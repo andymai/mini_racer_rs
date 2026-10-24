@@ -67,7 +67,7 @@ Reproduce with the seed from the summary line or the file names: `bundle exec ru
 - A case over 30 seconds records `["timeout",30]` and restarts the worker.
 - `--shrink` minimizes each new divergence not already `xfail:` or `crash:` into `test/diff/corpus/min-<id>.json`, keeping how its first differing step differs.
 
-The nightly explore job prints `values, seed <n>` per seed and uploads `tmp/diff` and the minimized cases as `diff-explore`. Replay one seed with `bundle exec ruby test/diff/run.rb --explore --shrink --seed <n> --js 1500 --ruby 1500`. A bug: fix it and commit the minimized case as a regression. A deliberate difference: a deviation, an accepted divergence, and `--write-ledger`.
+The nightly explore job prints `values, seed <n>` per seed and uploads `tmp/diff` and the minimized cases as `diff-explore`. Replay one seed with `bundle exec ruby test/diff/run.rb --explore --shrink --seed <n> --js 1500 --ruby 1500`. The same job then runs seeds 1 to 10 with shared values; replay one with `bundle exec ruby test/diff/run.rb --explore --shared --shrink --seed <n> --js 1500 --ruby 1500`. A bug: fix it and commit the minimized case as a regression. A deliberate difference: a deviation, an accepted divergence, and `--write-ledger`.
 
 ## Fork cases
 
