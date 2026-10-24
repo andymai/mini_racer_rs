@@ -88,4 +88,43 @@ class SharedSourcesTest < Minitest::Test
       assert_operator own_heap - heap, :>, bytes * 0.9, "a context read a copy of its own"
     end
   end
+
+  # Two UTF-8 sources of over a megabyte, one past ASCII only in Latin-1 and
+  # one with characters of every width up to astral, each starting at a
+  # shifting offset, so the runs a source is converted in end inside them.
+  # Two contexts load each and report the function's length in units, a
+  # digest of its text and their external memory.
+  WIDTHS = <<~'RUBY'
+    require "json"
+    require "mini_racer"
+    def comment(characters, count) = Array.new(count) { |i| ("a" * (i % 5)) + characters[i % characters.size] }.join
+    latin1 = "function latin1() { /* #{comment(%W[\u00E9 \u00FF \u0080], 300_000)} */ }\n1"
+    wide = "function wide() { /* #{comment(%W[\u00FF \u0100 \u07FF \u0800 \uFFFD \u{10000} \u{1F600} \u{10FFFF}],
+                                        250_000)} */ }\n1"
+    digest = "(() => { const text = %s.toString(); let hash = 0; for (let i = 0; i < text.length; i++) " \
+             "hash = (Math.imul(hash, 31) + text.charCodeAt(i)) | 0; return [text.length, hash]; })()"
+    outcomes = [[latin1, "latin1"], [wide, "wide"]].map do |source, name|
+      Array.new(2) do
+        context = MiniRacer::Context.new
+        [context.eval(source), context.eval(format(digest, name)), context.heap_stats[:external_memory]]
+      end
+    end
+    puts JSON.generate([[latin1, wide].map { |source| [source.bytesize, source.encode("UTF-16LE").bytesize / 2] },
+                        outcomes])
+  RUBY
+
+  # With the code cache off each context keeps a copy of its own, which V8
+  # decodes from the UTF-8 itself; the shared copy reads the same.
+  def test_a_shared_utf8_source_reads_as_v8_decodes_it
+    sizes, shared = outcome(WIDTHS, nil)
+    _, own = outcome(WIDTHS, "off")
+    bytes, units = sizes.transpose
+    read = ->(outcomes) { outcomes.map { |contexts| contexts.map { |context| context.take(2) } } }
+    external = ->(outcomes) { outcomes.map { |contexts| contexts.map(&:last) } }
+
+    assert_operator bytes.min, :>, 1 << 20
+    assert_equal read.call(own), read.call(shared)
+    assert_equal(units.map { |count| [count, count] }, external.call(shared))
+    assert_equal [[0, 0], [0, 0]], external.call(own)
+  end
 end

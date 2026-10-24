@@ -1,4 +1,5 @@
 use std::ffi::{c_char, c_void};
+use std::mem::MaybeUninit;
 use std::ptr::NonNull;
 use std::sync::Arc;
 use std::time::Duration;
@@ -156,6 +157,47 @@ pub fn utf8_to_utf16(text: &[u8], out: &mut [u16]) -> Option<usize> {
     // has room for.
     let converted = unsafe { v8::simdutf::convert_utf8_to_utf16le_with_errors(text, out) };
     converted.is_ok().then_some(converted.count)
+}
+
+/// A shared slice of a length fixed when it is made, written in place from its
+/// first element on, a run at a time, and handed out once every one is
+/// written.
+pub struct Filling<T> {
+    slots: Arc<[MaybeUninit<T>]>,
+    written: usize,
+}
+
+impl<T: Copy> Filling<T> {
+    #[must_use]
+    pub fn new(len: usize) -> Self {
+        Self {
+            slots: Arc::new_uninit_slice(len),
+            written: 0,
+        }
+    }
+
+    /// Writes `run` after the elements already written; `None`, writing
+    /// nothing, when it does not fit.
+    pub fn append(&mut self, run: &[T]) -> Option<()> {
+        let end = self.written.checked_add(run.len())?;
+        let slots = Arc::get_mut(&mut self.slots)?.get_mut(self.written..end)?;
+        for (slot, &unit) in slots.iter_mut().zip(run) {
+            slot.write(unit);
+        }
+        self.written = end;
+        Some(())
+    }
+
+    /// The slice, once every element is written.
+    #[must_use]
+    pub fn filled(self) -> Option<Arc<[T]>> {
+        if self.written != self.slots.len() {
+            return None;
+        }
+        // SAFETY: `append` writes the elements in order from the first and
+        // counts only those it wrote, so every one is initialized.
+        Some(unsafe { self.slots.assume_init() })
+    }
 }
 
 /// The address V8 names `isolate` by when it posts the isolate a task.
