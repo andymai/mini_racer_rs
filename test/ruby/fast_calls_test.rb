@@ -492,6 +492,69 @@ class FastCallsCapTest < Minitest::Test
   end
 end
 
+class FastCallsRefusalTest < Minitest::Test
+  include RubyProcess
+  include FastCallsFixtures
+
+  REFUSING = <<~JS
+    function keys(o) { return [hash(), Object.keys(o), Object.getPrototypeOf(o) === Object.prototype] }
+    function thrower() { throw new TypeError(hash()) }
+    ReactRailsUJS.serverRender = function (fn, name, props) { return [hash(), fn, name, JSON.stringify(props)] };
+  JS
+
+  DEEP = ("[" * 129) + ("]" * 129)
+
+  # A fast call, then a source for each refusal: arguments that are not an
+  # array, arguments past their JSON, props nested past 128, a `\u` in the
+  # code around a render's call, there spelling `arguments` to keep the
+  # wrapper for a call again, and a `\u` in a JSON string spelling
+  # `__proto__`.
+  SOURCES = [
+    "(hash.apply(this, [1]))",
+    '(hash.apply(this, {"length":1,"0":2}))',
+    "(thrower.apply(this, [] ))",
+    "(#{FastCallsFixtures.render("Deep", DEEP, before: "", after: "")})",
+    "(#{FastCallsFixtures.render("A", '{"n":1}', before: "globalThis.again = \\u0061rguments.callee;", after: "")})",
+    "again()",
+    '(keys.apply(this, [{"\\u005f_proto__":{"x":1},"a":1}]))',
+  ].freeze
+
+  # Each outcome with its bottom frame's script hash as `source` when it is
+  # the source's, as on the normal path, and `template` when it is not.
+  OUTCOMES = <<~RUBY.freeze
+    require "digest"
+    require "json"
+    require "mini_racer"
+    context = MiniRacer::Context.new
+    context.eval(#{REFLECTING.dump})
+    context.eval(#{REFUSING.dump})
+    outcomes = JSON.parse(#{JSON.generate(SOURCES).dump}).map do |source|
+      outcome = begin
+        context.eval(source)
+      rescue MiniRacer::Error => e
+        [e.class.name, e.message]
+      end
+      JSON.parse(JSON.generate(outcome).gsub(Digest::SHA256.hexdigest(source), "source").gsub(/\\h{64}/, "template"))
+    end
+    puts JSON.generate(outcomes)
+  RUBY
+
+  # Only the fast call hashes otherwise, by the approved deviation
+  # behavior:fast-calls@ruby; mini_racer 0.22.2 hashes its source too.
+  def test_sources_a_fast_call_refuses_run_as_with_fast_calls_off
+    rendered = ["source", "renderToString", "A", '{"n":1}']
+    refused = ["source", ["MiniRacer::RuntimeError", "TypeError: source"], ["source", "renderToString", "Deep", DEEP],
+               rendered, rendered, ["source", ["a"], false],]
+
+    { nil => "template", "off" => "source" }.each do |switch, first|
+      out, err, status = run_ruby(OUTCOMES, env: { "MINI_RACER_RS_FAST_CALLS" => switch })
+
+      assert_predicate status, :success?, err
+      assert_equal [first, *refused], JSON.parse(out), "MINI_RACER_RS_FAST_CALLS=#{switch.inspect}"
+    end
+  end
+end
+
 class FastCallsDeviationTest < Minitest::Test
   include RubyProcess
   include FastCallsFixtures

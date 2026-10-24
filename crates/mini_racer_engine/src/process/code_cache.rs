@@ -456,4 +456,21 @@ mod tests {
             Plan::Consume(..)
         ));
     }
+
+    #[test]
+    fn caches_past_the_size_limit_drop_the_least_recently_used() {
+        let cache = cache();
+        let half = || vec![0; super::MAX_BYTES / 2 + 1].into_boxed_slice();
+        cached(cache, &source(10), half());
+        cached(cache, &source(11), half());
+        assert_eq!(cache.stored(), 2);
+        assert!(matches!(
+            cache.plan(&name(), &source(11), None, true),
+            Plan::Consume(..)
+        ));
+        assert!(matches!(
+            cache.plan(&name(), &source(10), None, true),
+            Plan::Make(..)
+        ));
+    }
 }
