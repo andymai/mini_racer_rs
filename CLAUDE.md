@@ -117,6 +117,7 @@ Rust replacement for the `mini_racer` gem 0.22.2: same `MiniRacer` API, V8 from 
 | Gem packaging and the installed-gem smoke test | `rakelib/package.rake`, `release/smoke.rb`, `tools/versions.toml`, `.github/workflows/release.yml` |
 | Release floors, gem sizes, publish order, lockfiles | `scripts/check-glibc-floor.sh`, `scripts/check-macos-minos.sh`, `scripts/check-gem-sizes.sh`, `scripts/publish-gems.sh`, `scripts/sync-release-locks.sh` |
 | Sigstore attestations for published gems | `scripts/sign-gems.sh`, `release/sign/Gemfile`, `release/sign/Gemfile.lock`, `scripts/publish-gems.sh` |
+| SBOMs and the provenance bundle attached to each release | `scripts/sbom.sh`, `.github/workflows/release.yml` (`sbom`, `checksums`) |
 | Sanitizer runs | `.github/workflows/nightly.yml`, `scripts/sanitizers.sh`, `.github/sanitizers/lsan.supp` |
 | Nightly fuzzing and fresh-seed differential runs | `.github/workflows/nightly.yml`, `scripts/fuzz-smoke.sh`, `test/diff/run.rb` |
 | Weekly Ruby head, source gem, newest v8 | `.github/workflows/extended.yml` |

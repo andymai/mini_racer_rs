@@ -5,7 +5,7 @@ description: Use when cutting, holding, dry-running or recovering a mini_racer_r
 
 # Release Flow
 
-A release is a merged release-please PR. Merging it tags `vX.Y.Z` and publishes a GitHub release, and that `release: published` event runs `.github/workflows/release.yml`: one native gem per platform, each carrying an extension for every Ruby in `tools/versions.toml` `[release] rubies`, plus the source gem; every gem installed into an empty `GEM_HOME` and smoke-tested; `SHA256SUMS` and build provenance; then, once the `rubygems` environment's required reviewer approves, a trusted-publishing push to RubyGems.org and an upload to the GitHub release.
+A release is a merged release-please PR. Merging it tags `vX.Y.Z` and publishes a GitHub release, and that `release: published` event runs `.github/workflows/release.yml`: one native gem per platform, each carrying an extension for every Ruby in `tools/versions.toml` `[release] rubies`, plus the source gem; every gem installed into an empty `GEM_HOME` and smoke-tested; `SHA256SUMS`, CycloneDX and SPDX SBOMs, and build provenance; then, once the `rubygems` environment's required reviewer approves, a trusted-publishing push to RubyGems.org and an upload to the GitHub release.
 
 ## Quick reference
 
@@ -23,6 +23,8 @@ A release is a merged release-please PR. Merging it tags `vX.Y.Z` and publishes 
 | Action updates the release runs | Dependabot's github-actions PR when it changes `.github/workflows/release.yml` or `.github/actions/`, never auto-merged; read each action's changes between the two pinned SHAs and let the PR's release dry run pass before merging |
 | Source gem locally | `SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) bundle exec rake package:source` (into `pkg/`) |
 | What a publish would push | `scripts/publish-gems.sh --dry-run <dir>` |
+| SBOMs locally | `scripts/sbom.sh <dir>`, with cargo-cyclonedx at the version `tools/versions.toml` pins |
+| Check a gem's provenance offline | `gh attestation verify <gem> --bundle mini_racer_rs-<version>.intoto.jsonl --repo andymai/mini_racer_rs`, with the bundle from the GitHub release |
 | Lockfiles after a version bump | `scripts/sync-release-locks.sh` |
 | Smoke-test an installed gem | `EXPECTED_PLATFORM=<platform or ruby> ruby release/smoke.rb`, from outside the checkout |
 

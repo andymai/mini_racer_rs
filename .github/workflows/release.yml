@@ -31,6 +31,7 @@ on:
       - scripts/check-platforms.sh
       - scripts/check-versions.sh
       - scripts/publish-gems.sh
+      - scripts/sbom.sh
       - tools/versions.toml
   workflow_dispatch:
     inputs:
@@ -87,6 +88,31 @@ jobs:
           } >>"$GITHUB_OUTPUT"
       - run: scripts/check-versions.sh
       - run: scripts/check-platforms.sh
+
+  # A pull request's dry run builds them too, so a change that breaks them
+  # fails there; the checksums job puts them beside the gems.
+  sbom:
+    name: SBOMs
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          v8: "false"
+          tools: cargo-cyclonedx
+      - run: scripts/sbom.sh tmp/sbom
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sbom
+          path: tmp/sbom
+          if-no-files-found: error
+          retention-days: 7
 
   compile:
     name: Compile ${{ matrix.platform }} (Ruby ${{ matrix.ruby }})
@@ -414,7 +440,7 @@ jobs:
 
   checksums:
     name: Checksums and provenance
-    needs: [verify, install, install-musl-floor, install-truffleruby, install-source]
+    needs: [verify, sbom, install, install-musl-floor, install-truffleruby, install-source]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -440,10 +466,23 @@ jobs:
         run: |
           sha256sum -- *.gem >SHA256SUMS
           cat SHA256SUMS
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sbom
+          path: pkg
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        id: provenance
         if: github.ref_type == 'tag'
         with:
           subject-path: pkg/*.gem
+      # The bundle is one Sigstore bundle on one line, which
+      # gh attestation verify --bundle reads offline.
+      - name: Keep the provenance bundle for the release
+        if: github.ref_type == 'tag'
+        env:
+          BUNDLE: ${{ steps.provenance.outputs.bundle-path }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: cp -- "$BUNDLE" "pkg/mini_racer_rs-$VERSION.intoto.jsonl"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-${{ needs.verify.outputs.version }}
@@ -541,4 +580,5 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           shopt -s nullglob
-          gh release upload "$TAG" pkg/*.gem pkg/*.sigstore.json pkg/SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"
+          gh release upload "$TAG" pkg/*.gem pkg/*.sigstore.json pkg/SHA256SUMS pkg/*.cdx.json pkg/*.spdx.json \
+            pkg/*.intoto.jsonl --clobber --repo "$GITHUB_REPOSITORY"
