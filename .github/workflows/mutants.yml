@@ -38,11 +38,12 @@ jobs:
     env:
       CI: "true"
       # Every mutant relinks the engine's test binaries against V8: without
-      # debug info and with two jobs at a time they fit the runner, whose
-      # service was shut down mid-build with the defaults.
+      # debug info and with two jobs at a time they fit the runner.
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
       CARGO_BUILD_JOBS: "2"
+      # Below the runner's 16 GB, so a runaway mutant's test is what dies.
+      MUTANTS_MEMORY_MAX: 12G
     steps:
       - name: Free disk space
         run: |

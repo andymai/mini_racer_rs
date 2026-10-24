@@ -20,11 +20,24 @@ mode=${1:-}
 # mutants after it replay them.
 export PROPTEST_DISABLE_FAILURE_PERSISTENCE=1
 
+# A mutant can turn a bounded allocation into an unbounded one, and a test
+# that then takes all of a hosted runner's memory takes the runner down with
+# every result. With MUTANTS_MEMORY_MAX set, the run lives in a cgroup that
+# caps it, so the kernel kills the test, which cargo-mutants counts as caught.
+capped() {
+  if [ -n "${MUTANTS_MEMORY_MAX:-}" ]; then
+    sudo systemd-run --scope --quiet -p "MemoryMax=$MUTANTS_MEMORY_MAX" -p MemorySwapMax=0 -- \
+      sudo --preserve-env -u "$(id -un)" env "PATH=$PATH" "$@"
+  else
+    "$@"
+  fi
+}
+
 mutants() {
   local run=$1 status=0
   shift
   mkdir -p tmp/mutants
-  cargo mutants --output "tmp/mutants/$run" --cargo-arg=--locked ${CI:+--in-place} "$@" || status=$?
+  capped cargo mutants --output "tmp/mutants/$run" --cargo-arg=--locked ${CI:+--in-place} "$@" || status=$?
   case "$status" in
     0 | 2 | 3) ;;
     *) echo "mutants: cargo mutants exited $status" >&2; exit "$status" ;;
