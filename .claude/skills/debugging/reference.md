@@ -23,7 +23,7 @@ rusty_v8 152.2.0 leaks a 64-byte liveness cell per isolate on purpose (`Box::lea
 
 ## Loom failures
 
-The models run with `RUSTFLAGS="--cfg loom -Dwarnings" cargo test -p mini_racer_sync --test loom --release --locked --target-dir target/loom` (CI's Loom job and `scripts/gate.sh`). Append `-- <model name>` to run one. Loom explores interleavings in a fixed order, so rerunning the model replays the failing one; there is no seed to save.
+The models run with `RUSTFLAGS="--cfg loom -Dwarnings" cargo test -p mini_racer_sync --test loom --release --locked --target-dir target/loom` (CI's Loom job and `scripts/gate.sh`); `--cfg loom` builds need their own target directory, since sharing the default one rebuilds everything on every switch. Append `-- <model name>` to run one. Loom explores interleavings in a fixed order, so rerunning the model replays the failing one; there is no seed to save.
 
 The workspace pins loom 0.7.2 (`Cargo.lock`; its source is under `~/.cargo/registry/src/`). Its environment variables, as they apply here:
 
@@ -71,7 +71,15 @@ The nightly explore job prints `values, seed <n>` per seed and uploads `tmp/diff
 
 ## Fork cases
 
-Each `test/ruby/fork/<what>_case.rb` runs as its own process; ForkTest kills its process group after 60 seconds and prints the status, stdout and stderr. Inside, `child` reports `child: <class>: <message>` (the block raised, exit 1) or `child timed out` (exit 99 after five seconds), and `reap` raises `child <pid> hung`. Run one directly with `bundle exec ruby test/ruby/fork/<what>_case.rb; echo $?` (0 passes, 77 skips, and with `CI` set a skip exits 1) or through Minitest with `bundle exec ruby -Itest/ruby test/ruby/fork_test.rb -n test_<what>`. While it hangs, `eu-stack -p <pid>` on the parent and on the child shows where each is blocked; a child runs V8's worker tasks on threads of its own, started at its first worker task, whose idle stacks wait in `WorkerQueue::take`. A child that aborts with Abseil's `Mutex::Fer with pending CondVar queueing`, or hangs on worker work such as an awaited `WebAssembly.compile`, posted to V8's own worker threads, which it does not have: a worker slot no longer leads to `process::workers` (v8-bump skill, step 11). The fork rules the engine follows are in `CLAUDE.md`'s pitfalls; `test/stress/fork_loop.rb` forks 600 times with idle and busy contexts.
+Each `test/ruby/fork/<what>_case.rb` runs as its own process; ForkTest kills its process group after 60 seconds and prints the status, stdout and stderr. Inside, `child` reports `child: <class>: <message>` (the block raised, exit 1) or `child timed out` (exit 99 after five seconds), and `reap` raises `child <pid> hung`. Run one directly with `bundle exec ruby test/ruby/fork/<what>_case.rb; echo $?` (0 passes, 77 skips, and with `CI` set a skip exits 1) or through Minitest with `bundle exec ruby -Itest/ruby test/ruby/fork_test.rb -n test_<what>`. While it hangs, `eu-stack -p <pid>` on the parent and on the child shows where each is blocked; a child runs V8's worker tasks on threads of its own, started at its first worker task, whose idle stacks wait in `WorkerQueue::take`. A child that aborts with Abseil's `Mutex::Fer with pending CondVar queueing`, or hangs on worker work such as an awaited `WebAssembly.compile`, posted to V8's own worker threads, which it does not have: a worker slot no longer leads to `process::workers` (v8-bump skill, step 11). The fork rules the engine follows are in `ARCHITECTURE.md` "Forks" and `.claude/skills/engine-internals/forks.md`; `test/stress/fork_loop.rb` forks 600 times with idle and busy contexts.
+
+## Missing V8 static library
+
+v8's build script unpacks the archive into `<target>/<profile>/gn_out/obj`, outside its own build directory, and rust-cache keeps the build script's recorded output but not that directory, so a CI change that rebuilds the v8 crate without rerunning its build script (a feature or version change in a crate below v8) fails with `could not find native static library rusty_v8` unless `scripts/restore-v8-static-lib.sh`, which the setup action runs after the cache, has put the library back; the newest-v8 canary in `extended.yml`, which skips the setup action's V8 steps, cleans v8 instead. Locally a missing `gn_out` fails the same way once the v8 crate is rebuilt; run the script, or `cargo clean -p v8` (with `--release` for a release build).
+
+```bash
+. scripts/fetch-v8-archive.sh && scripts/restore-v8-static-lib.sh
+```
 
 ## Scheduled run issues
 

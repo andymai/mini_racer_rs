@@ -17,11 +17,11 @@ A release is a merged release-please PR. Merging it tags `vX.Y.Z` and publishes 
 | Hold releases | any `RELEASE_HOLD` other than `false`, unset included: release-please keeps its PR current but never merges it |
 | Release | `gh variable set RELEASE_HOLD --body false`, then `gh workflow run "Release Please"`; approve the `rubygems` deployment when the publish job waits |
 | Publish a tag by hand | `gh workflow run Release --ref vX.Y.Z -f publish=true` |
-| Native gem locally | `bundle exec rake compile`, `bundle exec rake package:stage PLATFORM=<platform>` per Ruby, then `bundle exec rake package:native PLATFORM=<platform>` |
+| Native gem locally | `bundle exec rake compile`, `bundle exec rake package:stage PLATFORM=<platform>` per Ruby (copies the compiled extension to `tmp/native/<platform>/<ruby minor>/`), then `bundle exec rake package:native PLATFORM=<platform>` (a native gem from every staged Ruby's extension, into `pkg/`) |
 | musl native gem locally | per Ruby, in the image `scripts/alpine-image.sh ruby-<minor>` prints, with the compile job's release environment: `scripts/alpine.sh compile <platform>`; then `bundle exec rake package:native PLATFORM=<platform>`, and `scripts/alpine.sh install <platform>` in a fresh container |
 | New Alpine image digests | Dependabot's docker PR for `release/alpine/Dockerfile`, never auto-merged; review it and let its release dry run pass. By hand: `skopeo inspect --raw docker://docker.io/library/ruby:<tag> \| sha256sum` gives a tag's multi-arch index digest |
 | Action updates the release runs | Dependabot's github-actions PR when it changes `.github/workflows/release.yml` or `.github/actions/`, never auto-merged; read each action's changes between the two pinned SHAs and let the PR's release dry run pass before merging |
-| Source gem locally | `SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) bundle exec rake package:source` |
+| Source gem locally | `SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) bundle exec rake package:source` (into `pkg/`) |
 | What a publish would push | `scripts/publish-gems.sh --dry-run <dir>` |
 | Lockfiles after a version bump | `scripts/sync-release-locks.sh` |
 | Smoke-test an installed gem | `EXPECTED_PLATFORM=<platform or ruby> ruby release/smoke.rb`, from outside the checkout |

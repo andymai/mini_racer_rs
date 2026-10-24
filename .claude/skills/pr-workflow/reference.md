@@ -9,7 +9,7 @@
 | Changes | Decides whether the PR touches code |
 | Format | `cargo fmt --all -- --check`, and the same for the fuzz crate |
 | TOML Format | `taplo fmt --check` |
-| RuboCop | `bundle exec rubocop` |
+| RuboCop | `bundle exec rubocop`, then `tools/compat/render.rb --check` (`COMPATIBILITY.md` and the README table match `compat.toml`), which a docs-only PR runs too |
 | Unused Dependencies | `cargo machete` |
 | Cargo Deny | `scripts/check-deny.sh`: the supported targets, every target (the only pass that sees `cfg(loom)` crates), and the fuzz crate |
 | Security Audit | `cargo audit` on the root and fuzz lockfiles |

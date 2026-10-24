@@ -56,7 +56,7 @@ Never skip a hook. If one fails on breakage you did not cause, stop and report i
 | Gem Contents: missing or unexpected files | Adjust the globs in `mini_racer_rs.gemspec` |
 | MSRV | Raise it on purpose in `Cargo.toml`, `tools/versions.toml`, and `MINIMUM_RUST` in `ext/mini_racer_rs/extconf.rb` together; `scripts/check-versions.sh` compares them |
 | TOML Format | `taplo fmt` |
-| RuboCop | `bundle exec rubocop -a`, then fix what remains |
+| RuboCop | `bundle exec rubocop -a`, then fix what remains. The job also runs `tools/compat/render.rb --check`, which fails on a stale `COMPATIBILITY.md` or README compat table: `bundle exec rake compat:render` |
 | Cargo Deny or Security Audit | Read the advisory and upgrade within range. If no fix exists, record the advisory ID with its reason in `[advisories] ignore` in `deny.toml`, and in an `[advisories] ignore` list in .cargo/audit.toml, created if missing (cargo audit does not read deny.toml) |
 
 Job details: [reference.md](reference.md).
