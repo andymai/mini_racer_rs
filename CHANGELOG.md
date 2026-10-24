@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.5.2](https://github.com/andymai/mini_racer_rs/compare/v1.5.1...v1.5.2) (2026-10-24)
+
+
+### Bug Fixes
+
+* **ext:** keep set_flags! values rooted and stop dropping interrupts in waits ([#152](https://github.com/andymai/mini_racer_rs/issues/152)) ([b32e5cd](https://github.com/andymai/mini_racer_rs/commit/b32e5cd22a1f0f36cc4fa1e7b516c8867829b70f))
+* **pool:** build replacements outside the timeout scope and root shutdown's queues ([#151](https://github.com/andymai/mini_racer_rs/issues/151)) ([60b292d](https://github.com/andymai/mini_racer_rs/commit/60b292df11e7802b9b8429848788176698b463e9))
+
+
+### Performance
+
+* **engine:** decode a shared UTF-8 source in place ([#155](https://github.com/andymai/mini_racer_rs/issues/155)) ([f37538f](https://github.com/andymai/mini_racer_rs/commit/f37538fa2931438c4cd5a40d7647d2bbfc92d356))
+* **engine:** remember 4,096 sightings of large scripts ([#156](https://github.com/andymai/mini_racer_rs/issues/156)) ([656b60f](https://github.com/andymai/mini_racer_rs/commit/656b60fe62c976ae06786460bb24004c127dccd8))
+
 ## [1.5.1](https://github.com/andymai/mini_racer_rs/compare/v1.5.0...v1.5.1) (2026-10-23)
 
 
