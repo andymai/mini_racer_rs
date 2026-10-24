@@ -19,11 +19,16 @@ Gem::Specification.new do |spec|
 
   spec.metadata = {
     "homepage_uri" => spec.homepage,
+    "source_code_uri" => "#{spec.homepage}/tree/v#{spec.version}",
+    "changelog_uri" => "#{spec.homepage}/blob/v#{spec.version}/CHANGELOG.md",
+    "documentation_uri" => "#{spec.homepage}/blob/v#{spec.version}/README.md#api-at-a-glance",
     "bug_tracker_uri" => "#{spec.homepage}/issues",
+    "funding_uri" => "https://github.com/sponsors/andymai",
     "rubygems_mfa_required" => "true",
   }
 
   spec.files = Dir[
+    ".yardopts",
     "AI-DISCLOSURE.md",
     "CHANGELOG.md",
     "COMPATIBILITY.md",
