@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/andymai/mini_racer_rs/compare/v1.6.0...v1.7.0) (2026-10-24)
+
+
+### Features
+
+* ship RBS signatures for MiniRacer and MiniRacerRs ([#173](https://github.com/andymai/mini_racer_rs/issues/173)) ([d790edb](https://github.com/andymai/mini_racer_rs/commit/d790edbb41863e94641ec7b62ef6f74973e79970))
+
 ## [1.6.0](https://github.com/andymai/mini_racer_rs/compare/v1.5.3...v1.6.0) (2026-10-24)
 
 
