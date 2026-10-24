@@ -251,6 +251,28 @@ class PoolReplacementTest < Minitest::Test
     assert_equal(2, contexts.with { 2 })
     assert_equal 3, calls
   end
+
+  # A replacement serves no request, so its setup runs unbounded by the scope
+  # of the checkout that retired the context it replaces, which here stays
+  # open until that setup has ended.
+  def test_a_replacement_is_built_outside_the_timeout_scope_that_retired_its_context
+    outcomes = Queue.new
+    contexts = pool(max_uses: 1) do |context|
+      context.eval("const end = Date.now() + 200; while (Date.now() < end) {} var ready = 42")
+      outcomes << :built
+    rescue MiniRacer::ScriptTerminatedError
+      outcomes << :terminated
+      raise
+    end
+    outcomes.pop
+
+    MiniRacerRs.timeout(20) do
+      contexts.with { _1.eval("1") }
+
+      assert_equal :built, outcomes.pop(timeout: 10)
+    end
+    assert_equal(42, contexts.with { _1.eval("ready") })
+  end
 end
 
 class PoolCheckoutTest < Minitest::Test

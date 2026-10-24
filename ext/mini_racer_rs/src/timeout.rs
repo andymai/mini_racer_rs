@@ -93,6 +93,20 @@ pub fn current(ruby: &Ruby) -> Result<Option<Duration>, Error> {
         .and_then(|scope| scope.0.budget()))
 }
 
+/// Takes the scope out of the current fiber's storage, for a thread the
+/// extension starts, which serves no request and starts with a copy of its
+/// creator's storage. Ruby removes it before it checks for interrupts as the
+/// call returns, so an interrupt raised then leaves the fiber outside it too.
+pub fn leave_inherited(ruby: &Ruby) -> Result<(), Error> {
+    if OPEN.load(Ordering::Relaxed) == 0 {
+        return Ok(());
+    }
+    FIBER
+        .get(ruby)
+        .funcall::<_, _, Value>(*ASET, (*KEY, ruby.qnil()))
+        .map(drop)
+}
+
 // The scope lives in fiber storage, which fibers and threads started inside
 // the block inherit; a copy that outlives the block finds the scope closed.
 fn timeout(ruby: &Ruby, milliseconds: Value) -> Result<Value, Error> {

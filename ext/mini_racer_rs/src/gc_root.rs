@@ -9,7 +9,7 @@ use magnus::{
     Class, DataTypeFunctions, Error, Module, Object, RModule, Ruby, TryConvert, TypedData, Value,
 };
 
-use crate::rb_raw;
+use crate::{rb_raw, timeout};
 
 pub struct StaticRoot<T: ReprValue>(Lazy<T>);
 
@@ -181,8 +181,8 @@ impl Spill {
 const SPAWNED: &str = "spawned_with";
 
 /// Starts a Ruby thread that runs `run` with `value`, which the thread object
-/// keeps alive until the thread ends. `run` must handle whatever its Ruby
-/// calls raise.
+/// keeps alive until the thread ends, outside any `MiniRacerRs.timeout` scope
+/// open where it was started. `run` must handle whatever its Ruby calls raise.
 pub fn spawn<T: ReprValue + TryConvert>(
     ruby: &Ruby,
     value: T,
@@ -195,6 +195,11 @@ pub fn spawn<T: ReprValue + TryConvert>(
     let thread = rb_raw::thread_create(
         ruby,
         Box::new(move |ruby: &Ruby| {
+            // A scope left open by the request that started the thread would
+            // otherwise bound its scripts, a context's setup block among them.
+            // An interrupt the call raises is dropped and `run` goes on: a
+            // pool thread left without running would leave its slot building.
+            let _ = timeout::leave_inherited(ruby);
             if let Ok(value) = ruby.thread_current().ivar_get::<_, T>(SPAWNED) {
                 run(ruby, value);
             }
