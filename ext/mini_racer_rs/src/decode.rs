@@ -590,7 +590,7 @@ impl Visitor for RubyVisitor<'_> {
         self.flush()?;
         let ruby = self.ruby;
         let frame = match container {
-            Container::Values | Container::Set => Frame::Array(ruby.ary_new()),
+            Container::Set => Frame::Array(ruby.ary_new()),
             Container::DenseArray { length } => {
                 Frame::Array(ruby.ary_new_capa(usize::try_from(length).unwrap_or(0)))
             }

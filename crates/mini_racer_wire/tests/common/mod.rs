@@ -14,7 +14,6 @@ pub fn hex(bytes: impl IntoIterator<Item = u8>) -> String {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
-    Values,
     Dense,
     Sparse,
     Object,
@@ -105,7 +104,6 @@ impl Visitor for Tree {
 
     fn begin(&mut self, container: Container) -> Result<Begun<Frame, usize>, String> {
         let kind = match container {
-            Container::Values => Kind::Values,
             Container::DenseArray { .. } => Kind::Dense,
             Container::SparseArray { .. } => Kind::Sparse,
             Container::Object => Kind::Object,
@@ -387,7 +385,6 @@ impl Tree {
                 entries,
             } => {
                 let (open, close) = match kind {
-                    Kind::Values => ("values(", ")"),
                     Kind::Dense => ("[", "]"),
                     Kind::Sparse => ("sparse[", "]"),
                     Kind::Object => ("{", "}"),

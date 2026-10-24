@@ -1,7 +1,7 @@
 mod common;
 
 use common::{Kind, Node, Tree, render, render_keys, render_runs};
-use mini_racer_wire::{Limits, Writer, decode_value, decode_values};
+use mini_racer_wire::{Limits, Writer, decode_value};
 
 fn body(body: &[u8]) -> String {
     render(&frame(body), Limits::default())
@@ -524,18 +524,6 @@ fn a_key_past_the_depth_limit_fails_before_it_is_read() {
     let (rendered, keys) = render_keys(&frame(b"o\"\x01aI\x02{\x01"), shallow);
     assert_eq!(rendered, "error: too much recursion");
     assert_eq!(keys, []);
-}
-
-#[test]
-fn values_of_one_frame_share_object_ids() {
-    let mut bytes = Vec::new();
-    let mut writer = Writer::new(&mut bytes);
-    writer.begin_object();
-    writer.end_object(0);
-    writer.object_ref(0);
-    let mut tree = Tree::default();
-    let root = decode_values(&bytes, Limits::default(), &mut tree).expect("decodes");
-    assert_eq!(tree.render(root), "values(#0={}, @0)");
 }
 
 #[test]

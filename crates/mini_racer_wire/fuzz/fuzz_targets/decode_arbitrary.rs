@@ -3,7 +3,7 @@
 use std::convert::Infallible;
 
 use libfuzzer_sys::fuzz_target;
-use mini_racer_wire::{Begun, Container, Limits, Scalar, Visitor, decode_value, decode_values};
+use mini_racer_wire::{Begun, Container, Limits, Scalar, Visitor, decode_value};
 
 struct Discard;
 
@@ -52,5 +52,4 @@ fuzz_target!(|data: &[u8]| {
     };
     let _ = decode_value(data, Limits::default(), &mut Discard);
     let _ = decode_value(data, tight, &mut Discard);
-    let _ = decode_values(data, tight, &mut Discard);
 });
