@@ -18,7 +18,7 @@ use crate::control::{
     CallRequest, CallbackReply, ControlBlock, Depth, HeapWatch, IsolateTerminator, JsText, Request,
 };
 use crate::fast_calls::{self, Hoisted, Shape};
-use crate::process::code_cache::{self, Building, Key, Plan};
+use crate::process::code_cache::{self, Building, Key, Plan, Stored};
 use crate::process::fork::Generation;
 use crate::process::platform::{self, Mode};
 use crate::process::watchdog;
@@ -70,6 +70,9 @@ struct Runtime {
     // Large scripts to cache once their dispatch is over, so making a cache
     // never counts against a timeout.
     uncached: Mutex<Vec<Uncached>>,
+    // Caches this context stored, built again once its next call is over, so
+    // they hold the functions that call compiled.
+    recached: Mutex<Vec<Recached>>,
     hoisting: Mutex<Hoisting>,
     // The values of each fast call running, innermost last, for `hoisted`.
     frames: Mutex<Vec<v8::Global<v8::Array>>>,
@@ -149,6 +152,11 @@ struct Uncached {
     building: Building,
 }
 
+struct Recached {
+    script: v8::Global<v8::UnboundScript>,
+    stored: Stored,
+}
+
 // A context's fast calls: the binding their templates read values through,
 // the templates compiled so far, most recently used last, and the last source
 // a fast call took, up to `LARGE_SOURCE`.
@@ -218,6 +226,7 @@ impl Runtime {
             snapshot,
             reader: generation.sources().reader(),
             uncached: Mutex::default(),
+            recached: Mutex::default(),
             hoisting: Mutex::default(),
             frames: Mutex::default(),
             matched: Mutex::default(),
@@ -409,8 +418,14 @@ fn fits(isolate: &mut v8::Isolate, watch: &HeapWatch) -> bool {
 }
 
 // A full collection the runner asks for itself, with no script to end if the
-// heap is at its limit.
+// heap is at its limit. The scripts held to cache again after a call go
+// first: held, a script whose top level declared 40,000 functions kept its
+// context's heap 0.7 MB larger through the collection.
 fn collect(isolate: &mut v8::Isolate, block: &ControlBlock) {
+    let held = isolate
+        .get_slot::<Arc<Runtime>>()
+        .map(|runtime| std::mem::take(&mut *lock(&runtime.recached)));
+    drop(held);
     block.heap.collecting.store(true, Ordering::Relaxed);
     isolate.low_memory_notification();
     block.heap.collecting.store(false, Ordering::Relaxed);
@@ -720,11 +735,15 @@ fn serve_one(
         Some(ToV8::Reply(_)) => return Served::Next,
         None => return Served::Stop { disposed: false },
     };
+    let calls = calls(&request);
     let response = {
         v8::scope_with_context!(let scope, isolate, &runtime.context);
         handle(scope, runtime, request)
     };
     // Before the response, so a fork that follows finds this runner idle.
+    if calls {
+        recache(isolate, runtime);
+    }
     cache_uncached(isolate, runtime);
     recover(isolate, block);
     let served = respond(block, response);
@@ -743,9 +762,36 @@ fn cache_uncached(isolate: &mut v8::Isolate, runtime: &Runtime) {
     let cache = runtime.generation.code_cache();
     v8::scope!(let scope, isolate);
     for Uncached { script, building } in uncached {
-        let script = v8::Local::new(scope, &script);
-        if let Some(data) = script.create_code_cache() {
-            cache.store(building, Box::from(&**data));
+        let Some(data) = v8::Local::new(scope, &script).create_code_cache() else {
+            continue;
+        };
+        if let Some(stored) = cache.store(building, Box::from(&**data)) {
+            lock(&runtime.recached).push(Recached { script, stored });
+        }
+    }
+}
+
+// A call, as opposed to a load: what runs after a script is cached compiles
+// more of it, which the cache then holds once built again. An eval the cache
+// would take is another load.
+const fn calls(request: &Request) -> bool {
+    match request {
+        Request::Call { .. } => true,
+        Request::Eval { source, .. } => !at_least(source, CACHED_SOURCE),
+        _ => false,
+    }
+}
+
+fn recache(isolate: &mut v8::Isolate, runtime: &Runtime) {
+    let recached = std::mem::take(&mut *lock(&runtime.recached));
+    if recached.is_empty() || runtime.block.term.is_disposing() {
+        return;
+    }
+    let cache = runtime.generation.code_cache();
+    v8::scope!(let scope, isolate);
+    for Recached { script, stored } in recached {
+        if let Some(data) = v8::Local::new(scope, &script).create_code_cache() {
+            cache.replace(&stored, Box::from(&**data));
         }
     }
 }

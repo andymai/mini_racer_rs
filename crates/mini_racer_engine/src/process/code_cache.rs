@@ -42,7 +42,8 @@ const FIRST_SIGHTING: usize = 16 << 20;
 /// too only in a context that reads the script from its shared source. Such a
 /// context caches a first sighting of 16 MiB or more whose run took at least
 /// as long as its compile (`worth_first`), unless that would drop an entry a
-/// context has read.
+/// context has read. The context that cached a script caches it again after
+/// its next call (`replace`).
 #[derive(Default)]
 pub struct CodeCache {
     // Most recently used last.
@@ -58,6 +59,7 @@ pub struct CodeCache {
     hasher: RandomState,
     hits: AtomicU64,
     stored: AtomicU64,
+    rebuilt: AtomicU64,
 }
 
 /// What a cached script is found by: its file name, the startup snapshot its
@@ -83,6 +85,13 @@ impl Entry {
     pub(crate) fn data(&self) -> &[u8] {
         &self.data
     }
+}
+
+/// A kept entry, as the context that built it builds it again once a call
+/// has compiled more of the script.
+pub(crate) struct Stored {
+    key: Key,
+    first: bool,
 }
 
 /// A key being built; dropped unbuilt, it lets another context build it.
@@ -224,39 +233,61 @@ impl CodeCache {
     /// entries past the limits; a cache larger than all of them is refused. A
     /// first sighting's cache that would drop an entry a context has read is
     /// not kept, and the script is cached at its next sighting instead.
-    pub(crate) fn store(&self, building: Building, data: Box<[u8]>) {
-        let (key, first) = (building.key.clone(), building.first);
+    /// A kept entry comes back as what its builder hands `replace` once a
+    /// call has run.
+    pub(crate) fn store(&self, building: Building, data: Box<[u8]>) -> Option<Stored> {
+        let stored = Stored {
+            key: building.key.clone(),
+            first: building.first,
+        };
         drop(building);
         if data.len() > MAX_BYTES {
-            touch(&self.refused, key, MAX_REFUSED);
-            return;
+            touch(&self.refused, stored.key, MAX_REFUSED);
+            return None;
         }
         let mut entries = lock(&self.entries);
-        if entries.iter().any(|entry| entry.key == key) {
-            return;
+        if entries.iter().any(|entry| entry.key == stored.key) {
+            return None;
         }
-        let mut count = entries.len() + 1;
-        let mut bytes = entries.iter().map(|entry| entry.data.len()).sum::<usize>() + data.len();
-        let mut dropped = 0;
-        while count > MAX_ENTRIES || bytes > MAX_BYTES {
-            let Some(oldest) = entries.get(dropped) else {
-                break;
-            };
-            if first && oldest.read.load(Ordering::Relaxed) {
-                return;
-            }
-            count -= 1;
-            bytes -= oldest.data.len();
-            dropped += 1;
-        }
+        let dropped = room(&entries, data.len(), stored.first)?;
         entries.drain(..dropped);
         entries.push(Arc::new(Entry {
-            key,
+            key: stored.key.clone(),
             data,
             read: AtomicBool::new(false),
         }));
         drop(entries);
         self.stored.fetch_add(1, Ordering::Relaxed);
+        Some(stored)
+    }
+
+    /// Puts `data`, built again by the context that stored the entry once a
+    /// call ran more of its script, in place of the entry, as the most
+    /// recently used. An entry gone since stays gone, and one the limits
+    /// leave no room for keeps what it held.
+    pub(crate) fn replace(&self, stored: &Stored, data: Box<[u8]>) {
+        if data.len() > MAX_BYTES {
+            return;
+        }
+        let mut entries = lock(&self.entries);
+        let Some(at) = entries.iter().position(|entry| entry.key == stored.key) else {
+            return;
+        };
+        let held = entries.remove(at);
+        let read = held.read.load(Ordering::Relaxed);
+        let Some(dropped) = room(&entries, data.len(), stored.first && !read) else {
+            entries.insert(at, held);
+            return;
+        };
+        entries.drain(..dropped);
+        entries.push(Arc::new(Entry {
+            key: stored.key.clone(),
+            data,
+            read: AtomicBool::new(read),
+        }));
+        drop(entries);
+        drop(held);
+        self.rebuilt.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Drops an entry V8 refused, so no later context tries it again.
@@ -275,6 +306,7 @@ impl CodeCache {
             hasher: self.hasher.clone(),
             hits: AtomicU64::new(0),
             stored: AtomicU64::new(0),
+            rebuilt: AtomicU64::new(0),
         }
     }
 
@@ -288,6 +320,12 @@ impl CodeCache {
     #[must_use]
     pub fn stored(&self) -> u64 {
         self.stored.load(Ordering::Relaxed)
+    }
+
+    /// Kept caches this process built again after a call.
+    #[must_use]
+    pub fn rebuilt(&self) -> u64 {
+        self.rebuilt.load(Ordering::Relaxed)
     }
 
     fn sighting(&self, filename: &JsText, source: &JsText, snapshot: Option<u64>) -> u64 {
@@ -311,6 +349,27 @@ impl CodeCache {
         encoding.hash(&mut hasher);
         hasher.finish()
     }
+}
+
+// How many of the least recently used entries go to make room for one of
+// `bytes` more; `None` when a first sighting's would drop one a context has
+// read.
+fn room(entries: &[Arc<Entry>], bytes: usize, first: bool) -> Option<usize> {
+    let mut count = entries.len() + 1;
+    let mut total = entries.iter().map(|entry| entry.data.len()).sum::<usize>() + bytes;
+    let mut dropped = 0;
+    while count > MAX_ENTRIES || total > MAX_BYTES {
+        let Some(oldest) = entries.get(dropped) else {
+            break;
+        };
+        if first && oldest.read.load(Ordering::Relaxed) {
+            return None;
+        }
+        count -= 1;
+        total -= oldest.data.len();
+        dropped += 1;
+    }
+    Some(dropped)
 }
 
 // Moves `item` to the back of `list`, adding it if absent and dropping the
@@ -379,7 +438,7 @@ pub(crate) fn first_override() -> Option<bool> {
 mod tests {
     use std::time::Duration;
 
-    use super::{CodeCache, FIRST_SIGHTING, MAX_ENTRIES, MAX_SIGHTINGS, Plan};
+    use super::{CodeCache, FIRST_SIGHTING, MAX_ENTRIES, MAX_SIGHTINGS, Plan, Stored};
     use crate::control::JsText;
 
     fn cache() -> &'static CodeCache {
@@ -723,6 +782,90 @@ mod tests {
         assert_eq!(cache.stored(), 3);
         assert!(matches!(
             cache.plan(&name(), &tiny(2), None, true),
+            Plan::Make(_)
+        ));
+    }
+
+    fn kept(cache: &'static CodeCache, text: &JsText, data: Box<[u8]>) -> Stored {
+        let _ = cache.plan(&name(), text, None, true);
+        let Plan::Make(building) = cache.plan(&name(), text, None, true) else {
+            panic!("a second sighting makes a cache");
+        };
+        cache
+            .store(building, data)
+            .unwrap_or_else(|| panic!("a cache with room is kept"))
+    }
+
+    fn data_of(cache: &'static CodeCache, text: &JsText) -> Vec<u8> {
+        let Plan::Consume(entry, _) = cache.plan(&name(), text, None, true) else {
+            panic!("a stored cache is found");
+        };
+        entry.data().to_vec()
+    }
+
+    // Built again, an entry holds the new cache and becomes the most recently
+    // used, read or not as it was.
+    #[test]
+    fn a_cache_built_again_takes_the_entrys_place() {
+        let cache = cache();
+        let stored = kept(cache, &tiny(0), Box::from(&b"loaded"[..]));
+        for seed in 1..MAX_ENTRIES {
+            cached(cache, &tiny(seed), Box::from(&b"compiled"[..]));
+        }
+        cache.replace(&stored, Box::from(&b"called"[..]));
+        assert_eq!(cache.rebuilt(), 1);
+        cached(cache, &tiny(MAX_ENTRIES), Box::from(&b"compiled"[..]));
+        assert_eq!(data_of(cache, &tiny(0)), b"called");
+        assert!(matches!(
+            cache.plan(&name(), &tiny(1), None, true),
+            Plan::Make(_)
+        ));
+    }
+
+    #[test]
+    fn an_entry_gone_or_too_large_built_again_is_left_as_it_was() {
+        let cache = cache();
+        let gone = kept(cache, &tiny(0), Box::from(&b"loaded"[..]));
+        let Plan::Consume(entry, _) = cache.plan(&name(), &tiny(0), None, true) else {
+            panic!("a stored cache is found");
+        };
+        cache.forget(&entry);
+        cache.replace(&gone, Box::from(&b"called"[..]));
+        assert!(matches!(
+            cache.plan(&name(), &tiny(0), None, true),
+            Plan::Make(_)
+        ));
+        let large = kept(cache, &tiny(1), Box::from(&b"loaded"[..]));
+        cache.replace(&large, vec![0; super::MAX_BYTES + 1].into_boxed_slice());
+        assert_eq!(data_of(cache, &tiny(1)), b"loaded");
+        assert_eq!(cache.rebuilt(), 0);
+    }
+
+    // A first sighting's entry no context has read yet still makes room only
+    // from unread entries when built again.
+    #[test]
+    fn a_first_sighting_built_again_never_drops_an_entry_a_context_has_read() {
+        let cache = cache();
+        let half = || vec![0; super::MAX_BYTES / 2 + 1].into_boxed_slice();
+        cached(cache, &tiny(1), half());
+        consumed(cache, &tiny(1));
+        let text = bundle(1, FIRST_SIGHTING);
+        let Plan::First(key) = cache.plan(&name(), &text, None, true) else {
+            panic!("a first sighting worth a cache at once");
+        };
+        let building = cache.first(key).unwrap_or_else(|| panic!("unclaimed"));
+        let stored = cache
+            .store(building, Box::from(&b"loaded"[..]))
+            .unwrap_or_else(|| panic!("a cache with room is kept"));
+        cache.replace(&stored, half());
+        assert_eq!(cache.rebuilt(), 0);
+        assert_eq!(data_of(cache, &text), b"loaded");
+        // Read now, it is built again as any other entry.
+        consumed(cache, &text);
+        cache.replace(&stored, half());
+        assert_eq!(cache.rebuilt(), 1);
+        assert!(matches!(
+            cache.plan(&name(), &tiny(1), None, true),
             Plan::Make(_)
         ));
     }
