@@ -49,7 +49,7 @@ Rust replacement for the `mini_racer` gem 0.22.2: same `MiniRacer` API, V8 from 
 | V8 flags, single-threaded detection, stack size | `crates/mini_racer_engine/src/process/platform.rs` |
 | V8 initialization, its custom platform, version | `crates/mini_racer_engine/src/process.rs` |
 | Runner thread, evaluation, callbacks, heap stats, error formats | `crates/mini_racer_engine/src/runner.rs` |
-| Code cache for evals of 128 KiB or more | `crates/mini_racer_engine/src/process/code_cache.rs`, `crates/mini_racer_engine/src/runner.rs` |
+| Code cache for evals of 128 KiB or more, and `MiniRacerRs.code_cache` | `crates/mini_racer_engine/src/process/code_cache.rs`, `crates/mini_racer_engine/src/runner.rs`, `ext/mini_racer_rs/src/counters.rs` |
 | One shared copy of each large source | `crates/mini_racer_engine/src/process/sources.rs`, `crates/mini_racer_engine/src/text.rs`, `crates/mini_racer_engine/src/sys.rs` |
 | Fast calls for ExecJS calls and react-rails renders | `crates/mini_racer_engine/src/fast_calls.rs`, `crates/mini_racer_engine/src/runner.rs` |
 | Freed malloc memory returned after large evals and snapshots | `crates/mini_racer_engine/src/runner.rs`, `crates/mini_racer_engine/src/sys.rs` |

@@ -136,6 +136,37 @@ fn a_first_sighting_worth_a_cache_is_cached_at_once() {
     assert_eq!(counts(), (2, 2));
 }
 
+// With 64 entries, each read, a first sighting's cache would drop one a
+// context has read, so it is refused; seen again, the script is cached as
+// any other, dropping the least recently used.
+#[test]
+fn a_first_sighting_that_would_drop_a_read_entry_is_refused() {
+    if alone(
+        "a_first_sighting_that_would_drop_a_read_entry_is_refused",
+        "always",
+    ) || std::env::var_os("MINI_RACER_RS_CODE_CACHE").is_some()
+    {
+        return;
+    }
+    // Seen, cached and read by a context each, every script new to each.
+    let (seer, builder, reader) = (spawn(), spawn(), spawn());
+    for seed in 0..64 {
+        let text = bundle(100 + seed, 128 << 10);
+        for context in [&seer, &builder, &reader] {
+            eval(context, "small.js", &text).expect("eval");
+        }
+    }
+    assert_eq!(counts(), (64, 64));
+    assert_eq!((cache().entries(), cache().refusals()), (64, 0));
+    let text = bundle(6, FIRST_SIGHTING);
+    eval(&spawn(), "bundle.js", &text).expect("eval");
+    assert_eq!(counts(), (64, 64));
+    assert_eq!((cache().entries(), cache().refusals()), (64, 1));
+    eval(&spawn(), "bundle.js", &text).expect("eval");
+    assert_eq!(counts(), (65, 64));
+    assert_eq!((cache().entries(), cache().refusals()), (64, 1));
+}
+
 #[test]
 fn a_first_sighting_not_worth_a_cache_is_cached_at_its_second() {
     if alone(

@@ -60,6 +60,11 @@ pub struct CodeCache {
     hits: AtomicU64,
     stored: AtomicU64,
     rebuilt: AtomicU64,
+    refusals: AtomicU64,
+    // What `entries` holds, set under its lock, so a reader never waits on
+    // it and a forked child never finds it held.
+    kept: AtomicU64,
+    kept_bytes: AtomicU64,
 }
 
 /// What a cached script is found by: its file name, the startup snapshot its
@@ -243,19 +248,25 @@ impl CodeCache {
         drop(building);
         if data.len() > MAX_BYTES {
             touch(&self.refused, stored.key, MAX_REFUSED);
+            self.refusals.fetch_add(1, Ordering::Relaxed);
             return None;
         }
         let mut entries = lock(&self.entries);
         if entries.iter().any(|entry| entry.key == stored.key) {
             return None;
         }
-        let dropped = room(&entries, data.len(), stored.first)?;
+        let Some(dropped) = room(&entries, data.len(), stored.first) else {
+            drop(entries);
+            self.refusals.fetch_add(1, Ordering::Relaxed);
+            return None;
+        };
         entries.drain(..dropped);
         entries.push(Arc::new(Entry {
             key: stored.key.clone(),
             data,
             read: AtomicBool::new(false),
         }));
+        self.publish(&entries);
         drop(entries);
         self.stored.fetch_add(1, Ordering::Relaxed);
         Some(stored)
@@ -267,6 +278,7 @@ impl CodeCache {
     /// leave no room for keeps what it held.
     pub(crate) fn replace(&self, stored: &Stored, data: Box<[u8]>) {
         if data.len() > MAX_BYTES {
+            self.refusals.fetch_add(1, Ordering::Relaxed);
             return;
         }
         let mut entries = lock(&self.entries);
@@ -277,6 +289,8 @@ impl CodeCache {
         let read = held.read.load(Ordering::Relaxed);
         let Some(dropped) = room(&entries, data.len(), stored.first && !read) else {
             entries.insert(at, held);
+            drop(entries);
+            self.refusals.fetch_add(1, Ordering::Relaxed);
             return;
         };
         entries.drain(..dropped);
@@ -285,6 +299,7 @@ impl CodeCache {
             data,
             read: AtomicBool::new(read),
         }));
+        self.publish(&entries);
         drop(entries);
         drop(held);
         self.rebuilt.fetch_add(1, Ordering::Relaxed);
@@ -292,14 +307,26 @@ impl CodeCache {
 
     /// Drops an entry V8 refused, so no later context tries it again.
     pub(crate) fn forget(&self, entry: &Arc<Entry>) {
-        lock(&self.entries).retain(|kept| !Arc::ptr_eq(kept, entry));
+        let mut entries = lock(&self.entries);
+        entries.retain(|kept| !Arc::ptr_eq(kept, entry));
+        self.publish(&entries);
+        drop(entries);
+        self.refusals.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn publish(&self, entries: &[Arc<Entry>]) {
+        let (count, bytes) = totals(entries);
+        self.kept.store(count, Ordering::Relaxed);
+        self.kept_bytes.store(bytes, Ordering::Relaxed);
     }
 
     /// A forked child's cache: what its parent kept, had seen and refused,
     /// unless a thread of the parent held it at the fork, under the same key.
     pub(crate) fn inherited(&self) -> Self {
+        let entries = copied(&self.entries);
+        let (count, bytes) = totals(&entries);
         Self {
-            entries: Mutex::new(copied(&self.entries)),
+            entries: Mutex::new(entries),
             sightings: Mutex::new(copied(&self.sightings)),
             building: Mutex::default(),
             refused: Mutex::new(copied(&self.refused)),
@@ -307,6 +334,9 @@ impl CodeCache {
             hits: AtomicU64::new(0),
             stored: AtomicU64::new(0),
             rebuilt: AtomicU64::new(0),
+            refusals: AtomicU64::new(0),
+            kept: AtomicU64::new(count),
+            kept_bytes: AtomicU64::new(bytes),
         }
     }
 
@@ -326,6 +356,26 @@ impl CodeCache {
     #[must_use]
     pub fn rebuilt(&self) -> u64 {
         self.rebuilt.load(Ordering::Relaxed)
+    }
+
+    /// Caches V8 rejected in this process, and caches it made or made again
+    /// and did not keep: past the size limit, or a first sighting's that
+    /// would have dropped an entry a context has read.
+    #[must_use]
+    pub fn refusals(&self) -> u64 {
+        self.refusals.load(Ordering::Relaxed)
+    }
+
+    /// Caches kept now, a forked child's inherited ones included.
+    #[must_use]
+    pub fn entries(&self) -> u64 {
+        self.kept.load(Ordering::Relaxed)
+    }
+
+    /// The bytes of the caches kept now.
+    #[must_use]
+    pub fn bytes(&self) -> u64 {
+        self.kept_bytes.load(Ordering::Relaxed)
     }
 
     fn sighting(&self, filename: &JsText, source: &JsText, snapshot: Option<u64>) -> u64 {
@@ -385,6 +435,15 @@ fn touch<T: PartialEq>(list: &Mutex<Vec<T>>, item: T, max: usize) -> bool {
     list.push(item);
     drop(list);
     found.is_some()
+}
+
+fn totals(entries: &[Arc<Entry>]) -> (u64, u64) {
+    let bytes = entries.iter().map(|entry| entry.data.len()).sum::<usize>();
+    (to_u64(entries.len()), to_u64(bytes))
+}
+
+fn to_u64(n: usize) -> u64 {
+    u64::try_from(n).unwrap_or(u64::MAX)
 }
 
 fn copied<T: Clone>(list: &Mutex<Vec<T>>) -> Vec<T> {
@@ -582,11 +641,14 @@ mod tests {
         ));
     }
 
+    // Its entries, and counts of its own work alone.
     #[test]
     fn a_child_starts_from_its_parents_entries() {
         let cache = cache();
         cached(cache, &source(4), Box::from(&b"compiled"[..]));
         let child: &'static CodeCache = Box::leak(Box::new(cache.inherited()));
+        assert_eq!((child.entries(), child.bytes()), (1, 8));
+        assert_eq!((child.stored(), child.hits()), (0, 0));
         assert!(matches!(
             child.plan(&name(), &source(4), None, true),
             Plan::Consume(..)
@@ -600,10 +662,73 @@ mod tests {
         let held = cache.entries.lock();
         let child: &'static CodeCache = Box::leak(Box::new(cache.inherited()));
         drop(held);
+        assert_eq!((child.entries(), child.bytes()), (0, 0));
         assert!(matches!(
             child.plan(&name(), &source(5), None, true),
             Plan::Make(..)
         ));
+    }
+
+    #[test]
+    fn counts_the_entries_it_keeps_and_their_bytes() {
+        let cache = cache();
+        assert_eq!((cache.entries(), cache.bytes()), (0, 0));
+        let stored = kept(cache, &tiny(0), Box::from(&b"loaded"[..]));
+        cached(cache, &tiny(1), Box::from(&b"compiled"[..]));
+        assert_eq!((cache.entries(), cache.bytes()), (2, 14));
+        cache.replace(&stored, Box::from(&b"called again"[..]));
+        assert_eq!((cache.entries(), cache.bytes()), (2, 20));
+        let Plan::Consume(entry, _) = cache.plan(&name(), &tiny(1), None, true) else {
+            panic!("a stored cache is found");
+        };
+        cache.forget(&entry);
+        assert_eq!((cache.entries(), cache.bytes()), (1, 12));
+        // One past the count drops the least recently used, `tiny(0)`'s.
+        for seed in 2..MAX_ENTRIES + 2 {
+            cached(cache, &tiny(seed), Box::from(&b"compiled"[..]));
+        }
+        let full = u64::try_from(MAX_ENTRIES).unwrap_or(u64::MAX);
+        assert_eq!((cache.entries(), cache.bytes()), (full, full * 8));
+    }
+
+    // V8's rejections, and caches built or built again but not kept; an
+    // entry gone before its builder built it again refuses nothing.
+    #[test]
+    fn counts_each_cache_rejected_or_refused() {
+        let cache = cache();
+        let too_large = || vec![0; super::MAX_BYTES + 1].into_boxed_slice();
+        cached(cache, &tiny(0), too_large());
+        assert_eq!(cache.refusals(), 1);
+        let stored = kept(cache, &tiny(1), Box::from(&b"loaded"[..]));
+        cache.replace(&stored, too_large());
+        assert_eq!(cache.refusals(), 2);
+        let Plan::Consume(entry, _) = cache.plan(&name(), &tiny(1), None, true) else {
+            panic!("a stored cache is found");
+        };
+        cache.forget(&entry);
+        assert_eq!(cache.refusals(), 3);
+        cache.replace(&stored, Box::from(&b"called"[..]));
+        assert_eq!((cache.refusals(), cache.entries()), (3, 0));
+        assert_eq!((cache.stored(), cache.rebuilt()), (1, 0));
+    }
+
+    // A forked child may find the lock held by a thread of its parent, so
+    // the counts are read without it.
+    #[test]
+    fn its_counts_are_read_without_its_lock() {
+        let cache = cache();
+        cached(cache, &tiny(0), Box::from(&b"compiled"[..]));
+        let held = cache.entries.lock();
+        assert_eq!(
+            (
+                cache.entries(),
+                cache.bytes(),
+                cache.stored(),
+                cache.refusals()
+            ),
+            (1, 8, 1, 0)
+        );
+        drop(held);
     }
 
     #[test]
@@ -754,8 +879,9 @@ mod tests {
         consumed(cache, &tiny(0));
         consumed(cache, &roomy);
         let crowded = bundle(7, FIRST_SIGHTING);
+        assert_eq!(cache.refusals(), 0);
         first(cache, &crowded, Box::from(&b"compiled"[..]));
-        assert_eq!(cache.stored(), 65);
+        assert_eq!((cache.stored(), cache.refusals()), (65, 1));
         consumed(cache, &tiny(2));
         let Plan::Make(building) = cache.plan(&name(), &crowded, None, true) else {
             panic!("a second sighting makes a cache");
@@ -775,7 +901,7 @@ mod tests {
         cached(cache, &tiny(1), half());
         consumed(cache, &tiny(1));
         first(cache, &bundle(8, FIRST_SIGHTING), half());
-        assert_eq!(cache.stored(), 1);
+        assert_eq!((cache.stored(), cache.refusals()), (1, 1));
         cached(cache, &tiny(2), half());
         assert_eq!(cache.stored(), 2);
         first(cache, &bundle(9, FIRST_SIGHTING), half());
@@ -858,7 +984,7 @@ mod tests {
             .store(building, Box::from(&b"loaded"[..]))
             .unwrap_or_else(|| panic!("a cache with room is kept"));
         cache.replace(&stored, half());
-        assert_eq!(cache.rebuilt(), 0);
+        assert_eq!((cache.rebuilt(), cache.refusals()), (0, 1));
         assert_eq!(data_of(cache, &text), b"loaded");
         // Read now, it is built again as any other entry.
         consumed(cache, &text);

@@ -71,6 +71,10 @@ pub struct Sources {
     made: AtomicU64,
     reads: AtomicU64,
     conversions: AtomicU64,
+    // What the list keeps, set under its lock, so a reader never waits on it
+    // and a forked child never finds it held.
+    kept: AtomicU64,
+    kept_bytes: AtomicU64,
 }
 
 impl Default for Sources {
@@ -179,6 +183,19 @@ impl List {
             .find(|(refused, _)| refused == key)
             .map_or_else(|| least_bytes(text), |&(_, bytes)| bytes)
     }
+
+    fn totals(&self) -> (u64, u64) {
+        let bytes = self
+            .kept
+            .iter()
+            .map(|kept| kept.units.bytes())
+            .sum::<usize>();
+        (to_u64(self.kept.len()), to_u64(bytes))
+    }
+}
+
+fn to_u64(n: usize) -> u64 {
+    u64::try_from(n).unwrap_or(u64::MAX)
 }
 
 // The fewest bytes `text` can take as units, so a source that cannot fit is
@@ -201,7 +218,15 @@ impl Sources {
             made: AtomicU64::new(0),
             reads: AtomicU64::new(0),
             conversions: AtomicU64::new(0),
+            kept: AtomicU64::new(0),
+            kept_bytes: AtomicU64::new(0),
         }
+    }
+
+    fn publish(&self, list: &List) {
+        let (count, bytes) = list.totals();
+        self.kept.store(count, Ordering::Relaxed);
+        self.kept_bytes.store(bytes, Ordering::Relaxed);
     }
 
     /// A number for a new context to read shared sources as, told apart from
@@ -223,6 +248,7 @@ impl Sources {
         // unread is read again, and kept, rather than copied again.
         let found = list.find(key, reader);
         let spent = list.sweep();
+        self.publish(&list);
         let room = found.is_none() && list.room(list.least_bytes(key, text), self.bounds);
         drop(list);
         drop(spent);
@@ -271,6 +297,7 @@ impl Sources {
             held: 1,
             readers,
         });
+        self.publish(&list);
         drop(list);
         // Freed once the lock is released, as a large source takes a while,
         // like the spent copies above.
@@ -305,9 +332,11 @@ impl Sources {
                 swept: list.swept.clone(),
             })
             .unwrap_or_default();
+        let inherited = Self::bounded(self.bounds.0, self.bounds.1);
+        inherited.publish(&list);
         Self {
             list: Mutex::new(list),
-            ..Self::bounded(self.bounds.0, self.bounds.1)
+            ..inherited
         }
     }
 
@@ -327,6 +356,18 @@ impl Sources {
     #[must_use]
     pub fn conversions(&self) -> u64 {
         self.conversions.load(Ordering::Relaxed)
+    }
+
+    /// Sources kept now, a forked child's inherited ones included.
+    #[must_use]
+    pub fn kept(&self) -> u64 {
+        self.kept.load(Ordering::Relaxed)
+    }
+
+    /// The bytes of the sources kept now, one a unit or two, as V8 reads them.
+    #[must_use]
+    pub fn kept_bytes(&self) -> u64 {
+        self.kept_bytes.load(Ordering::Relaxed)
     }
 
     /// Strings alive now that read a kept source.
@@ -412,10 +453,12 @@ mod tests {
         let sources = Sources::default();
         let text = script(1);
         let key = key(&text);
+        assert_eq!((sources.kept(), sources.kept_bytes()), (0, 0));
         let first = one_byte(sources.units(&key, &text, sources.reader()));
         let second = one_byte(sources.units(&key, &text, sources.reader()));
         assert!(Arc::ptr_eq(&first, &second));
         assert_eq!(sources.made(), 1);
+        assert_eq!((sources.kept(), sources.kept_bytes()), (1, 2 << 20));
         assert_eq!(sources.reading(), 2);
         drop((first, second));
         assert_eq!(sources.reading(), 0);
@@ -491,6 +534,7 @@ mod tests {
         assert!(copy.upgrade().is_some());
         drop(sources.units(&other_key, &other, sources.reader()));
         assert!(copy.upgrade().is_none());
+        assert_eq!((sources.kept(), sources.kept_bytes()), (1, 2 << 20));
         drop(sources.units(&key, &text, sources.reader()));
         assert_eq!(sources.made(), 3);
     }
@@ -611,6 +655,12 @@ mod tests {
         drop(still_read);
         assert!(two_byte(sources.units(&astral_key, &astral, sources.reader())).len() > 2 << 20);
         assert_eq!((sources.conversions(), sources.made()), (3, 2));
+        // The copy one context read is swept, and the two-byte one counts two
+        // bytes a unit.
+        assert_eq!(
+            (sources.kept(), sources.kept_bytes()),
+            (1, 2 * ((2 << 20) + 2))
+        );
     }
 
     #[test]
@@ -637,6 +687,8 @@ mod tests {
         let key = key(&text);
         let shared = parent.units(&key, &text, parent.reader());
         let child = parent.inherited();
+        assert_eq!((child.kept(), child.kept_bytes()), (1, 2 << 20));
+        assert_eq!((child.made(), child.reads()), (0, 0));
         let in_child = child.units(&key, &text, child.reader());
         assert!(same(shared.as_ref(), in_child.as_ref()));
         assert_eq!(child.reading(), 2);
@@ -714,8 +766,11 @@ mod tests {
         let key = key(&text);
         let shared = one_byte(parent.units(&key, &text, parent.reader()));
         let held = parent.list.lock();
+        // Read without the lock, which a child may find held.
+        assert_eq!((parent.kept(), parent.kept_bytes()), (1, 2 << 20));
         let child = parent.inherited();
         drop(held);
+        assert_eq!((child.kept(), child.kept_bytes()), (0, 0));
         assert!(!Arc::ptr_eq(
             &shared,
             &one_byte(child.units(&key, &text, child.reader()))
