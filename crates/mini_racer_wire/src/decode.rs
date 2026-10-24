@@ -37,8 +37,6 @@ pub enum Scalar<'a> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Container {
-    /// Every value of a multi-value frame, in order.
-    Values,
     /// `length` is at most the bytes left in the input.
     DenseArray {
         length: u32,
@@ -299,13 +297,6 @@ impl<'a> Reader<'a> {
             .map_err(|_| DecodeError::Truncated)?;
         let value = f64::from_le_bytes(bytes);
         Ok(if value.is_nan() { f64::NAN } else { value })
-    }
-
-    // V8 pads before a two-byte string to align its characters.
-    const fn skip_padding(&mut self) {
-        while let Some((&tag::PADDING, rest)) = self.rest.split_first() {
-            self.rest = rest;
-        }
     }
 
     // The readers a run takes elements with. Each consumes nothing unless
@@ -929,20 +920,4 @@ impl<'a, 'v, V: Visitor> Decoder<'a, 'v, V> {
 /// Decodes the one value of a V8 `ValueSerializer` buffer.
 pub fn decode_value<V: Visitor>(bytes: &[u8], limits: Limits, visitor: &mut V) -> Decoded<V> {
     Decoder::new(bytes, limits, visitor)?.value(limits.max_depth)
-}
-
-/// Decodes every value of a buffer written as several values after one
-/// header, which share object ids. They arrive as a `Container::Values`.
-pub fn decode_values<V: Visitor>(bytes: &[u8], limits: Limits, visitor: &mut V) -> Decoded<V> {
-    let mut decoder = Decoder::new(bytes, limits, visitor)?;
-    let mut frame = Decoder::<V>::visit(decoder.visitor.begin(Container::Values))?.frame;
-    loop {
-        decoder.reader.skip_padding();
-        if decoder.reader.rest.is_empty() {
-            break;
-        }
-        let value = decoder.value(limits.max_depth)?;
-        Decoder::<V>::visit(decoder.visitor.push(&mut frame, value))?;
-    }
-    Decoder::<V>::visit(decoder.visitor.end(frame))
 }

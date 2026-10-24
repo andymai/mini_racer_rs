@@ -12,9 +12,7 @@ mod write;
 
 use std::ops::RangeInclusive;
 
-pub use decode::{
-    Begun, Container, DecodeError, Limits, Scalar, Text, Visitor, decode_value, decode_values,
-};
+pub use decode::{Begun, Container, DecodeError, Limits, Scalar, Text, Visitor, decode_value};
 pub use write::{WriteError, Writer};
 
 pub const READ_VERSIONS: RangeInclusive<u32> = 13..=16;
